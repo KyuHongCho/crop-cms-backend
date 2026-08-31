@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  # docker-compose.yaml uses ${VAR:?} and refuses to parse without these, so CI
+  # supplies throwaway values. They never reach a real database: the stack is
+  # created and destroyed inside a single run.
+  POSTGRES_PASSWORD: ci-postgres-password
+  DB_USER: cms_app
+  DB_PASSWORD: ci-app-password
+
+jobs:
+  stack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compose file parses
+        # A key with no value -- `build:` with nothing after it -- makes the WHOLE
+        # file unusable, not just its own service. That shipped here once. This
+        # check costs a second and rules the class out.
+        run: docker compose config -q
+
+      - name: Image builds
+        run: docker compose build
+
+      - name: Stack starts, and Postgres is actually ready
+        # --wait blocks on the db healthcheck, so reaching the next step means
+        # Postgres accepted a connection -- not merely that a container exists.
+        run: docker compose up -d --wait
+
+      - name: API answers over HTTP
+        # `docker ps` reporting "Up" proves only that PID 1 is alive. Under
+        # --reload the application can be dead inside a container that still
+        # reports healthy, which also shipped here once. Only a real response
+        # over the published port proves the app works.
+        run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
+
+      - name: Migrations create every table
+        # Guards the silent failure: if app/model/model.py is empty or never
+        # imported, create_all() succeeds and creates NOTHING. Asserting the
+        # count is what makes that visible.
+        run: |
+          docker compose exec -T cms python -m app.db.migrate_db
+          count=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT count(*) FROM pg_tables WHERE schemaname='public';" | tr -d '[:space:]')
+          echo "tables created: $count"
+          test "$count" = "4"
+
+      - name: Provenance invariant is enforced by the database
+        # Mirrors crop_advisor/claims.py: a claim read first-hand cannot also name
+        # the paper it was read through. This asserts the INSERT is REJECTED --
+        # a constraint that cannot be made to fail is not evidence that it works.
+        run: |
+          docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -q <<'SQL'
+          INSERT INTO crops (slug, common_name, scientific_name)
+            VALUES ('basil', 'basil', 'Ocimum basilicum');
+          INSERT INTO main_categories (slug, name)
+            VALUES ('research-literature', 'Research literature');
+          INSERT INTO sub_categories (main_category_id, slug, name)
+            SELECT id, 'temperature-response', 'Temperature response' FROM main_categories;
+          SQL
+          if docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc "
+                INSERT INTO items (sub_category_id, crop_id, title, body,
+                                   source, reference, url, read_directly, via)
+                SELECT s.id, c.id, 't', 'b', 's', 'r', 'u', true, 'some paper'
+                FROM sub_categories s, crops c;"; then
+            echo "FAIL: read_directly=true with a 'via' paper was accepted"
+            exit 1
+          fi
+          echo "OK: the database rejected it, as claims.py requires"
+
+      - name: Deleting a crop cascades to its documents
+        # ON DELETE CASCADE lives in the schema, not in Python, so bulk SQL
+        # cannot route around it. Verified by deleting through raw SQL.
+        run: |
+          docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc "
+            INSERT INTO items (sub_category_id, crop_id, title, body,
+                               source, reference, url, read_directly)
+            SELECT s.id, c.id, 't', 'b', 's', 'r', 'u', true
+            FROM sub_categories s, crops c;"
+          docker compose exec -T db psql -U "$DB_USER" -d cms -qc "DELETE FROM crops;"
+          left=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT count(*) FROM items;" | tr -d '[:space:]')
+          echo "items left after deleting the crop: $left"
+          test "$left" = "0"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
