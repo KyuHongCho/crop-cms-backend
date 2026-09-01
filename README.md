@@ -32,6 +32,7 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 8 checks |
 | ⏳ | `DELETE` endpoints | not built |
 | ⏳ | Automated tests (`pytest`/`httpx` are not even installed yet) | not built |
+| ⏳ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on every pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | not built — worth more once the row above exists |
 | ⏳ | Authentication | not built |
 | ⏳ | Embedding column + vector search over document bodies | not built — the model is undecided, and it is a real constraint (see below) |
 | ⏳ | Retrieval endpoint the advisor would actually call (crop + topic) | not built |
@@ -122,6 +123,27 @@ there is no embedding column yet.
 - **[agentic-workflow](https://github.com/KyuHongCho/agentic-workflow)** — the tool-agnostic
   `plan → build → review` loop, with adversarial auditors and hard-enforced gates, used to
   build both.
+
+### The agentic review pipeline, and why it is not here yet
+
+`agentic-workflow` pairs every role with an adversarial auditor — `plan ↔ plan-audit`,
+`build ↔ build-audit`, `review ↔ review-audit` — so no stage grades its own homework. Locally
+that loop is enforced by hooks. In CI it runs as an `Agentic Review` workflow whose jobs are
+`gate → review → review-audit → finalize`: the reviewer inspects the pull request, then a
+separate auditor attacks the reviewer's findings before anything is reported.
+
+[crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already runs it
+(`.github/workflows/agentic-review.yml`), checking the portable `core/` instructions out of
+`agentic-workflow` at run time rather than vendoring a copy that would drift.
+
+**This repository has only `ci.yml`.** Porting the review workflow is planned, and it is worth
+sequencing after a test suite rather than before one. The shared verification rules
+(`core/shared/verify.md`) tell a reviewer to *run the relevant existing tests and read the
+output*, and — when no test covers a claim — to write a throwaway one, run it, and delete it
+afterwards. So the loop is not blocked by having no suite; it just does more work for weaker
+evidence, and the runner has to install Python and the test dependencies before the agent
+starts, which this repository's CI does not yet do. Hence "automated tests" sitting directly
+above it in the table.
 
 ## Licence
 
