@@ -109,11 +109,23 @@ actually guarantees it.
 **Cascades live in the schema.** `ON DELETE CASCADE` with `passive_deletes=True`, not ORM-only
 cascade, because ORM cascade is bypassed by bulk deletes and raises instead.
 
-**PostgreSQL, diverging from the course this was built alongside.** The course uses MySQL. The
-RAG content-layer requirement makes pgvector the deciding factor. Note the constraint that
-makes it a real design question rather than a detail: **HNSW cannot index vectors above 2000
-dimensions**, which rules out a 3072-dimension embedding model unless reduced. That is why
-there is no embedding column yet.
+**PostgreSQL, diverging from the course this was built alongside.** The course is
+[Dipping into FastAPI (FastAPI + React.js + AWS LightSail)](https://www.inflearn.com/en/course/fastapi-%EC%B0%8D%EC%96%B4%EB%A8%B9%EA%B8%B0)
+by ddur on Inflearn; its companion code is
+[ym7596/FASTAPI-CMS-SERVER](https://github.com/ym7596/FASTAPI-CMS-SERVER), which uses MySQL and
+whose `schema/` and `crud/` layers are what the comments in this repo's `app/schema/` and
+`app/crud/` compare against. The RAG content-layer requirement makes pgvector the deciding
+factor here.
+
+The constraint that makes the embedding choice a real design question: an index — HNSW or
+IVFFlat — takes a `vector` column of at most **2,000 dimensions**, so a 3072-dimension model
+cannot be indexed as `vector`. That does not rule such a model out. `halfvec` indexes up to
+4,000 dimensions, and an HNSW index on `halfvec(3072)` builds over real rows here with the
+planner using it — verified on this stack. Keeping the column as `vector(3072)` and indexing a
+`halfvec` cast also works, but only for queries written to match that expression; the naive
+query falls back to a sequential scan with no error. So what is open is the model and which of
+those two column shapes to use — not whether 3072 fits. That is why there is no embedding
+column yet.
 
 ## Related repositories
 
@@ -163,7 +175,7 @@ app/
   db/migrate_db.py   sync engine, drop_all + create_all
   model/model.py     Crop, MainCategory, SubCategory, Item — the contract everything matches
   schema/            Pydantic request/response shapes
-  crud/              data access; the only place that touches the session
+  crud/              data access — queries and commits (routers do 404 pre-checks)
   router/            HTTP surface
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI

@@ -4,3 +4,7 @@ dockerenv/
 __pycache__/
 *.pyc
 .DS_Store
+
+# JetBrains IDE state (PyCharm/IntelliJ). Per-user, not per-project:
+# workspace.xml records absolute paths and uncommitted-change state.
+.idea/
