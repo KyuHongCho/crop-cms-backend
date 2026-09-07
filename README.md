@@ -76,8 +76,10 @@ open  localhost:8000/docs       # interactive OpenAPI
 > run**. Harmless while the tables are empty; do not run it once there is real content.
 > Choosing Alembic instead is an open decision.
 
-The API is published on **8000** and PostgreSQL on **55432** (not 5432, to avoid colliding
-with a local install).
+The API is published on **8000** and PostgreSQL on **5432**, the default port, so a GUI
+client connects without being told a custom one. If you already run PostgreSQL on the host,
+change the published port in `docker-compose.yaml` — only host tools are affected, since the
+app reaches the database over the Docker network (`DB_HOST: db`), never the published port.
 
 ## Endpoints
 
