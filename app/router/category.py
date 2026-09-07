@@ -66,18 +66,16 @@ async def delete_main_category(
 ):
     """Delete an EMPTY main category. One with sub-categories is refused.
 
-    Refused, not cascaded: a main category is a kind of knowledge, and deleting
-    "research literature" should not silently take the documents filed under it
-    with it. The escape hatch is to delete the sub-categories first, one at a
-    time, each of which refiles rather than destroys.
+    Refused rather than cascaded: deleting "research literature" should not
+    quietly take every document filed beneath it. Delete the sub-categories
+    first -- each of those refiles its documents instead of destroying them.
     """
     main_category = await db.get(model.MainCategory, main_category_id)
     if not main_category:
         raise HTTPException(status_code=404, detail="Main category not found")
 
-    # Counted here so the 409 can say how many. Left to ON DELETE RESTRICT it
-    # would be a ForeignKeyViolation, i.e. an opaque 500 (see the create
-    # endpoint above, :52-55).
+    # Counted here so the 409 can say how many. Left to the database, it would
+    # be a foreign-key error -- an opaque 500 (as with the create endpoint).
     children = await category_crud.count_sub_categories(db, main_category_id)
     if children:
         raise HTTPException(
@@ -103,19 +101,18 @@ async def delete_sub_category(
 ):
     """Delete a sub-category. Its documents are REFILED, never destroyed.
 
-    200 with a count rather than 204: the documents move, and a 204 would say
-    nothing about where they went. The move itself is done by the BEFORE DELETE
-    trigger in the database, so psql behaves the same way -- see
-    app/db/migrate_db.py.
+    200 with a count, not an empty 204: the documents move, and the caller
+    should be told where. The move is done by a trigger in the database, so
+    psql behaves the same way -- see app/db/migrate_db.py.
     """
     sub_category = await db.get(model.SubCategory, sub_category_id)
     if not sub_category:
         raise HTTPException(status_code=404, detail="Sub-category not found")
 
-    # The bucket is where everything else is refiled TO; deleting it would
-    # leave later deletes failing on a foreign key naming `items`, a table the
-    # caller never touched. Checked here for a readable message; the trigger
-    # refuses it again below, for callers that never reach this code.
+    # The bucket is where everything else gets refiled TO. Without it, a later
+    # delete fails on a foreign key naming `items` -- a table the caller never
+    # touched. Checked here for a readable message; the trigger refuses it
+    # again anyway, for callers that never run this code.
     if sub_category_id == model.UNCATEGORISED_SUB_CATEGORY_ID:
         raise HTTPException(
             status_code=409,
@@ -128,11 +125,11 @@ async def delete_sub_category(
     try:
         refiled = await category_crud.delete_sub_category(db, sub_category)
     except ProgrammingError as exc:
-        # ONLY the trigger's own RAISE, sqlstate P0001 (psycopg's
-        # RaiseException). Not a general IntegrityError handler: UniqueViolation,
-        # ForeignKeyViolation, NotNullViolation and CheckViolation all reach
-        # here too, and reporting a genuine bug as an ordinary conflict is worse
-        # than a 500. Anything else is re-raised untouched.
+        # P0001 is the code PostgreSQL gives a trigger's own RAISE. Narrow on
+        # purpose: ProgrammingError also covers real bugs, like a typo'd query
+        # or a missing column, and dressing those up as an ordinary conflict is
+        # worse than a 500. Everything else is re-raised untouched. (Duplicate
+        # slugs and the like are IntegrityError, which never reaches here.)
         if getattr(exc.orig, "sqlstate", None) != "P0001":
             raise
         await db.rollback()

@@ -19,17 +19,15 @@ engine = create_engine(DB_URL, echo=True)
 
 # --- the "Uncategorised" bucket -------------------------------------------
 #
-# Deleting a sub-category refiles its documents here instead of destroying
-# them. The id has THREE homes and they must agree: the Python constants in
-# model.py, the seed below, and the literal inside the trigger body -- PL/pgSQL
-# cannot read a Python constant, so the trigger's copy is interpolated here, at
-# migration time, and cannot drift from the seed it sits next to. CI asserts the
-# seeded ids equal the constants.
+# Where a deleted sub-category's documents are refiled to. Its id lives in three
+# places that must agree: the constants in model.py, the seed below, and the
+# trigger body -- which cannot read Python, so its copy is filled in here, next
+# to the seed, where the two cannot drift apart. CI re-reads the seeded rows and
+# checks them against the constants.
 #
-# Explicit ids do NOT advance a SERIAL sequence, so both sequences are setval'd
-# afterwards. Without that the next INSERT collides on the primary key --
-# UniqueViolation on main_categories_pkey, which a naive 409 handler would
-# report as "a category with that slug already exists".
+# Inserting an explicit id does not move the table's id counter along, so both
+# are reset with setval afterwards. Skip that and the next INSERT collides with
+# the bucket's own id.
 SEED_BUCKET_SQL = f"""
 INSERT INTO main_categories (id, slug, name, position)
      VALUES ({UNCATEGORISED_MAIN_CATEGORY_ID}, 'uncategorised', 'Uncategorised', 0);
@@ -40,17 +38,13 @@ SELECT setval('main_categories_id_seq', (SELECT max(id) FROM main_categories));
 SELECT setval('sub_categories_id_seq',  (SELECT max(id) FROM sub_categories));
 """
 
-# CREATE OR REPLACE: drop_all() drops the tables (and with them the trigger),
-# but a FUNCTION is not a table and survives every rebuild.
+# CREATE OR REPLACE because drop_all() removes the tables and the trigger with
+# them, but a function is not a table and survives every rebuild.
 #
-# BEFORE DELETE, so the UPDATE lands before the FK's RESTRICT is evaluated. It
-# is in the schema rather than in the router because raw SQL and psql route
-# around Python entirely -- and because the empty bucket would otherwise be
-# deletable, after which every later sub-category delete fails with an error
-# naming `items`, a table the caller never touched.
-#
-# RAISE EXCEPTION arrives at psycopg as RaiseException, sqlstate P0001;
-# app/router/category.py maps exactly that one sqlstate to HTTP 409.
+# BEFORE DELETE, so the documents have moved by the time RESTRICT is checked.
+# It lives in the database, not the router, because psql and raw SQL bypass
+# Python entirely. The RAISE reaches Python as error code P0001, which
+# app/router/category.py turns into an HTTP 409.
 CREATE_REFILE_TRIGGER_SQL = f"""
 CREATE OR REPLACE FUNCTION refile_items_to_uncategorised() RETURNS trigger AS $$
 BEGIN

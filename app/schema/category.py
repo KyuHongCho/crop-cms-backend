@@ -69,18 +69,16 @@ class SubCategoryResponse(BaseModel):
 
 
 class SubCategoryDeleteResponse(BaseModel):
-    """What a sub-category delete actually did.
+    """What the delete actually did.
 
-    Deleting a sub-category does not destroy its documents -- a BEFORE DELETE
-    trigger refiles them to the "Uncategorised" bucket first. That is invisible
-    from a 204, and "nothing moves silently" is the rule this endpoint exists to
-    keep, so the delete answers 200 with the count instead. A dry-run endpoint
-    would say the same thing less usefully.
+    The documents are not destroyed -- a trigger refiles them to the
+    "Uncategorised" bucket first. An empty 204 would hide that, so the endpoint
+    answers 200 and says how many moved.
     """
 
     documents_refiled: int
-    # UNCATEGORISED_SUB_CATEGORY_ID (model.py). Returned rather than assumed:
-    # the caller should not have to know the number to find its documents again.
+    # Returned, not assumed: the caller should not have to know the bucket's id
+    # in advance to find its documents again.
     refiled_to: int
 
 

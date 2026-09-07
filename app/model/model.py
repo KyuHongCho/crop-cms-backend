@@ -6,12 +6,10 @@ from sqlalchemy.orm import relationship
 
 from app.db.db import Base
 
-# The "Uncategorised" bucket. Deleting a sub-category refiles its documents here
-# rather than destroying them, so this id is a schema-level fact, not a
-# convention: app/db/migrate_db.py seeds both rows AND hard-codes the same
-# number inside the PL/pgSQL trigger body, because a trigger cannot read a
-# Python constant. Three homes, one number -- keep them in step. CI asserts the
-# seeded ids equal these constants.
+# The "Uncategorised" bucket: where a deleted sub-category's documents are
+# refiled to, instead of being destroyed. app/db/migrate_db.py writes this same
+# number into the seeded rows and into the trigger, which cannot read a Python
+# constant. CI checks the seeded ids still match these.
 UNCATEGORISED_MAIN_CATEGORY_ID = 1
 UNCATEGORISED_SUB_CATEGORY_ID = 1
 
@@ -28,12 +26,11 @@ class Crop(Base):
     scientific_name = Column(String(255), nullable=False)           # "Ocimum basilicum"
     ecocrop_id = Column(Integer, unique=True)                       # 1547
 
-    # passive_deletes="all", not True. True suppresses only the pre-emptive
-    # SELECT; a collection that happens to be loaded is still cascaded in
-    # Python, which under ON DELETE RESTRICT means a NotNullViolation 500
-    # instead of the database's own refusal. "all" hands the decision to
-    # PostgreSQL unconditionally, so behaviour does not depend on what a
-    # previous line in the same request happened to load.
+    # "all", not True. True only skips the look-ahead SELECT; it does not stop
+    # SQLAlchemy blanking the foreign key of documents already in memory, which
+    # breaks NOT NULL and makes the delete a 500. Nothing loads them today, so
+    # True would look fine -- "all" is what keeps it fine after someone adds a
+    # selectinload, by leaving the decision to PostgreSQL either way.
     items = relationship("Item", back_populates="crop", passive_deletes="all")
 
 
@@ -49,18 +46,16 @@ class MainCategory(Base):
     name = Column(String(255), nullable=False)
     position = Column(Integer, nullable=False, server_default=text("0"))
 
-    # No cascade="all, delete-orphan": it DELETEs the children in Python, which
-    # is exactly the data loss this tree exists to prevent. Deleting a main
-    # category that still holds sub-categories is refused -- by the router with
-    # a count, and by ON DELETE RESTRICT underneath it. Re-adding delete-orphan
-    # beside passive_deletes="all" is a configuration error SQLAlchemy refuses:
-    #   ArgumentError: On MainCategory.subcategories, can't set
-    #   passive_deletes='all' in conjunction with 'delete' or 'delete-orphan'
-    #   cascade
-    # Measured: it fires at configure_mappers(), which is LAZY -- the uvicorn
-    # process still starts and GET / still answers 200. Every request that
-    # touches a mapper is a 500 from then on, which is what CI's endpoint steps
-    # catch; the start-up check alone would not.
+    # No cascade="all, delete-orphan": it deletes the children in Python, which
+    # is the data loss this design exists to prevent. Deleting a main category
+    # that still holds sub-categories is refused instead -- by the router, with
+    # a count, and by ON DELETE RESTRICT beneath it.
+    #
+    # Putting delete-orphan back alongside passive_deletes="all" raises
+    # ArgumentError, but not at start-up: mappers configure lazily, so the app
+    # boots and GET / still answers 200 while every request that touches the
+    # database returns 500. CI catches it on the endpoint steps, not the
+    # start-up check.
     subcategories = relationship(
         "SubCategory", back_populates="main_category", passive_deletes="all",
     )
@@ -79,10 +74,9 @@ class SubCategory(Base):
     position = Column(Integer, nullable=False, server_default=text("0"))
 
     main_category = relationship("MainCategory", back_populates="subcategories")
-    # Same reasoning as MainCategory.subcategories above -- but here the
-    # database does not refuse: the BEFORE DELETE trigger installed by
-    # app/db/migrate_db.py refiles the documents to UNCATEGORISED_SUB_CATEGORY_ID
-    # first, so the RESTRICT has nothing left to refuse.
+    # As above -- except the database never has to refuse here: the trigger in
+    # app/db/migrate_db.py refiles the documents to the bucket first, leaving
+    # RESTRICT nothing to block.
     items = relationship(
         "Item", back_populates="sub_category", passive_deletes="all",
     )
@@ -111,19 +105,16 @@ class Item(Base):
     )
 
     id = Column(Integer, primary_key=True)
-    # RESTRICT, and deliberately NO server_default. Read alone this says
-    # "deleting a sub-category is refused" -- it is not, and that is the one
-    # cost of this design. The refiling is done first by the BEFORE DELETE
-    # trigger refile_items_to_uncategorised() in app/db/migrate_db.py; RESTRICT
-    # is what catches any path the trigger did not cover. A column default
-    # would let ON DELETE SET DEFAULT do the same job, but a default also
-    # applies at INSERT -- an INSERT omitting sub_category_id would silently
-    # file the document under the bucket instead of being refused.
+    # RESTRICT, and deliberately no default. This line alone reads as "deleting
+    # a sub-category is refused" -- it is not; the trigger in migrate_db.py
+    # refiles the documents first, and RESTRICT only catches what it missed.
+    # ON DELETE SET DEFAULT would refile without a trigger, but it needs a
+    # column default, and defaults apply on INSERT too: a new document missing
+    # sub_category_id would be filed under the bucket instead of rejected.
     sub_category_id = Column(
         Integer, ForeignKey("sub_categories.id", ondelete="RESTRICT"), nullable=False
     )
-    # No trigger here: a crop with documents simply cannot be deleted. Crops are
-    # seeded to match the advisor's data, not authored in this CMS.
+    # No trigger here: a crop that still has documents simply cannot be deleted.
     crop_id = Column(Integer, ForeignKey("crops.id", ondelete="RESTRICT"), nullable=False)
 
     # The shared question, e.g. "optimal-temperature". Retrieval returns the

@@ -45,10 +45,9 @@ async def create_main_category(
 async def count_sub_categories(db: AsyncSession, main_category_id: int) -> int:
     """How many sub-categories hang off this main category.
 
-    The router refuses the delete with this number rather than letting
-    ON DELETE RESTRICT raise, because the ForeignKeyViolation reaches the client
-    as an opaque HTTP 500 -- the same reason the create endpoints pre-check
-    their parents (router/category.py:52-55).
+    The router refuses the delete with this number rather than letting the
+    database raise, whose foreign-key error would reach the client as an opaque
+    500 -- the same reason the create endpoints pre-check their parents.
     """
     return await db.scalar(
         select(func.count())
@@ -60,11 +59,10 @@ async def count_sub_categories(db: AsyncSession, main_category_id: int) -> int:
 async def delete_main_category(
     db: AsyncSession, main_category: model.MainCategory
 ) -> None:
-    """Delete a main category that the caller has already found to be empty.
+    """Delete a main category the caller has already found to be empty.
 
-    Nothing cascades: MainCategory.subcategories carries no delete-orphan and
-    passive_deletes="all" (model.py), so this emits one DELETE and lets
-    ON DELETE RESTRICT be the backstop if a child appeared in between.
+    Nothing cascades (see model.py), so this is a single DELETE. If a child
+    appeared in the meantime, ON DELETE RESTRICT stops it.
     """
     await db.delete(main_category)
     await db.commit()
@@ -95,18 +93,15 @@ async def delete_sub_category(
 ) -> int:
     """Delete a sub-category and report how many documents were refiled.
 
-    The refiling itself is NOT done here. The BEFORE DELETE trigger
-    refile_items_to_uncategorised() (app/db/migrate_db.py) moves the documents
-    to UNCATEGORISED_SUB_CATEGORY_ID inside the same statement, so raw SQL and
-    psql get the same behaviour as this endpoint. All this function does is
-    count them first, because after the DELETE they are indistinguishable from
-    documents that were already in the bucket.
+    The refiling is not done here -- the trigger in app/db/migrate_db.py moves
+    the documents as part of the same statement, so psql behaves like this
+    endpoint. All this adds is the count, taken first, because afterwards the
+    moved documents look exactly like ones already in the bucket.
 
-    The count can UNDER-report. Under READ COMMITTED a document inserted between
-    the count and the DELETE is refiled by the trigger but not counted;
-    SELECT ... FOR UPDATE on the sub-category closes it (a child INSERT takes
-    FOR KEY SHARE, which conflicts). Deliberately not paid for: this is a
-    single-user CMS with no authentication and no concurrent writer.
+    That count can under-report: a document inserted between the count and the
+    DELETE is refiled but not counted. Locking the sub-category first
+    (SELECT ... FOR UPDATE) would close the gap, and is deliberately not paid
+    for -- this is a single-user CMS with no concurrent writer.
     """
     refiled = await db.scalar(
         select(func.count())
