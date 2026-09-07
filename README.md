@@ -31,17 +31,17 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | Deleting a category **refiles** its documents instead of destroying them — `ON DELETE RESTRICT` + a `BEFORE DELETE` trigger + `passive_deletes="all"` | **working** — CI asserts the documents survive, that the bucket cannot be deleted even when empty, and that a crop still holding documents cannot be deleted |
 | ✅ | Pydantic schemas + CRUD layer + DB-backed endpoints | **working** — `GET`/`POST` for categories and items, `DELETE` for categories, `GET` for crops |
 | ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 15 checks |
+| ✅ | Automated tests, `pytest` + `httpx2`, run against an isolated `db-test`/`cms_test` server | **working** — see Testing below |
 | ⏳ | `PATCH` everywhere, and `DELETE /items/{id}` | not built — `PATCH` today would blank every field the caller omitted |
-| ⏳ | Automated tests (`pytest`/`httpx` are not even installed yet) | not built |
 | ✅ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on a pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | **working** — `.github/workflows/agentic-review.yml`; runs on `opened`/`reopened`/`ready_for_review`, or on a `/agentic-review` comment. Advisory: it gates nothing |
 | ⏳ | Authentication | not built |
 | ⏳ | Embedding column + vector search over document bodies | not built — the model is undecided, and it is a real constraint (see below) |
 | ⏳ | Retrieval endpoint the advisor would actually call (crop + topic) | not built |
 | ⏳ | Frontend (`crop-cms-frontend/`) | not started |
 
-Known rough edges, recorded rather than hidden: a duplicate `slug` currently surfaces as
-`500` instead of `409`, and `PATCH` does not exist, so there is no way to rename a category
-or edit a document without replacing it.
+Known rough edges, recorded rather than hidden: `PATCH` does not exist, so there is no way to
+rename a category or edit a document without replacing it. (A duplicate `slug` used to surface
+as `500` instead of `409` — fixed; see Testing.)
 
 The question that used to sit here — whether a sub-category *owns* its documents or merely
 *classifies* them — is now settled in favour of **classifies**: deleting a sub-category
@@ -84,14 +84,51 @@ the host, change the published port in `docker-compose.yaml`; only host tools ar
 since the app reaches the database over the Docker network (`DB_HOST: db`), never the published
 port.
 
+## Testing
+
+The suite never runs against the dev database. `docker-compose.yaml` has a second,
+ephemeral Postgres server, `db-test` — `pgvector/pgvector:pg17` with `POSTGRES_DB: cms_test`,
+tmpfs-backed so it starts empty every time, and hidden from a plain `docker compose up` behind
+`profiles: [test]`.
+
+```bash
+# 1. Start the test database alongside the normal stack (needs --profile test;
+#    a bare `docker compose up` never sees db-test)
+docker compose --profile test up -d --wait
+
+# 2. Build the schema in cms_test (never cms) -- DB_HOST/DB_NAME override for
+#    this one exec only; app/db/db.py already reads both from the environment
+docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+  python -m app.db.migrate_db
+
+# 3. Run the suite, same override
+docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+  python -m pytest -q
+```
+
+A guard test (`tests/test_categories.py::test_suite_talks_to_the_test_database_never_dev`)
+asserts `DB_HOST=db-test` / `DB_NAME=cms_test` before anything else runs, and
+`tests/conftest.py`'s per-test fixture checks it again immediately before it TRUNCATEs every
+content table between tests — omitting the `-e` overrides fails loudly rather than quietly
+touching the dev database. That fixture also reseeds the "Uncategorised" bucket after every
+TRUNCATE (`RESTART IDENTITY CASCADE` would otherwise remove it, breaking every test after the
+first one that touches it).
+
+Dev tooling: `pytest>=9`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
+`TestClient` raises `RuntimeError` naming `httpx2` rather than merely warning), both in
+`requirements-dev.txt` and installed into the same image as `requirements.txt`.
+
+CI (`.github/workflows/ci.yml`) runs this exact sequence — `docker compose --profile test
+up -d --wait`, then the two `exec` calls above — on every push and PR.
+
 ## Endpoints
 
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/crops` | Read-only. Crops are **seeded** to match the advisor's `data/ecocrop/<slug>.json`, not authored here |
-| `GET` `POST` | `/main-categories` | Kind of knowledge: crop profile, research literature, cultivation practice, pests and disorders |
+| `GET` `POST` | `/main-categories` | Kind of knowledge: crop profile, research literature, cultivation practice, pests and disorders. `409` on a duplicate `slug`, naming the violated constraint |
 | `DELETE` | `/main-categories/{id}` | `204` if empty. `409` naming the count if it still holds sub-categories — a main category never takes its documents with it |
-| `GET` `POST` | `/sub-categories` | Unique per parent, not globally |
+| `GET` `POST` | `/sub-categories` | Unique per parent, not globally. `409` on a duplicate `slug`, naming the violated constraint |
 | `DELETE` | `/sub-categories/{id}` | `200 {"documents_refiled": n, "refiled_to": 1}` — the documents move to "Uncategorised", they are not deleted. `409` for "Uncategorised" itself |
 | `GET` `POST` | `/items` | One narrative document with its provenance |
 

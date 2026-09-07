@@ -1,0 +1,9 @@
+# Test tooling only -- never imported by app/. Installed into the same image
+# as requirements.txt (Dockerfile) so the suite runs with the same
+# interpreter and package set as the application.
+#
+# httpx2, not httpx: starlette==1.6.0's TestClient raises
+# "RuntimeError: The starlette.testclient module requires the httpx2 package
+# to be installed" -- it does not merely warn.
+pytest>=9
+httpx2==2.12.0

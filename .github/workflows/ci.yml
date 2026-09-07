@@ -33,7 +33,10 @@ jobs:
       - name: Stack starts, and Postgres is actually ready
         # --wait blocks on the db healthcheck, so reaching the next step means
         # Postgres accepted a connection -- not merely that a container exists.
-        run: docker compose up -d --wait
+        # --profile test also starts db-test: an ephemeral second Postgres
+        # server, invisible to a plain `docker compose up`, that the suite
+        # below runs against -- never the dev db/cms.
+        run: docker compose --profile test up -d --wait
 
       - name: API answers over HTTP
         # `docker ps` reporting "Up" proves only that PID 1 is alive. Under
@@ -41,6 +44,17 @@ jobs:
         # reports healthy, which also shipped here once. Only a real response
         # over the published port proves the app works.
         run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
+
+      - name: Test suite runs against db-test/cms_test, never the dev database
+        # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py already
+        # reads both from the environment (no application code change needed).
+        # migrate_db.py builds the schema fresh in cms_test first -- db-test is
+        # tmpfs-backed and starts empty every run.
+        run: |
+          docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+            python -m app.db.migrate_db
+          docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+            python -m pytest -q
 
       - name: Migrations create every table
         # Guards the silent failure: if app/model/model.py is empty or never
