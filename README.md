@@ -33,7 +33,7 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 15 checks |
 | ⏳ | `PATCH` everywhere, and `DELETE /items/{id}` | not built — `PATCH` today would blank every field the caller omitted |
 | ⏳ | Automated tests (`pytest`/`httpx` are not even installed yet) | not built |
-| ⏳ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on every pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | not built — worth more once the row above exists |
+| ✅ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on a pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | **working** — `.github/workflows/agentic-review.yml`; runs on `opened`/`reopened`/`ready_for_review`, or on a `/agentic-review` comment. Advisory: it gates nothing |
 | ⏳ | Authentication | not built |
 | ⏳ | Embedding column + vector search over document bodies | not built — the model is undecided, and it is a real constraint (see below) |
 | ⏳ | Retrieval endpoint the advisor would actually call (crop + topic) | not built |
@@ -76,8 +76,13 @@ open  localhost:8000/docs       # interactive OpenAPI
 > run**. Harmless while the tables are empty; do not run it once there is real content.
 > Choosing Alembic instead is an open decision.
 
-The API is published on **8000** and PostgreSQL on **55432** (not 5432, to avoid colliding
-with a local install).
+The API is published on **8000**, and PostgreSQL on **5432** — the default port, so a GUI
+client connects without being told a custom one — but bound to **loopback only**
+(`127.0.0.1:5432:5432`). Without that host-IP prefix Docker publishes on every interface, which
+would put the dev database on the port a scanner tries first. If you already run PostgreSQL on
+the host, change the published port in `docker-compose.yaml`; only host tools are affected,
+since the app reaches the database over the Docker network (`DB_HOST: db`), never the published
+port.
 
 ## Endpoints
 
@@ -173,14 +178,18 @@ separate auditor attacks the reviewer's findings before anything is reported.
 (`.github/workflows/agentic-review.yml`), checking the portable `core/` instructions out of
 `agentic-workflow` at run time rather than vendoring a copy that would drift.
 
-**This repository has only `ci.yml`.** Porting the review workflow is planned, and it is worth
-sequencing after a test suite rather than before one. The shared verification rules
-(`core/shared/verify.md`) tell a reviewer to *run the relevant existing tests and read the
+**This repository now runs it too**, as `.github/workflows/agentic-review.yml`: `review`
+posts its findings — inline where they sit on a changed line — and `review-audit` then posts a
+second comment correcting or confirming them, having formed its own findings blind first. The
+review is advisory and gates nothing; only `stack` is a required check.
+
+It still has no test suite, and that costs the reviewer real evidence. The shared verification
+rules (`core/shared/verify.md`) tell it to *run the relevant existing tests and read the
 output*, and — when no test covers a claim — to write a throwaway one, run it, and delete it
-afterwards. So the loop is not blocked by having no suite; it just does more work for weaker
-evidence, and the runner has to install Python and the test dependencies before the agent
-starts, which this repository's CI does not yet do. Hence "automated tests" sitting directly
-above it in the table.
+afterwards. In CI it holds read-only tools and cannot do the second half, so a claim it cannot
+ground is marked unverified rather than asserted. Hence "automated tests" sitting directly
+above it in the table: the loop works without a suite, it just does more work for weaker
+evidence.
 
 ## Licence
 
