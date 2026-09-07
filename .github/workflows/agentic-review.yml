@@ -190,27 +190,21 @@ jobs:
           # going over — throwing away a review it had already posted.
           # `timeout-minutes` above is the real guard: it stops work instead of binning it.
           claude_args: |
-            --allowedTools "Read,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*),Bash(wc:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
+            --model claude-opus-5
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*),Bash(wc:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
           prompt: |
             You are the `review` role. Follow, from this checkout:
-              ${{ env.CORE_DIR }}/core/roles/review.md   — what to produce
-              ${{ env.CORE_DIR }}/core/shared/verify.md  — how to ground each finding
-
-            In your "Verification process" section, quote one line verbatim from
-            `${{ env.CORE_DIR }}/core/roles/review.md`, with its line number, to show which
-            instruction file you actually read.
-
+              ${{ env.CORE_DIR }}/core/roles/review.md         — what to produce
+              ${{ env.CORE_DIR }}/core/shared/verify.md        — how to ground each finding
+              ${{ env.CORE_DIR }}/agentic-review-guideline.md  — where each finding goes, and the exact shape of your comment
             REPO: ${{ github.repository }}   PR: ${{ needs.gate.outputs.pr }}
 
-            Post exactly ONE pull request comment. For every finding give:
-              * the file path and line number
-              * before/after code
-              * why it matters
-            End the comment with a "Verification process" section stating how you grounded each
-            finding: which files you read, and which `git diff` / `git show` / `gh pr diff` output
-            you checked. In CI you hold read-only tools only — a finding you could not confirm from
-            the checked-out tree or the PR diff, mark as unverified rather than asserting it.
-            Close the section with the final `git status --porcelain`.
+            Read all three before you start. The guideline's comment structure is exact — follow it
+            literally and post nothing outside it. In CI you hold read-only tools only.
+
+            One addition to the guideline's Verification block: as the first `**Ran:**` entry,
+            quote one line verbatim from `${{ env.CORE_DIR }}/core/roles/review.md` with its line
+            number, to show which instruction file you actually read.
       # The run log reports how MANY calls were denied but never WHICH, so a too-narrow tool list
       # could only be widened by guesswork. Upload the agent's transcript instead and read them.
       # `if: always()` because the failing run is the interesting one.
@@ -255,27 +249,21 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Same tool grant and `--max-turns` reasoning as the `review` job — see the notes there.
           claude_args: |
+            --model claude-sonnet-5
             --allowedTools "Read,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*),Bash(wc:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
           prompt: |
             You are the `review-audit` auditor. Follow, from this checkout:
-              ${{ env.CORE_DIR }}/core/auditors/review-audit.md — the criteria, incl. the two passes
-              ${{ env.CORE_DIR }}/core/shared/verify.md         — how to ground each objection
+              ${{ env.CORE_DIR }}/core/auditors/review-audit.md      — the criteria, including the two passes
+              ${{ env.CORE_DIR }}/core/shared/verify.md              — how to ground each objection
+              ${{ env.CORE_DIR }}/agentic-review-audit-guideline.md  — the order of work, and the exact shape of your comment
             REPO: ${{ github.repository }}   PR: ${{ needs.gate.outputs.pr }}
 
-            Pass 1 is BLIND. Form your own findings from the diff BEFORE you read the
-            reviewer's comment; reading it first anchors you, and blind spots are what this
-            pass exists to catch. Only then open the review and compare.
+            Read all three before you start. The guideline's comment structure is exact — follow it
+            literally and post nothing outside it. In CI you hold read-only tools only.
 
-            Then post a SECOND pull request comment of your own, below the reviewer's.
-            Do NOT edit or delete theirs: the original review and your corrections must
-            both stay visible, or there is no record of what the audit actually caught.
-            Open with a one-line verdict, then:
-              * if something is wrong, correct it and say what was wrong
-              * if nothing is wrong, say so and explain why each finding holds
-            End with a "Re-verification process" section: which files you read for yourself, and
-            which `git diff` / `git show` / `gh pr diff` output you checked. In CI you hold
-            read-only tools only — an objection you could not confirm from the checked-out tree or
-            the PR diff, mark as unverified. Close with the final `git status --porcelain`.
+            One addition to the guideline's Re-verification block: as the first `**Re-ran:**` entry,
+            quote one line verbatim from `${{ env.CORE_DIR }}/core/auditors/review-audit.md` with
+            its line number, to show which instruction file you actually read.
       # Same transcript upload as the review job -- see the comment there. The artifact name
       # must differ or the two jobs collide on upload.
       - if: always()
