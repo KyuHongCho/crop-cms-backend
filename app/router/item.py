@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 # Unfiltered, deliberately: Item.published defaults to false server-side
-# (model.py:95), so a published-only filter would hide every document the CMS
+# (see model.py), so a published-only filter would hide every document the CMS
 # has just created from the CMS that created it.
 @router.get("/items", response_model=list[item_schema.ItemResponse])
 async def get_items(db: AsyncSession = Depends(get_db)):

@@ -1,8 +1,9 @@
 """Read-only shape for a crop.
 
 There is deliberately no CropCreate: crops are seeded to match the advisor's
-data/ecocrop/<slug>.json rather than authored here, and deleting one cascades
-to every document about it (model.py:88). Settled in PR #2.
+data/ecocrop/<slug>.json rather than authored here. Settled in PR #2. There is
+no delete either, and the database backs that up -- Item.crop_id is ON DELETE
+RESTRICT, so a crop that still has documents about it cannot be removed.
 
 The four columns map onto that file as: slug <- the filename, common_name <-
 "common_name", scientific_name <- the JSON key "name", ecocrop_id <-
@@ -29,5 +30,5 @@ class CropResponse(BaseModel):
     slug: str
     common_name: str
     scientific_name: str
-    # model.py:20 has no nullable=False, so this one really can be absent.
+    # Crop.ecocrop_id has no nullable=False, so this one really can be absent.
     ecocrop_id: int | None = None

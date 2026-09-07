@@ -6,6 +6,13 @@ from sqlalchemy.orm import relationship
 
 from app.db.db import Base
 
+# The "Uncategorised" bucket: where a deleted sub-category's documents are
+# refiled to, instead of being destroyed. app/db/migrate_db.py writes this same
+# number into the seeded rows and into the trigger, which cannot read a Python
+# constant. CI checks the seeded ids still match these.
+UNCATEGORISED_MAIN_CATEGORY_ID = 1
+UNCATEGORISED_SUB_CATEGORY_ID = 1
+
 
 class Crop(Base):
     """A crop the advisor can be asked about. Identified the way the advisor
@@ -19,7 +26,12 @@ class Crop(Base):
     scientific_name = Column(String(255), nullable=False)           # "Ocimum basilicum"
     ecocrop_id = Column(Integer, unique=True)                       # 1547
 
-    items = relationship("Item", back_populates="crop", passive_deletes=True)
+    # "all", not True. True only skips the look-ahead SELECT; it does not stop
+    # SQLAlchemy blanking the foreign key of documents already in memory, which
+    # breaks NOT NULL and makes the delete a 500. Nothing loads them today, so
+    # True would look fine -- "all" is what keeps it fine after someone adds a
+    # selectinload, by leaving the decision to PostgreSQL either way.
+    items = relationship("Item", back_populates="crop", passive_deletes="all")
 
 
 class MainCategory(Base):
@@ -34,9 +46,18 @@ class MainCategory(Base):
     name = Column(String(255), nullable=False)
     position = Column(Integer, nullable=False, server_default=text("0"))
 
+    # No cascade="all, delete-orphan": it deletes the children in Python, which
+    # is the data loss this design exists to prevent. Deleting a main category
+    # that still holds sub-categories is refused instead -- by the router, with
+    # a count, and by ON DELETE RESTRICT beneath it.
+    #
+    # Putting delete-orphan back alongside passive_deletes="all" raises
+    # ArgumentError, but not at start-up: mappers configure lazily, so the app
+    # boots and GET / still answers 200 while every request that touches the
+    # database returns 500. CI catches it on the endpoint steps, not the
+    # start-up check.
     subcategories = relationship(
-        "SubCategory", back_populates="main_category",
-        cascade="all, delete-orphan", passive_deletes=True,
+        "SubCategory", back_populates="main_category", passive_deletes="all",
     )
 
 
@@ -46,16 +67,18 @@ class SubCategory(Base):
 
     id = Column(Integer, primary_key=True)
     main_category_id = Column(
-        Integer, ForeignKey("main_categories.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("main_categories.id", ondelete="RESTRICT"), nullable=False
     )
     slug = Column(String(64), nullable=False)
     name = Column(String(255), nullable=False)
     position = Column(Integer, nullable=False, server_default=text("0"))
 
     main_category = relationship("MainCategory", back_populates="subcategories")
+    # As above -- except the database never has to refuse here: the trigger in
+    # app/db/migrate_db.py refiles the documents to the bucket first, leaving
+    # RESTRICT nothing to block.
     items = relationship(
-        "Item", back_populates="sub_category",
-        cascade="all, delete-orphan", passive_deletes=True,
+        "Item", back_populates="sub_category", passive_deletes="all",
     )
 
 
@@ -82,10 +105,18 @@ class Item(Base):
     )
 
     id = Column(Integer, primary_key=True)
+    # RESTRICT, and deliberately no default. This line alone reads as "deleting
+    # a sub-category is refused" -- it is not; the BEFORE DELETE trigger
+    # refile_items_before_sub_category_delete (app/db/migrate_db.py) refiles the
+    # documents first, and RESTRICT only catches what it missed.
+    # ON DELETE SET DEFAULT would refile without a trigger, but it needs a
+    # column default, and defaults apply on INSERT too: a new document missing
+    # sub_category_id would be filed under the bucket instead of rejected.
     sub_category_id = Column(
-        Integer, ForeignKey("sub_categories.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("sub_categories.id", ondelete="RESTRICT"), nullable=False
     )
-    crop_id = Column(Integer, ForeignKey("crops.id", ondelete="CASCADE"), nullable=False)
+    # No trigger here: a crop that still has documents simply cannot be deleted.
+    crop_id = Column(Integer, ForeignKey("crops.id", ondelete="RESTRICT"), nullable=False)
 
     # The shared question, e.g. "optimal-temperature". Retrieval returns the
     # whole set for a topic, so contradicting sources arrive together.

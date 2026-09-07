@@ -5,8 +5,8 @@ The provenance block mirrors crop_advisor.claims.Claim field-for-field
 maps onto a Claim with no rename table.
 
 Deliberately absent: opt_min / opt_max. Agronomic bands are the advisor's data,
-never CMS prose -- model.py:65-67. If a figure's only home is an item body, it
-is in the wrong system.
+never CMS prose -- see Item's docstring in model.py. If a figure's only home is
+an item body, it is in the wrong system.
 
 Every length bound mirrors a column in model.py. Without them an over-long value
 reaches PostgreSQL, raises DataError, and FastAPI serves HTTP 500; with them the
@@ -30,14 +30,14 @@ class ItemBase(BaseModel):
     crop_id: int
     # The shared question, e.g. "optimal-temperature". Retrieval returns the
     # whole set for a topic, so contradicting sources arrive together
-    # (model.py:90-91). String(128) at model.py:92.
+    # (see Item.topic). String(128) on that column.
     topic: str | None = Field(default=None, max_length=128)
-    title: str = Field(min_length=1, max_length=255)  # model.py:93
+    title: str = Field(min_length=1, max_length=255)  # Item.title
     body: str = Field(min_length=1)                   # Text, no max
-    published: bool = False                           # model.py:95
+    published: bool = False                           # Item.published
 
     # --- provenance, mirroring claims.py:40-47 ------------------------------
-    source: str = Field(min_length=1, max_length=255)  # model.py:98
+    source: str = Field(min_length=1, max_length=255)  # Item.source
     reference: str = Field(min_length=1)               # Text, no max
     url: str = Field(min_length=1)                     # Text, no max
     read_directly: bool
@@ -74,7 +74,7 @@ class ItemCreate(ItemBase):
     @model_validator(mode="after")
     def _read_directly_excludes_via(self) -> "ItemCreate":
         """Mirror of Claim.__post_init__ (claims.py:53-62) and of the database's
-        read_directly_excludes_via CHECK (model.py:78-81).
+        read_directly_excludes_via CHECK on Item.__table_args__.
 
         Without this the row is still rejected -- but by PostgreSQL, as an
         unhandled IntegrityError, which FastAPI serves as HTTP 500. With it the

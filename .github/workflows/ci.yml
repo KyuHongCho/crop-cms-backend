@@ -53,6 +53,60 @@ jobs:
           echo "tables created: $count"
           test "$count" = "4"
 
+      - name: The Uncategorised bucket is seeded where the code expects it
+        # The bucket id has three homes -- the constants in model.py, the seed in
+        # migrate_db.py, and a literal inside the PL/pgSQL trigger body, because
+        # a trigger cannot read a Python constant. This asserts the database and
+        # the Python agree; nothing else would notice them drifting apart.
+        #
+        # Then the sequences. Seeding an explicit id does NOT advance a SERIAL
+        # sequence, so migrate_db.py setval's both. Without that the very next
+        # insert collides on the primary key -- and a naive 409 handler would
+        # report that UniqueViolation as "a category with that slug already
+        # exists". Asserting the new rows come back at id=2 is what catches it.
+        run: |
+          for scope in MAIN SUB; do
+            table=$([ "$scope" = MAIN ] && echo main_categories || echo sub_categories)
+            seeded=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+              "SELECT id FROM $table WHERE slug = 'uncategorised';" | tr -d '[:space:]')
+            constant=$(docker compose exec -T cms python -c \
+              "from app.model.model import UNCATEGORISED_${scope}_CATEGORY_ID as i; print(i)" \
+              | tr -d '[:space:]')
+            echo "$table bucket: seeded=$seeded constant=$constant"
+            test -n "$seeded"
+            test "$seeded" = "$constant"
+          done
+          api="http://localhost:8000"
+          id() { python3 -c "import json,sys; print(json.load(sys.stdin)['id'])"; }
+          mc=$(curl -fsS -X POST "$api/main-categories" -H 'content-type: application/json' \
+                 -d '{"slug":"sequence-probe","name":"Sequence probe"}' | id)
+          sc=$(curl -fsS -X POST "$api/sub-categories" -H 'content-type: application/json' \
+                 -d "{\"main_category_id\":$mc,\"slug\":\"sequence-probe\",\"name\":\"Sequence probe\"}" | id)
+          echo "first main category after the seed: id=$mc; first sub-category: id=$sc"
+          test "$mc" = "2"
+          test "$sc" = "2"
+          curl -fsS -o /dev/null -X DELETE "$api/sub-categories/$sc"
+          curl -fsS -o /dev/null -X DELETE "$api/main-categories/$mc"
+
+      - name: Deletion rules are in the schema, not in Python
+        # Read back from pg_constraint, not from model.py. Mutating
+        # ForeignKey.ondelete at runtime never reaches the DDL -- SQLAlchemy
+        # emits from the ForeignKeyConstraint -- so a test that trusts the
+        # Python side can pass against a schema that still says CASCADE.
+        run: |
+          for fk in items_crop_id_fkey \
+                    items_sub_category_id_fkey \
+                    sub_categories_main_category_id_fkey; do
+            rule=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+              "SELECT confdeltype FROM pg_constraint WHERE conname = '$fk';" | tr -d '[:space:]')
+            echo "$fk: confdeltype=$rule (r = RESTRICT, c = CASCADE)"
+            test "$rule" = "r"
+          done
+          trigger=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT tgname FROM pg_trigger WHERE NOT tgisinternal;" | tr -d '[:space:]')
+          echo "triggers: $trigger"
+          test "$trigger" = "refile_items_before_sub_category_delete"
+
       - name: Provenance invariant is enforced by the database
         # Mirrors crop_advisor/claims.py: a claim read first-hand cannot also name
         # the paper it was read through. This asserts the INSERT is REJECTED --
@@ -63,33 +117,242 @@ jobs:
             VALUES ('basil', 'basil', 'Ocimum basilicum');
           INSERT INTO main_categories (slug, name)
             VALUES ('research-literature', 'Research literature');
+          -- WHERE, because migrate_db.py now seeds an "Uncategorised" bucket
+          -- main category. Unqualified this creates a SECOND sub-category, and
+          -- the refile assertion further down stops being measurable.
           INSERT INTO sub_categories (main_category_id, slug, name)
-            SELECT id, 'temperature-response', 'Temperature response' FROM main_categories;
+            SELECT id, 'temperature-response', 'Temperature response'
+              FROM main_categories WHERE slug <> 'uncategorised';
           SQL
           if docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc "
                 INSERT INTO items (sub_category_id, crop_id, title, body,
                                    source, reference, url, read_directly, via)
                 SELECT s.id, c.id, 't', 'b', 's', 'r', 'u', true, 'some paper'
-                FROM sub_categories s, crops c;"; then
+                FROM sub_categories s, crops c
+                WHERE s.slug = 'temperature-response';"; then
             echo "FAIL: read_directly=true with a 'via' paper was accepted"
             exit 1
           fi
           echo "OK: the database rejected it, as claims.py requires"
 
-      - name: Deleting a crop cascades to its documents
-        # ON DELETE CASCADE lives in the schema, not in Python, so bulk SQL
-        # cannot route around it. Verified by deleting through raw SQL.
+      - name: sub_category_id has no default and is still NOT NULL
+        # The reason this design uses RESTRICT + a trigger rather than
+        # ON DELETE SET DEFAULT: SET DEFAULT needs a column default, and a
+        # column default ALSO applies at INSERT. An INSERT omitting
+        # sub_category_id would then be filed under the bucket silently instead
+        # of being refused. Asserting the absence of the default is what stops
+        # someone "simplifying" this back.
+        run: |
+          d=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT coalesce(column_default, '(none)') || ' ' || is_nullable
+               FROM information_schema.columns
+              WHERE table_name = 'items' AND column_name = 'sub_category_id';" | tr -d '[:space:]')
+          echo "items.sub_category_id: default+nullable = $d"
+          test "$d" = "(none)NO"
+          if docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc "
+                INSERT INTO items (crop_id, title, body,
+                                   source, reference, url, read_directly)
+                SELECT id, 't', 'b', 's', 'r', 'u', true FROM crops;"; then
+            echo "FAIL: an INSERT omitting sub_category_id was accepted"
+            exit 1
+          fi
+          echo "OK: NotNullViolation, so the insert guard survived the refile design"
+
+      - name: Deleting a sub-category refiles its documents, never destroys them
+        # Named slugs, never literal ids: the bucket seed shifts every id, and an
+        # assertion written against `id = 2` would pass for the wrong reason.
+        # This is raw SQL on purpose -- the refile is a BEFORE DELETE trigger in
+        # the schema, so psql gets the same behaviour as the HTTP endpoint.
         run: |
           docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc "
             INSERT INTO items (sub_category_id, crop_id, title, body,
                                source, reference, url, read_directly)
             SELECT s.id, c.id, 't', 'b', 's', 'r', 'u', true
-            FROM sub_categories s, crops c;"
-          docker compose exec -T db psql -U "$DB_USER" -d cms -qc "DELETE FROM crops;"
+            FROM sub_categories s, crops c
+            WHERE s.slug = 'temperature-response';"
+          count() {
+            docker compose exec -T db psql -U "$DB_USER" -d cms -tAc "$1" | tr -d '[:space:]'
+          }
+          bucket="SELECT count(*) FROM items WHERE sub_category_id =
+                    (SELECT id FROM sub_categories WHERE slug = 'uncategorised');"
+          echo "before: bucket=$(count "$bucket") total=$(count 'SELECT count(*) FROM items;')"
+          test "$(count "$bucket")" = "0"
+          test "$(count 'SELECT count(*) FROM items;')" = "1"
+          docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc \
+            "DELETE FROM sub_categories WHERE slug = 'temperature-response';"
+          echo "after:  bucket=$(count "$bucket") total=$(count 'SELECT count(*) FROM items;')"
+          test "$(count "$bucket")" = "1"
+          test "$(count 'SELECT count(*) FROM items;')" = "1"
+          echo "OK: the document moved to the bucket and none was lost"
+
+      - name: Deleting a crop that still has documents is refused
+        # The rule is ON DELETE RESTRICT in the schema, not a check in Python,
+        # so bulk SQL cannot route around it. Crops are seeded to match the
+        # advisor's data; nothing in this CMS should be able to erase the
+        # documents attached to one.
+        run: |
+          if docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 \
+               -qc "DELETE FROM crops;"; then
+            echo "FAIL: the crop was deleted out from under its documents"
+            exit 1
+          fi
           left=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
             "SELECT count(*) FROM items;" | tr -d '[:space:]')
-          echo "items left after deleting the crop: $left"
-          test "$left" = "0"
+          echo "documents still present after the refused delete: $left"
+          test "$left" = "1"
+
+      - name: The Uncategorised bucket cannot be deleted, full or EMPTY
+        # Empty is the case that matters. Postgres alone protects the bucket only
+        # while it holds a row; delete it empty and deleting a later sub-category
+        # that still holds documents fails with an error naming `items`, a table
+        # the caller never touched. The trigger closes that, and closes it for
+        # raw SQL too.
+        run: |
+          refused() {
+            if docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 \
+                 -qc "DELETE FROM sub_categories WHERE slug = 'uncategorised';"; then
+              echo "FAIL: the bucket was deleted ($1)"
+              exit 1
+            fi
+            echo "OK: refused ($1)"
+          }
+          refused "holding a document"
+          docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc \
+            "DELETE FROM items;"
+          test "$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            'SELECT count(*) FROM items;' | tr -d '[:space:]')" = "0"
+          refused "empty"
+
+      - name: The API refiles, reports the count, and refuses to orphan
+        # The end-to-end promise, over HTTP: delete a sub-category holding three
+        # documents and get back how many moved and where to -- not a 204 that
+        # says nothing about where the content went.
+        run: |
+          json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
+          api="http://localhost:8000"
+
+          mc=$(curl -fsS -X POST "$api/main-categories" -H 'content-type: application/json' \
+                 -d '{"slug":"basil-notes","name":"Basil notes"}' | json "['id']")
+          sc=$(curl -fsS -X POST "$api/sub-categories" -H 'content-type: application/json' \
+                 -d "{\"main_category_id\":$mc,\"slug\":\"temperature\",\"name\":\"Temperature\"}" \
+                 | json "['id']")
+          crop=$(curl -fsS "$api/crops" | json "[0]['id']")
+          for n in 1 2 3; do
+            curl -fsS -o /dev/null -X POST "$api/items" -H 'content-type: application/json' \
+              -d "{\"sub_category_id\":$sc,\"crop_id\":$crop,\"title\":\"doc $n\",\"body\":\"b\",
+                   \"source\":\"s\",\"reference\":\"r\",\"url\":\"u\",\"read_directly\":true}"
+          done
+
+          body=$(curl -fsS -X DELETE "$api/sub-categories/$sc")
+          echo "DELETE /sub-categories/$sc -> $body"
+          test "$body" = '{"documents_refiled":3,"refiled_to":1}'
+          filed=$(curl -fsS "$api/items" | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); print(len(d), sorted({i['sub_category_id'] for i in d}))")
+          echo "GET /items -> $filed"
+          test "$filed" = "3 [1]"
+
+          # One call per assertion: DELETE is not idempotent here, and calling
+          # twice would turn the 204 into a 404 against the row it just removed.
+          deleted() {
+            got=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$api/$1")
+            echo "DELETE /$1 -> $got (expected $2)"
+            test "$got" = "$2"
+          }
+          deleted sub-categories/1 409        # the bucket itself
+          deleted main-categories/1 409       # still holds the bucket
+          deleted "main-categories/$mc" 204   # now empty, so it goes
+          deleted main-categories/99999 404
+
+      - name: The refile is load-independent, and the ORM copies can be made honest
+        # passive_deletes=True suppresses only the pre-emptive SELECT; a
+        # collection that happens to be loaded is still cascaded in Python.
+        # "all" is load-independent -- so this runs BOTH scenarios, one per
+        # process, against the real configured mappers, and reads pg_constraint
+        # back on each run. Two shortcuts fail SILENTLY and were both hit while
+        # this was designed: mutating ForeignKey.ondelete never reaches the DDL
+        # (SQLAlchemy emits from the ForeignKeyConstraint), and mutating
+        # relationship.passive_deletes after configure_mappers() is not honoured
+        # by the OneToManyDP that drives the DELETE.
+        run: |
+          for scenario in unloaded loaded; do
+            docker compose exec -T cms python - "$scenario" <<'PY'
+          import asyncio, sys
+
+          from sqlalchemy import text
+          from app.db.db import async_session, engine
+          from app.model.model import (
+              Item, SubCategory, MainCategory,
+              UNCATEGORISED_SUB_CATEGORY_ID as BUCKET,
+          )
+
+          engine.echo = False  # db.py:16 sets echo=True; that log is not the evidence
+
+          LOADED = sys.argv[1] == "loaded"
+
+
+          async def main():
+              async with async_session() as db:
+                  rules = dict((await db.execute(text(
+                      "SELECT conname, confdeltype FROM pg_constraint WHERE contype = 'f'"
+                  ))).all())
+                  assert rules == {
+                      "items_sub_category_id_fkey": "r",
+                      "items_crop_id_fkey": "r",
+                      "sub_categories_main_category_id_fkey": "r",
+                  }, f"the DDL does not match the mappers' intent: {rules}"
+                  assert SubCategory.items.property.passive_deletes == "all"
+                  assert "delete-orphan" not in SubCategory.items.property.cascade
+
+                  await db.execute(text("DELETE FROM items"))
+                  await db.execute(text("DELETE FROM sub_categories WHERE id <> :b"), {"b": BUCKET})
+                  await db.commit()
+
+                  crop = await db.scalar(text("SELECT id FROM crops LIMIT 1"))
+                  parent = await db.scalar(
+                      text("SELECT id FROM main_categories WHERE id <> :b LIMIT 1"), {"b": BUCKET}
+                  )
+                  sc = SubCategory(main_category_id=parent, slug="probe", name="Probe")
+                  db.add(sc)
+                  await db.commit()
+                  items = [
+                      Item(sub_category_id=sc.id, crop_id=crop, title=f"doc {n}", body="b",
+                           source="s", reference="r", url="u", read_directly=True)
+                      for n in (1, 2, 3)
+                  ]
+                  db.add_all(items)
+                  await db.commit()
+
+                  if LOADED:
+                      await db.refresh(sc, ["items"])
+                      assert len(sc.items) == 3
+
+                  await db.delete(sc)
+                  await db.commit()
+
+                  rows = [tuple(r) for r in (await db.execute(
+                      text("SELECT id, sub_category_id FROM items ORDER BY id")
+                  )).all()]
+                  assert len(rows) == 3, f"documents were DESTROYED, not refiled: {rows}"
+                  assert all(s == BUCKET for _, s in rows), rows
+                  print(f"loaded={LOADED!s:<5} db={rows}")
+
+                  # expire_on_commit=False (db.py:19) means nothing re-reads the
+                  # Item objects, so they still carry the pre-refile parent. The
+                  # handler does not serialize them, so nothing in production is
+                  # wrong today -- this pins the documented remedy.
+                  stale = [(i.id, i.sub_category_id) for i in items]
+                  db.expire_all()
+                  for i in items:
+                      await db.refresh(i)
+                  fresh = [(i.id, i.sub_category_id) for i in items]
+                  print(f"loaded={LOADED!s:<5} in-memory before expire_all()={stale}")
+                  print(f"loaded={LOADED!s:<5} in-memory after  expire_all()={fresh}")
+                  assert fresh == rows, (fresh, rows)
+
+
+          asyncio.run(main())
+          PY
+          done
 
       - name: Container logs on failure
         if: failure()

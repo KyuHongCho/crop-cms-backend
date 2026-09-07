@@ -1,8 +1,9 @@
 """Data access for crops.
 
 Read-only by design: crops are seeded to match the advisor's
-data/ecocrop/<slug>.json rather than authored here, and deleting one cascades to
-every document about it (model.py:88). Settled in PR #2.
+data/ecocrop/<slug>.json rather than authored here. Settled in PR #2.
+Item.crop_id is ON DELETE RESTRICT, so a crop that still has documents cannot
+be deleted.
 """
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

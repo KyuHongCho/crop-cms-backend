@@ -15,8 +15,9 @@ here. If a figure's only home is a document body, it is in the wrong system.
 > **Status: early. Building in progress — not finished.**
 > The stack runs end to end: PostgreSQL 17 + pgvector in Docker, a four-table schema whose
 > provenance rule is enforced by a database `CHECK`, and HTTP endpoints that read and write it.
-> There are **no automated tests**, **no authentication**, **no `DELETE` endpoints**, and
-> **no embedding column** — so despite pgvector being installed, there is no vector search yet.
+> There are **no automated tests**, **no authentication**, **no `DELETE` endpoint for
+> documents**, and **no embedding column** — so despite pgvector being installed, there is
+> no vector search yet.
 > **Nothing consumes this API**: the advisor has no client for it, verified. This README
 > describes only what actually runs; planned work is labelled as such.
 
@@ -27,10 +28,10 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | Containerised dev stack — Python 3.13, PostgreSQL 17.11, pgvector 0.8.6 | **working** |
 | ✅ | Four-table schema: `crops`, `main_categories`, `sub_categories`, `items` | **working** |
 | ✅ | Provenance invariant enforced in the database, not in Python — a claim read first-hand cannot also name the paper it was read through | **working** — CI asserts the `INSERT` is *rejected* |
-| ✅ | Database-level cascades (`ON DELETE CASCADE` + `passive_deletes`) | **working** — CI asserts a crop delete removes its documents |
-| ✅ | Pydantic schemas + CRUD layer + DB-backed endpoints | **working** — `GET`/`POST` for categories and items, `GET` for crops |
-| ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 8 checks |
-| ⏳ | `DELETE` endpoints | not built |
+| ✅ | Deleting a category **refiles** its documents instead of destroying them — `ON DELETE RESTRICT` + a `BEFORE DELETE` trigger + `passive_deletes="all"` | **working** — CI asserts the documents survive, that the bucket cannot be deleted even when empty, and that a crop still holding documents cannot be deleted |
+| ✅ | Pydantic schemas + CRUD layer + DB-backed endpoints | **working** — `GET`/`POST` for categories and items, `DELETE` for categories, `GET` for crops |
+| ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 15 checks |
+| ⏳ | `PATCH` everywhere, and `DELETE /items/{id}` | not built — `PATCH` today would blank every field the caller omitted |
 | ⏳ | Automated tests (`pytest`/`httpx` are not even installed yet) | not built |
 | ⏳ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on every pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | not built — worth more once the row above exists |
 | ⏳ | Authentication | not built |
@@ -39,9 +40,12 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ⏳ | Frontend (`crop-cms-frontend/`) | not started |
 
 Known rough edges, recorded rather than hidden: a duplicate `slug` currently surfaces as
-`500` instead of `409`, and whether a sub-category should *own* its documents or merely
-*classify* them is still undecided — today deleting a category destroys everything filed
-under it.
+`500` instead of `409`, and `PATCH` does not exist, so there is no way to rename a category
+or edit a document without replacing it.
+
+The question that used to sit here — whether a sub-category *owns* its documents or merely
+*classifies* them — is now settled in favour of **classifies**: deleting a sub-category
+refiles its documents rather than destroying them (see below).
 
 ## Quickstart
 
@@ -59,7 +63,8 @@ EOF
 # 2. Bring up the API and the database
 docker compose up -d --build
 
-# 3. Create the tables (drops and recreates them — see the warning below)
+# 3. Create the tables, seed the "Uncategorised" bucket, install the refile
+#    trigger (drops and recreates everything — see the warning below)
 docker compose exec cms python -m app.db.migrate_db
 
 # 4. The API
@@ -80,7 +85,9 @@ with a local install).
 |---|---|---|
 | `GET` | `/crops` | Read-only. Crops are **seeded** to match the advisor's `data/ecocrop/<slug>.json`, not authored here |
 | `GET` `POST` | `/main-categories` | Kind of knowledge: crop profile, research literature, cultivation practice, pests and disorders |
+| `DELETE` | `/main-categories/{id}` | `204` if empty. `409` naming the count if it still holds sub-categories — a main category never takes its documents with it |
 | `GET` `POST` | `/sub-categories` | Unique per parent, not globally |
+| `DELETE` | `/sub-categories/{id}` | `200 {"documents_refiled": n, "refiled_to": 1}` — the documents move to "Uncategorised", they are not deleted. `409` for "Uncategorised" itself |
 | `GET` `POST` | `/items` | One narrative document with its provenance |
 
 `GET /items` returns **everything, unfiltered**. `published` defaults to false server-side, so
@@ -106,8 +113,26 @@ mirrors `crop_advisor/claims.py` in the sibling repo. Application-level validati
 so the client gets a `422` naming the rule rather than a `500`, but the database is what
 actually guarantees it.
 
-**Cascades live in the schema.** `ON DELETE CASCADE` with `passive_deletes=True`, not ORM-only
-cascade, because ORM cascade is bypassed by bulk deletes and raises instead.
+**Deleting a category never destroys documents, and that rule lives in the schema.** Every
+foreign key is `ON DELETE RESTRICT`, and a `BEFORE DELETE` trigger on `sub_categories`
+refiles the documents to an **"Uncategorised"** bucket (seeded at id 1) before the delete
+lands. Deleting the bucket itself is refused — including when it is empty, which Postgres
+alone would allow, after which deleting any sub-category that still held documents would
+fail with an error naming `items`, a table the caller never touched.
+
+It is in the database rather than in the router because `psql` and bulk SQL route around
+Python entirely. The cost is discoverability, and it is real: `model.py` reads `RESTRICT`,
+from which a reader would conclude the delete is *refused*. The comment at the foreign key
+names the trigger.
+
+The relationships carry `passive_deletes="all"` and deliberately **no**
+`cascade="all, delete-orphan"`. `delete-orphan` issues the child `DELETE`s from Python —
+exactly the data loss this design exists to prevent — and plain `passive_deletes=True` only
+suppresses the pre-emptive `SELECT`, so a collection that happens to have been loaded
+earlier in the same request is still cascaded. `"all"` is load-independent. Putting
+`delete-orphan` back beside it is a configuration error SQLAlchemy refuses outright, so
+CI's endpoint checks catch the regression rather than a silent data loss reaching
+production.
 
 **PostgreSQL, diverging from the course this was built alongside.** The course is
 [Dipping into FastAPI (FastAPI + React.js + AWS LightSail)](https://www.inflearn.com/en/course/fastapi-%EC%B0%8D%EC%96%B4%EB%A8%B9%EA%B8%B0)
@@ -172,7 +197,8 @@ with attribution); `items.licence_note` exists to carry those terms per document
 app/
   main.py            FastAPI app, router registration
   db/db.py           async engine, session factory, the single declarative Base
-  db/migrate_db.py   sync engine, drop_all + create_all
+  db/migrate_db.py   sync engine, drop_all + create_all, the "Uncategorised" seed
+                     and the BEFORE DELETE refile trigger
   model/model.py     Crop, MainCategory, SubCategory, Item — the contract everything matches
   schema/            Pydantic request/response shapes
   crud/              data access — queries and commits (routers do 404 pre-checks)
