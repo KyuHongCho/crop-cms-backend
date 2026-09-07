@@ -30,5 +30,5 @@ class CropResponse(BaseModel):
     slug: str
     common_name: str
     scientific_name: str
-    # model.py:20 has no nullable=False, so this one really can be absent.
+    # Crop.ecocrop_id has no nullable=False, so this one really can be absent.
     ecocrop_id: int | None = None

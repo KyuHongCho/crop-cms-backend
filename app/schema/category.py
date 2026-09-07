@@ -18,8 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class MainCategoryCreate(BaseModel):
     """Kind of knowledge: crop profile, research literature, cultivation
-    practice, pests and disorders (model.py:26-28). A crop is NOT one -- it is
-    an entity, so adding a crop does not duplicate this tree."""
+    practice, pests and disorders (MainCategory's docstring in model.py). A
+    crop is NOT one -- it is an entity, so adding a crop does not duplicate
+    this tree."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -31,11 +32,12 @@ class MainCategoryCreate(BaseModel):
         }
     )
 
-    # NOT NULL with no server default (model.py:33). Omit it and the failure is
-    # a NotNullViolation at commit(), not a validation error at the boundary.
+    # NOT NULL with no server default (MainCategory.slug). Omit it and the
+    # failure is a NotNullViolation at commit(), not a validation error at the
+    # boundary.
     slug: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
-    position: int = 0  # mirrors server_default=text("0"), model.py:35
+    position: int = 0  # mirrors MainCategory.position server_default=text("0")
 
 
 class SubCategoryCreate(BaseModel):
@@ -52,7 +54,7 @@ class SubCategoryCreate(BaseModel):
 
     main_category_id: int
     # Unique per parent, not globally: UniqueConstraint(main_category_id, slug)
-    # at model.py:45.
+    # on SubCategory.__table_args__.
     slug: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     position: int = 0

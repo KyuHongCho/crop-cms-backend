@@ -117,8 +117,8 @@ actually guarantees it.
 foreign key is `ON DELETE RESTRICT`, and a `BEFORE DELETE` trigger on `sub_categories`
 refiles the documents to an **"Uncategorised"** bucket (seeded at id 1) before the delete
 lands. Deleting the bucket itself is refused — including when it is empty, which Postgres
-alone would allow, after which every later category delete would fail with an error naming
-`items`, a table the caller never touched.
+alone would allow, after which deleting any sub-category that still held documents would
+fail with an error naming `items`, a table the caller never touched.
 
 It is in the database rather than in the router because `psql` and bulk SQL route around
 Python entirely. The cost is discoverability, and it is real: `model.py` reads `RESTRICT`,

@@ -106,8 +106,9 @@ class Item(Base):
 
     id = Column(Integer, primary_key=True)
     # RESTRICT, and deliberately no default. This line alone reads as "deleting
-    # a sub-category is refused" -- it is not; the trigger in migrate_db.py
-    # refiles the documents first, and RESTRICT only catches what it missed.
+    # a sub-category is refused" -- it is not; the BEFORE DELETE trigger
+    # refile_items_before_sub_category_delete (app/db/migrate_db.py) refiles the
+    # documents first, and RESTRICT only catches what it missed.
     # ON DELETE SET DEFAULT would refile without a trigger, but it needs a
     # column default, and defaults apply on INSERT too: a new document missing
     # sub_category_id would be filed under the bucket instead of rejected.

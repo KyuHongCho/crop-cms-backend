@@ -11,7 +11,8 @@ router = APIRouter()
 
 
 # "main category" = kind of knowledge (crop profile, research literature,
-# cultivation practice, pests and disorders). A crop is NOT one -- model.py:27.
+# cultivation practice, pests and disorders). A crop is NOT one -- see
+# MainCategory's docstring in model.py.
 @router.get(
     "/main-categories",
     response_model=list[category_schema.MainCategoryResponse],

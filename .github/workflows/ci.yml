@@ -203,9 +203,10 @@ jobs:
 
       - name: The Uncategorised bucket cannot be deleted, full or EMPTY
         # Empty is the case that matters. Postgres alone protects the bucket only
-        # while it holds a row; delete it empty and every later sub-category
-        # delete fails with an error naming `items`, a table the caller never
-        # touched. The trigger closes that, and closes it for raw SQL too.
+        # while it holds a row; delete it empty and deleting a later sub-category
+        # that still holds documents fails with an error naming `items`, a table
+        # the caller never touched. The trigger closes that, and closes it for
+        # raw SQL too.
         run: |
           refused() {
             if docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 \

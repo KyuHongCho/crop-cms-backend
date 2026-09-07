@@ -10,7 +10,7 @@ async def get_items(db: AsyncSession) -> list[model.Item]:
     """Every document, unfiltered.
 
     Deliberately not published-only: Item.published defaults to false
-    server-side (model.py:95), so a published-only filter would make every
+    server-side (see model.py), so a published-only filter would make every
     freshly created document invisible to the CMS that just created it. When the
     advisor needs published-only retrieval it gets a separate endpoint -- crop
     plus topic, the whole topic set, never truncated -- not a flag on this one.
