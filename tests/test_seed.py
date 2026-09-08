@@ -14,6 +14,7 @@ need no such thing. test_bare_advisor_import_would_fail_collection proves
 that failure mode directly, and that the guard avoids it.
 """
 import os
+import pathlib
 import subprocess
 import sys
 
@@ -154,7 +155,7 @@ def test_bare_advisor_import_would_fail_collection():
         env=env,
         capture_output=True,
         text=True,
-        cwd="/src",
+        cwd=str(pathlib.Path(__file__).resolve().parent.parent),
     )
     # 5 == "no tests collected": pytest's own code for a clean module-level
     # skip (importorskip fires during collection). That is the guard working
