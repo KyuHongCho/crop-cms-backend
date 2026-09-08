@@ -34,7 +34,7 @@ claims = pytest.importorskip(
         "mount at that path is empty) -- see docker-compose.yaml"
     ),
 )
-from crop_advisor.ecocrop import load_crop  # noqa: E402
+load_crop = pytest.importorskip("crop_advisor.ecocrop").load_crop
 
 
 def _items_by_topic(db_session, topic: str) -> list[Item]:
