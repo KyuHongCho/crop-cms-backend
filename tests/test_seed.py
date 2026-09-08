@@ -66,6 +66,26 @@ def test_seed_is_idempotent(sync_db_session):
     assert first == second, "re-running the seed script changed or duplicated rows"
 
 
+def test_seed_repairs_a_row_edited_outside_the_script(sync_db_session):
+    """Re-running must bring an edited row back in line, not merely avoid
+    duplicating it. test_seed_is_idempotent cannot see this: both of its runs
+    write identical content, so an update branch that silently did nothing
+    would look exactly like one that works.
+    """
+    seed.main()
+    doc = sync_db_session.execute(select(Item)).scalars().first()
+    doc_id, original_body = doc.id, doc.body
+
+    doc.body = "DRIFTED -- edited outside the seed script"
+    sync_db_session.commit()
+
+    seed.main()
+    sync_db_session.expire_all()
+    assert sync_db_session.get(Item, doc_id).body == original_body, (
+        "re-running the seed did not restore a row that had drifted"
+    )
+
+
 def test_three_temperature_documents_share_one_topic(sync_db_session):
     seed.main()
     docs = _items_by_topic(sync_db_session, "optimal-temperature")

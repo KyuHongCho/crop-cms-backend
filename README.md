@@ -106,6 +106,19 @@ docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms \
   python -m pytest -q
 ```
 
+### The seed corpus tests need the sibling repo checked out
+
+`tests/test_seed.py` checks that `scripts/seed.py`'s pinned source strings still match what
+[crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) actually publishes,
+so it imports that project live. `docker-compose.yaml` mounts it read-only at `/advisor`,
+defaulting to `../crop-climate-advisor` — check the sibling out next to this repo and it works
+with no extra setup. Set `ADVISOR_HOST_PATH` if it lives somewhere else.
+
+Without it, every test in that file **skips rather than fails**, and `pytest -q` reports the
+whole file as a single `1 skipped` with no reason — add `-rs` to see it. CI has no such gap: a
+dedicated step imports `crop_advisor.claims` and fails the build if the sibling is missing, so
+a skip there can never pass for a green run.
+
 A guard test (`tests/test_categories.py::test_suite_talks_to_the_test_database_never_dev`)
 asserts `DB_HOST=db-test` / `DB_NAME=cms_test` before anything else runs, and
 `tests/conftest.py`'s per-test fixture checks it again immediately before it TRUNCATEs every
