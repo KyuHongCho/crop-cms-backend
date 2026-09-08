@@ -30,7 +30,7 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | Provenance invariant enforced in the database, not in Python — a claim read first-hand cannot also name the paper it was read through | **working** — CI asserts the `INSERT` is *rejected* |
 | ✅ | Deleting a category **refiles** its documents instead of destroying them — `ON DELETE RESTRICT` + a `BEFORE DELETE` trigger + `passive_deletes="all"` | **working** — CI asserts the documents survive, that the bucket cannot be deleted even when empty, and that a crop still holding documents cannot be deleted |
 | ✅ | Pydantic schemas + CRUD layer + DB-backed endpoints | **working** — `GET`/`POST` for categories and items, `DELETE` for categories, `GET` for crops |
-| ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 15 checks |
+| ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 16 checks |
 | ✅ | Automated tests, `pytest` + `httpx2`, run against an isolated `db-test`/`cms_test` server | **working** — see Testing below |
 | ⏳ | `PATCH` everywhere, and `DELETE /items/{id}` | not built — `PATCH` today would blank every field the caller omitted |
 | ✅ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on a pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | **working** — `.github/workflows/agentic-review.yml`; runs on `opened`/`reopened`/`ready_for_review`, or on a `/agentic-review` comment. Advisory: it gates nothing |

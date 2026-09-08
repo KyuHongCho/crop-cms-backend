@@ -118,6 +118,11 @@ def test_bucket_survives_truncate_and_reseed(client):
 
     truncate_and_reseed()
 
+    main_response = client.get("/main-categories")
+    assert main_response.status_code == 200
+    main_slugs = {main_category["slug"] for main_category in main_response.json()}
+    assert main_slugs == {"uncategorised"}
+
     response = client.get("/sub-categories")
     assert response.status_code == 200
     slugs = {sub_category["slug"] for sub_category in response.json()}
