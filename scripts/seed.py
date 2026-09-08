@@ -14,9 +14,15 @@ diverged, at seed time -- not this script. (`reference`/`condition`/`via`/
 `url` are mostly, not always, exact copies -- see that test file's own notes;
 they are not drift-tested.)
 
-Idempotent: re-running updates existing rows to match this file rather than
-duplicating them, keyed on (crop, title) for documents and on slug for the
-category scaffold and the crop itself.
+Idempotent for unchanged content: re-running updates the rows this script
+wrote rather than duplicating them, keyed on (crop, title, source) for
+documents and on slug for the category scaffold and the crop itself.
+
+`source` is in the key so the script cannot adopt somebody else's document
+that happens to share a title -- but that makes the key wider, and there is
+no delete path here. Editing a `title` or `source` therefore inserts a new
+row and leaves the old one behind. After such an edit, remove the superseded
+row by hand or re-seed a fresh database; a re-run will not tidy up.
 """
 from sqlalchemy.orm import Session
 
