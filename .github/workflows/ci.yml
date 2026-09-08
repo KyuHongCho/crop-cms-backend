@@ -34,7 +34,7 @@ jobs:
       # same relative path (../crop-climate-advisor from crop-cms-backend/)
       # that docker-compose.yaml's ADVISOR_HOST_PATH default already expects
       # for local dev, means no env var override is needed here -- the one
-      # default serves both. NOT yet verified end-to-end in a real Actions run.
+      # default serves both.
       - uses: actions/checkout@v7
         with:
           repository: KyuHongCho/crop-climate-advisor
