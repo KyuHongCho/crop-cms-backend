@@ -5,10 +5,10 @@ autouse _clean_database fixture TRUNCATEs first). scripts/seed.py itself
 never imports crop_advisor: its three `optimal-temperature` documents are
 pinned to literal source strings copied from crop_advisor/claims.py. The
 drift test below is what notices the two have diverged -- it needs a *live*
-import of the sibling repo, which is not always available (a developer who
-has not checked out crop-climate-advisor, or a CI runner before the sibling
-checkout lands). That import is guarded with pytest.importorskip rather than
-a bare `import`, because a bare import that fails is a collection error --
+import of the sibling repo, which is not always available: a developer who
+has not checked out crop-climate-advisor. (CI always has it -- both checkouts
+run before every other step.) That import is guarded with pytest.importorskip
+rather than a bare `import`, because a bare import that fails is a collection error --
 pytest exits 2 and reddens the *whole* file, including the tests below that
 need no such thing. test_bare_advisor_import_would_fail_collection proves
 that failure mode directly, and that the guard avoids it.

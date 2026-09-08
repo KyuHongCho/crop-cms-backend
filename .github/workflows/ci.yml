@@ -64,16 +64,21 @@ jobs:
         # over the published port proves the app works.
         run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
 
-      - name: The advisor sibling is really importable (the drift test must not silently skip)
-        # tests/test_seed.py guards its live import with pytest.importorskip so a
-        # missing sibling degrades to a clean skip -- correct for local dev, wrong
-        # here, where the checkout above means "absent" is always a bug, not a
-        # choice. importorskip would hide that bug behind a green "passed" suite;
-        # this step turns it back into a red one.
+      - name: The seed tests really collect (they must not silently skip)
+        # tests/test_seed.py guards its advisor imports with pytest.importorskip
+        # so a missing sibling degrades to a clean skip -- correct for local dev,
+        # wrong here, where the checkouts above mean "absent" is always a bug.
+        # pytest has no built-in "fail on skip" (its strict= applies to xfail
+        # only) and an all-skip run exits 0, so the suite step below cannot
+        # catch it.
+        #
+        # Asserting collection rather than importing named modules: any
+        # importorskip firing collapses the file to "no tests collected"
+        # (exit 5), so this covers every guarded module, including ones added
+        # later. Naming them one by one is what let crop_advisor.ecocrop slip
+        # through. -rs prints which guard fired and why. Needs no database.
         run: |
-          docker compose exec -T cms python -c \
-            "import sys, os; sys.path.insert(0, os.environ['ADVISOR_PATH']); \
-             import crop_advisor.claims; print('advisor importable')"
+          docker compose exec -T cms python -m pytest tests/test_seed.py --collect-only -q -rs
 
       - name: Test suite runs against db-test/cms_test, never the dev database
         # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py already
