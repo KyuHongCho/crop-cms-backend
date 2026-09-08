@@ -97,9 +97,11 @@ def test_unpublished_draft_fixture_present(sync_db_session):
 def test_one_document_source_not_in_the_registry(sync_db_session):
     seed.main()
     registry_sources = {c.source for c in claims.temperature_claims(load_crop("basil"))}
+    assert seed.OFF_REGISTRY_SOURCE not in registry_sources
+
     items = list(sync_db_session.execute(select(Item)).scalars())
-    off_registry = [i for i in items if i.source not in registry_sources]
-    assert len(off_registry) >= 1, "expected at least one document whose source is not in the registry"
+    off_registry = [i for i in items if i.source == seed.OFF_REGISTRY_SOURCE]
+    assert len(off_registry) == 1, f"expected exactly one off-registry document, got {len(off_registry)}"
 
 
 def test_bare_advisor_import_would_fail_collection():
