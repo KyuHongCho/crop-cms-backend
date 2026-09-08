@@ -64,6 +64,17 @@ jobs:
         # over the published port proves the app works.
         run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
 
+      - name: The advisor sibling is really importable (the drift test must not silently skip)
+        # tests/test_seed.py guards its live import with pytest.importorskip so a
+        # missing sibling degrades to a clean skip -- correct for local dev, wrong
+        # here, where the checkout above means "absent" is always a bug, not a
+        # choice. importorskip would hide that bug behind a green "passed" suite;
+        # this step turns it back into a red one.
+        run: |
+          docker compose exec -T cms python -c \
+            "import sys, os; sys.path.insert(0, os.environ['ADVISOR_PATH']); \
+             import crop_advisor.claims; print('advisor importable')"
+
       - name: Test suite runs against db-test/cms_test, never the dev database
         # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py already
         # reads both from the environment (no application code change needed).
