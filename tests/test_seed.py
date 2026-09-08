@@ -58,6 +58,9 @@ def test_seed_is_idempotent(sync_db_session):
     first = sorted((i.title, i.topic, i.source) for i in sync_db_session.execute(select(Item)).scalars())
 
     seed.main()
+    # seed.main() writes through its own session, so force this one to re-read
+    # from the database rather than trust what it already holds in memory.
+    sync_db_session.expire_all()
     second = sorted((i.title, i.topic, i.source) for i in sync_db_session.execute(select(Item)).scalars())
 
     assert first == second, "re-running the seed script changed or duplicated rows"
