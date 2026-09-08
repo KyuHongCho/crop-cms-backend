@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.crud.category as category_crud
@@ -8,6 +8,43 @@ import app.schema.category as category_schema
 from app.db.db import get_db
 
 router = APIRouter()
+
+
+async def _raise_from_integrity_error(db: AsyncSession, exc: IntegrityError) -> None:
+    """Discriminate the SQLSTATE. Never returns normally -- always raises.
+
+    23505 (unique_violation) -> 409, naming the constraint that actually
+    fired via exc.orig.diag.constraint_name. A blanket `IntegrityError -> 409`
+    would report a desynced sequence's pkey collision (constraint
+    "main_categories_pkey") as "a category with that slug already exists"
+    (constraint "main_categories_slug_key") -- see plan-2's "Preconditions on
+    the sibling plan" #1. Naming the real constraint is what tells the two
+    apart.
+
+    23514 (check_violation) -> 422, kept as a documented drift backstop, like
+    the P0001 handler in delete_sub_category below. Neither category table
+    carries a CHECK constraint today, so this branch is not reachable through
+    this router -- it exists for the day one is added here, the way
+    schema/item.py:ItemCreate's own validator already returns 422 for
+    Item.read_directly_excludes_via before the database is ever asked.
+
+    Anything else is re-raised untouched: a real bug (a typo'd column, a
+    missing table) must stay a 500, not be dressed up as a conflict.
+    """
+    await db.rollback()
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "23505":
+        constraint_name = getattr(exc.orig.diag, "constraint_name", None)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"a unique constraint was violated: {constraint_name}",
+                "constraint_name": constraint_name,
+            },
+        ) from exc
+    if sqlstate == "23514":
+        raise HTTPException(status_code=422, detail=exc.orig.diag.message_primary) from exc
+    raise exc
 
 
 # "main category" = kind of knowledge (crop profile, research literature,
@@ -30,7 +67,10 @@ async def create_main_category(
     body: category_schema.MainCategoryCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    return await category_crud.create_main_category(db, body)
+    try:
+        return await category_crud.create_main_category(db, body)
+    except IntegrityError as exc:
+        await _raise_from_integrity_error(db, exc)
 
 
 @router.get(
@@ -54,7 +94,10 @@ async def create_sub_category(
     # IntegrityError, which reaches the client as an opaque HTTP 500.
     if not await db.get(model.MainCategory, body.main_category_id):
         raise HTTPException(status_code=404, detail="Main category not found")
-    return await category_crud.create_sub_category(db, body)
+    try:
+        return await category_crud.create_sub_category(db, body)
+    except IntegrityError as exc:
+        await _raise_from_integrity_error(db, exc)
 
 
 @router.delete(

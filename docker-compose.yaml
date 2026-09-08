@@ -34,7 +34,47 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d cms"]
+      # -h is required, not decorative: the entrypoint's temporary init-time
+      # server is socket-only (listen_addresses=''), so a socket-based
+      # pg_isready reports "accepting connections" while initdb is still
+      # running underneath it -- `up -d --wait` can then return before the
+      # bootstrap finishes. Forcing TCP makes the check wait for the real
+      # server. Verified.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d cms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  # A second, ephemeral Postgres server for the test suite -- not a second
+  # database on `db`. profiles: [test] keeps it invisible to a plain
+  # `docker compose up` (verified: that starts 2 containers, not 3); it only
+  # starts with `--profile test`.
+  db-test:
+    image: pgvector/pgvector:pg17
+    profiles: ["test"]
+    # No restart policy, deliberately: a failed init must leave this
+    # container Exited(1) forever, so every subsequent `up --wait` returns
+    # non-zero rather than silently reusing a half-initialised server.
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # initdb/01-init.sh:9 targets --dbname "$POSTGRES_DB", so this
+      # bootstraps cms_test with the same extension, role and grants as `db`
+      # -- the script itself is unmodified.
+      POSTGRES_DB: cms_test
+      DB_USER: ${DB_USER:?set DB_USER in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    # tmpfs, load-bearing: verified that container-writable-layer storage AND
+    # an anonymous volume both survive a restart (initdb then skips
+    # re-running -- "Skipping initialization" appears) -- only tmpfs is gone
+    # after `restart`, `stop`+`start`, and `down`+`up` alike, so initdb always
+    # re-runs. size=1g caps it -- uncapped it defaults to ~50% of host RAM;
+    # 200k rows measured at 478M, so this has headroom for this slice.
+    tmpfs:
+      - /var/lib/postgresql/data:size=1g
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d cms_test"]
       interval: 5s
       timeout: 3s
       retries: 10
