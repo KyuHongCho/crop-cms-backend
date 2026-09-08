@@ -284,13 +284,19 @@ def main() -> None:
             for doc in docs:
                 fields = {**_DOC_DEFAULTS, "topic": topic, **doc}
                 title = fields.pop("title")
+                source = fields.pop("source")
                 fields["sub_category_id"] = sub_category.id
+                # `source` is part of the key, not just a field to overwrite:
+                # nothing makes (crop, title) unique, so without it this script
+                # would treat somebody else's document with the same title as
+                # its own and overwrite it.
                 _get_or_create(
                     session,
                     Item,
                     fields,
                     crop_id=crop.id,
                     title=title,
+                    source=source,
                 )
 
         session.commit()
