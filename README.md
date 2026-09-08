@@ -114,7 +114,7 @@ touching the dev database. That fixture also reseeds the "Uncategorised" bucket 
 TRUNCATE (`RESTART IDENTITY CASCADE` would otherwise remove it, breaking every test after the
 first one that touches it).
 
-Dev tooling: `pytest>=9`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
+Dev tooling: `pytest==9.1.1`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
 `TestClient` raises `RuntimeError` naming `httpx2` rather than merely warning), both in
 `requirements-dev.txt` and installed into the same image as `requirements.txt`.
 
