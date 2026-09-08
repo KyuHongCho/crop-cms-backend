@@ -5,5 +5,5 @@
 # httpx2, not httpx: starlette==1.6.0's TestClient raises
 # "RuntimeError: The starlette.testclient module requires the httpx2 package
 # to be installed" -- it does not merely warn.
-pytest>=9
+pytest==9.1.1
 httpx2==2.12.0
