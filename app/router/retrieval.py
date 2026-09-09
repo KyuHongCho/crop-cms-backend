@@ -41,7 +41,7 @@ async def get_topic_set(
 
     documents = await retrieval_crud.get_topic_set(db, crop_id, topic)
 
-    # A single candidate today -- there is no topic *selection* until Slice 6
+    # A single candidate today -- there is no topic *selection* yet
     # (Rules 1/2). Routed through the same Rule 3 policy multi-topic selection
     # will use, so the refusal path is real, tested code, not a stub.
     candidate = TopicCandidate(topic=topic, score=0.0, documents=documents)

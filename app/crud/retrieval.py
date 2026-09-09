@@ -5,12 +5,12 @@ never picks a winner among documents disagreeing about the same topic: a
 selected topic returns **complete**, never a top-k slice.
 
 Three rules, decided here (N3 in plan-1). Only rule 3's machinery is built and
-tested in this slice; rules 1 and 2 have no chunk/embedding table to operate
-on until Slice 5, so they are recorded as named, tested constants/contracts
-here and wired to real scoring in Slice 6.
+tested now; rules 1 and 2 have no chunk/embedding table to operate on until
+that infrastructure exists, so they are recorded as named, tested
+constants/contracts here and wired to real scoring once it does.
 
-    Rule 1 -- topic score = MAX chunk similarity.  Decided here, built Slice 6.
-    Rule 2 -- k = 3 topics.                        Decided here, built Slice 6.
+    Rule 1 -- topic score = MAX chunk similarity.  Decided here, built later.
+    Rule 2 -- k = 3 topics.                        Decided here, built later.
     Rule 3 -- budget policy (below).               Decided AND built here.
 """
 import os
@@ -23,17 +23,17 @@ from app.model.model import Crop, Item
 
 # --- Rule 2: k = 3 topics -----------------------------------------------------
 #
-# Decided in this slice, per plan-1:137/142. Not exercised until Slice 6 builds
-# topic selection -- there is no scoring machinery here to select *from* -- but
-# named and asserted now so the number is not invented later.
-# Configurable via env var so a later slice can tune it without a code change.
+# Decided here, per plan-1:137/142. Not exercised until topic selection is
+# built -- there is no scoring machinery here to select *from* -- but named
+# and asserted now so the number is not invented later.
+# Configurable via env var so a future change can tune it without a code edit.
 TOPIC_SELECTION_K = int(os.environ.get("TOPIC_SELECTION_K", "3"))
 
 # --- Rule 3: budget policy, measured in characters ----------------------------
 #
 # A character count with a documented characters-per-token ratio, not a
 # tokeniser -- plan-1:171-180 defers the provider decision to immediately
-# after this slice, so no tokeniser is importable yet, and a tokeniser would
+# after this point, so no tokeniser is importable yet, and a tokeniser would
 # be provider-specific regardless. 4 characters per token is the commonly
 # cited rule of thumb for English prose (matches OpenAI's own documented
 # approximation). Erring approximate is fine here because it errs toward
@@ -86,9 +86,10 @@ def document_context_chars(documents: list[Item]) -> int:
 
     Title + body only. Provenance is currently assumed to never be inserted
     into the LLM prompt itself (it would be attached as structured citation
-    metadata instead) -- but that is a Slice 8 design decision not yet made,
-    not a settled fact. If Slice 8 ends up injecting provenance text into the
-    prompt, this undercounts the real context by roughly 1.4x-2x (measured
+    metadata instead) -- but that is a design decision the chat feature
+    hasn't made yet, not a settled fact. If it ends up injecting provenance
+    text into the prompt, this undercounts the real context by roughly 1.4x-2x
+    (measured
     across the current seed corpus) and must be revisited then.
     """
     return sum(len(document.title) + len(document.body) for document in documents)
@@ -100,8 +101,8 @@ class TopicCandidate:
 
     The score is opaque to this module -- it is only ever compared and
     ordered, never computed here. That is what lets Rule 3 be built and
-    tested in this slice with constructed scores, and reused unchanged once
-    Slice 6 supplies real MAX chunk-similarity scores (Rule 1).
+    tested now with constructed scores, and reused unchanged once real MAX
+    chunk-similarity scores (Rule 1) exist.
     """
 
     topic: str

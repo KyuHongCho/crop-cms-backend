@@ -102,10 +102,11 @@ class Item(Base):
             "NOT (read_directly AND coalesce(btrim(via), '') <> '')",
             name="read_directly_excludes_via",
         ),
-        # `items_pkey` was the only index before this slice (verified via
-        # `\d items`). Retrieval's whole-topic-set query filters on exactly
-        # this pair -- app/crud/retrieval.py:topic_set_statement -- so without
-        # it every retrieval request is a sequential scan of `items`.
+        # `items_pkey` was the only index before `ix_items_crop_id_topic`
+        # below was added (verified via `\d items`). Retrieval's
+        # whole-topic-set query filters on exactly this pair --
+        # app/crud/retrieval.py:topic_set_statement -- so without it every
+        # retrieval request is a sequential scan of `items`.
         Index("ix_items_crop_id_topic", "crop_id", "topic"),
     )
 

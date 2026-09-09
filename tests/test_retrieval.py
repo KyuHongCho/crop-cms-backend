@@ -115,11 +115,11 @@ def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
 
 
 def test_a_normal_response_always_carries_a_dropped_field(client):
-    """`dropped` is on every successful response, not added only once Slice 6
-    supplies real multi-topic selection to populate it -- see
+    """`dropped` is on every successful response, not added only once real
+    multi-topic selection exists to populate it -- see
     app/schema/retrieval.py's TopicSetResponse and app/router/retrieval.py.
     Today there is only ever one candidate, so it is always empty, but the
-    field itself is present now so the later slice is not a response-shape
+    field itself is present now so that later work is not a response-shape
     change.
     """
     crop_id = _make_crop("basil")
@@ -213,8 +213,9 @@ def test_the_sql_actually_executed_contains_no_limit(client, caplog):
 
 
 def test_the_api_surface_carries_no_limit_parameter(client):
-    """No `limit` parameter, per the slice goal. A caller must not be able to
-    ask for a truncated topic set at all -- not even by opting in."""
+    """No `limit` parameter, per this endpoint's design goal. A caller must
+    not be able to ask for a truncated topic set at all -- not even by
+    opting in."""
     schema = client.get("/openapi.json").json()
     path = schema["paths"]["/retrieval/{crop_slug}/{topic}"]["get"]
     names = [parameter["name"] for parameter in path.get("parameters", [])]
@@ -254,16 +255,17 @@ def test_a_topic_with_no_published_documents_returns_an_empty_set_not_404(client
 # --- Rules 1-3 -- N3: decided here, only rule 3 built and tested here --------
 #
 # Rules 1 (MAX chunk similarity) and 2 (k topics) have no chunk/embedding table
-# to operate on until Slice 5, so they are not exercised through the HTTP
-# retrieval endpoint here -- there is no topic *selection* yet, only a direct
-# crop+topic lookup. What plan-1:130-142 requires of THIS slice is that they
-# are decided and named; rule 3 (below) is additionally built and tested here,
-# against constructed TopicCandidates, so Slice 6 can call it unchanged once
-# real MAX-similarity scores exist.
+# to operate on yet, so they are not exercised through the HTTP retrieval
+# endpoint here -- there is no topic *selection* yet, only a direct crop+topic
+# lookup. What plan-1:130-142 requires here is that they are decided and
+# named; rule 3 (below) is additionally built and tested here, against
+# constructed TopicCandidates, so real topic selection can call it unchanged
+# once real MAX-similarity scores exist.
 
 
 def test_k_defaults_to_3():
-    """Rule 2: k = 3 topics, decided in this slice (implemented in Slice 6).
+    """Rule 2: k = 3 topics, decided here (implemented once topic selection
+    exists).
 
     Not exercised through the HTTP surface -- there is no topic *selection*
     to apply it to yet -- so this asserts the named constant directly.
@@ -492,7 +494,7 @@ def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
 
 # --- topic casing/whitespace normalization ------------------------------------
 #
-# Nothing normalized Item.topic anywhere before this slice's fix: neither
+# Nothing normalized Item.topic anywhere before this fix: neither
 # scripts/seed.py's `_get_or_create` (Item(**lookup, **defaults) + session.add())
 # nor app/crud/item.py's create_item (model.Item(**body.model_dump())) passes
 # through Pydantic -- both are real ORM constructions -- so a Pydantic

@@ -170,8 +170,8 @@ coming.
 
 **The deliberate departure from the RAG course this project is built alongside.** The course
 teaches `similarity_search(query, k=N)` — a top-k slice of *documents*. This system does not do
-that. Once topic *selection* lands (a later slice, needing chunk embeddings this repository does
-not have yet), `k` will select **topics**, by the topic's single best-matching passage (MAX, not
+that. Once topic *selection* lands (needing chunk embeddings this repository does not have yet),
+`k` will select **topics**, by the topic's single best-matching passage (MAX, not
 mean — a mean would perversely penalise topics that hold more disagreeing sources, exactly the
 ones this design exists to surface). Every topic that selection picks still returns **complete**;
 `k` never truncates a topic's own document set.
@@ -199,10 +199,10 @@ Today there is only ever one topic in play — `crop_slug` + `topic` name it dir
 no topic *selection* yet — so in practice a successful response's `dropped` field is always `[]`:
 with a single candidate, clause 1 never has anything else to drop it against, and only the
 single-topic refusal (clause 2) is reachable through this HTTP endpoint. The response shape
-already carries `dropped` on every successful call, though — not added later — so the later slice
-that adds real multi-topic selection populates it without a response-shape change. The
+already carries `dropped` on every successful call, though — not added later — so real
+multi-topic selection, once it lands, populates it without a response-shape change. The
 drop-whole-topics machinery (clause 1) itself is built and tested against constructed topic
-candidates in `tests/test_retrieval.py`, ready for that slice to call unchanged.
+candidates in `tests/test_retrieval.py`, ready to call unchanged once that lands.
 
 ## Architecture & design decisions
 
