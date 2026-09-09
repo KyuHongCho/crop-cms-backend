@@ -30,7 +30,7 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | Provenance invariant enforced in the database, not in Python — a claim read first-hand cannot also name the paper it was read through | **working** — CI asserts the `INSERT` is *rejected* |
 | ✅ | Deleting a category **refiles** its documents instead of destroying them — `ON DELETE RESTRICT` + a `BEFORE DELETE` trigger + `passive_deletes="all"` | **working** — CI asserts the documents survive, that the bucket cannot be deleted even when empty, and that a crop still holding documents cannot be deleted |
 | ✅ | Pydantic schemas + CRUD layer + DB-backed endpoints | **working** — `GET`/`POST` for categories and items, `DELETE` for categories, `GET` for crops |
-| ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 16 checks |
+| ✅ | CI — builds the stack and asserts the schema invariants on every push and PR | **working** — 17 named steps |
 | ✅ | Automated tests, `pytest` + `httpx2`, run against an isolated `db-test`/`cms_test` server | **working** — see Testing below |
 | ⏳ | `PATCH` everywhere, and `DELETE /items/{id}` | not built — `PATCH` today would blank every field the caller omitted |
 | ✅ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on a pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | **working** — `.github/workflows/agentic-review.yml`; runs on `opened`/`reopened`/`ready_for_review`, or on a `/agentic-review` comment. Advisory: it gates nothing |
@@ -67,7 +67,11 @@ docker compose up -d --build
 #    trigger (drops and recreates everything — see the warning below)
 docker compose exec cms python -m app.db.migrate_db
 
-# 4. The API
+# 4. Optional: load the basil demo corpus — 13 documents across 5 topics.
+#    Idempotent: re-running it changes nothing (tests/test_seed.py asserts that).
+docker compose exec cms python -m scripts.seed
+
+# 5. The API
 curl localhost:8000/            # {"Hello":"World"}
 open  localhost:8000/docs       # interactive OpenAPI
 ```
@@ -106,6 +110,21 @@ docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms \
   python -m pytest -q
 ```
 
+### The seed corpus tests need the sibling repo checked out
+
+`tests/test_seed.py` checks that `scripts/seed.py`'s pinned source strings still match what
+[crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) actually publishes,
+so it imports that project live. `docker-compose.yaml` mounts it read-only at `/advisor`,
+defaulting to `../crop-climate-advisor` — check the sibling out next to this repo and it works
+with no extra setup. Set `ADVISOR_HOST_PATH` if it lives somewhere else.
+
+Without it, every test in that file **skips rather than fails**, and `pytest -q` reports the
+whole file as a single `1 skipped` with no reason — add `-rs` to see it. CI has no such gap: a
+dedicated step runs `pytest tests/test_seed.py --collect-only -q -rs` and fails the build if
+nothing collects, so a skip there can never pass for a green run. It names no module on
+purpose — any guarded import that fires collapses the file to "no tests collected" (exit 5),
+which covers guards added later too.
+
 A guard test (`tests/test_categories.py::test_suite_talks_to_the_test_database_never_dev`)
 asserts `DB_HOST=db-test` / `DB_NAME=cms_test` before anything else runs, and
 `tests/conftest.py`'s per-test fixture checks it again immediately before it TRUNCATEs every
@@ -114,7 +133,7 @@ touching the dev database. That fixture also reseeds the "Uncategorised" bucket 
 TRUNCATE (`RESTART IDENTITY CASCADE` would otherwise remove it, breaking every test after the
 first one that touches it).
 
-Dev tooling: `pytest>=9`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
+Dev tooling: `pytest==9.1.1`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
 `TestClient` raises `RuntimeError` naming `httpx2` rather than merely warning), both in
 `requirements-dev.txt` and installed into the same image as `requirements.txt`.
 
@@ -249,6 +268,7 @@ app/
   schema/            Pydantic request/response shapes
   crud/              data access — queries and commits (routers do 404 pre-checks)
   router/            HTTP surface
+scripts/seed.py      the basil demo corpus — idempotent, keyed on (crop, title, source)
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI
 ```

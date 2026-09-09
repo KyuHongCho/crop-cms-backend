@@ -12,6 +12,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.db.migrate_db import SEED_BUCKET_SQL
 from app.db.migrate_db import engine as sync_engine
@@ -66,3 +67,12 @@ def client():
     # surfaces as an HTTP 500 response, the way a real client sees it,
     # instead of bubbling up as a Python exception inside the test.
     return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture
+def sync_db_session():
+    """A plain synchronous ORM session against db-test/cms_test, for tests
+    that read back what a sync-engine script (e.g. scripts/seed.py) wrote --
+    same sync_engine migrate_db.py and _clean_database above already use."""
+    with Session(sync_engine) as session:
+        yield session

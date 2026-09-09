@@ -4,6 +4,15 @@ services:
     volumes:
       - ./dockerenv:/src/.venv
       - .:/src
+      # The sibling repo, read-only. Defaults to a true sibling directory
+      # under the shared parent (local dev). ci.yml checks the sibling out
+      # onto the runner at that same relative path, so this default resolves
+      # there too with no env var override -- ADVISOR_HOST_PATH exists for
+      # any other layout (e.g. a checkout script that lands it elsewhere).
+      # A bind mount to a path that does not exist silently creates an empty
+      # directory (verified), which is exactly why tests/test_seed.py's
+      # drift test uses pytest.importorskip rather than a bare import.
+      - ${ADVISOR_HOST_PATH:-../crop-climate-advisor}:/advisor:ro
     ports:
       - "8000:8000"
     environment:
@@ -13,6 +22,7 @@ services:
       DB_PORT: 5432
       DB_NAME: cms
       PYTHONPATH: /src
+      ADVISOR_PATH: /advisor
     depends_on:
       db:
         condition: service_healthy

@@ -18,8 +18,27 @@ env:
 jobs:
   stack:
     runs-on: ubuntu-latest
+    # Every step below assumes cwd = the repo root; this is that root now
+    # that a second repo is also checked out onto the runner (see the two
+    # checkouts immediately below).
+    defaults:
+      run:
+        working-directory: crop-cms-backend
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: crop-cms-backend
+
+      # tests/test_seed.py's drift test needs a live import of
+      # crop_advisor.claims. Checking the sibling out side-by-side, at the
+      # same relative path (../crop-climate-advisor from crop-cms-backend/)
+      # that docker-compose.yaml's ADVISOR_HOST_PATH default already expects
+      # for local dev, means no env var override is needed here -- the one
+      # default serves both.
+      - uses: actions/checkout@v7
+        with:
+          repository: KyuHongCho/crop-climate-advisor
+          path: crop-climate-advisor
 
       - name: Compose file parses
         # A key with no value -- `build:` with nothing after it -- makes the WHOLE
@@ -44,6 +63,22 @@ jobs:
         # reports healthy, which also shipped here once. Only a real response
         # over the published port proves the app works.
         run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
+
+      - name: The seed tests really collect (they must not silently skip)
+        # tests/test_seed.py guards its advisor imports with pytest.importorskip
+        # so a missing sibling degrades to a clean skip -- correct for local dev,
+        # wrong here, where the checkouts above mean "absent" is always a bug.
+        # pytest has no built-in "fail on skip" (its strict= applies to xfail
+        # only) and an all-skip run exits 0, so the suite step below cannot
+        # catch it.
+        #
+        # Asserting collection rather than importing named modules: any
+        # importorskip firing collapses the file to "no tests collected"
+        # (exit 5), so this covers every guarded module, including ones added
+        # later. Naming them one by one is what let crop_advisor.ecocrop slip
+        # through. -rs prints which guard fired and why. Needs no database.
+        run: |
+          docker compose exec -T cms python -m pytest tests/test_seed.py --collect-only -q -rs
 
       - name: Test suite runs against db-test/cms_test, never the dev database
         # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py already
