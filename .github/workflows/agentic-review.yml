@@ -243,6 +243,20 @@ jobs:
           # that showed both labels at once.
           gh pr edit "${{ needs.gate.outputs.pr }}" --remove-label "Review ongoing" || true
           gh pr edit "${{ needs.gate.outputs.pr }}" --add-label "Audit ongoing"     || true
+      # Inline findings are in no `gh pr view` field -- only `gh api .../pulls/N/comments`,
+      # which the agent cannot call (outside --allowedTools). Round 3's auditor tried, was
+      # refused, and audited 3 of 6 findings blind. Dumping here needs no new tool grant.
+      # CORE_DIR is already untracked, so the auditor's `git status --porcelain` is unchanged.
+      - name: Dump the review's inline findings for the auditor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/${{ needs.gate.outputs.pr }}/comments" \
+            --paginate \
+            --jq '.[] | select(.in_reply_to_id == null)
+                  | "### \(.path):\(.line // .original_line)  (r\(.id))\n\n\(.body)\n"' \
+            > "${{ env.CORE_DIR }}/review-inline-comments.md"
+          echo "inline findings dumped: $(grep -c '^### ' "${{ env.CORE_DIR }}/review-inline-comments.md")"
       - id: agent
         uses: anthropics/claude-code-action@v1
         with:
@@ -257,6 +271,12 @@ jobs:
               ${{ env.CORE_DIR }}/core/shared/verify.md              — how to ground each objection
               ${{ env.CORE_DIR }}/agentic-review-audit-guideline.md  — the order of work, and the exact shape of your comment
             REPO: ${{ github.repository }}   PR: ${{ needs.gate.outputs.pr }}
+
+            The review's INLINE findings are not in `gh pr view` output. Read them at:
+              ${{ env.CORE_DIR }}/review-inline-comments.md
+            That file is half the review; the summary comment is the other half. If it is
+            empty, mark those findings unverified — never assert the review missed something
+            you did not read.
 
             Read all three before you start. The guideline's comment structure is exact — follow it
             literally and post nothing outside it. In CI you hold read-only tools only.
