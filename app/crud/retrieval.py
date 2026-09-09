@@ -58,7 +58,14 @@ def topic_set_statement(crop_id: int, topic: str) -> Select:
         select(Item)
         .where(
             Item.crop_id == crop_id,
-            Item.topic == topic,
+            # Normalize the caller's input, not the indexed column -- wrapping
+            # Item.topic itself (e.g. func.lower(func.trim(Item.topic))) would
+            # defeat ix_items_crop_id_topic (verified via EXPLAIN: the topic
+            # half of the predicate falls back to a Filter/Recheck instead of
+            # an Index Cond). Item.topic itself is normalized on write by
+            # Item._normalize_topic (model.py), so the stored value is already
+            # comparable to this.
+            Item.topic == topic.strip().lower(),
             Item.published.is_(True),
         )
         .order_by(Item.id)
@@ -77,9 +84,12 @@ async def get_crop_id_by_slug(db: AsyncSession, crop_slug: str) -> int | None:
 def document_context_chars(documents: list[Item]) -> int:
     """Character count of one topic's assembled context.
 
-    Title + body only -- the two fields actually assembled into a prompt.
-    Provenance (source, reference, url, ...) is metadata reported alongside
-    the answer, not counted against the budget.
+    Title + body only. Provenance is currently assumed to never be inserted
+    into the LLM prompt itself (it would be attached as structured citation
+    metadata instead) -- but that is a Slice 8 design decision not yet made,
+    not a settled fact. If Slice 8 ends up injecting provenance text into the
+    prompt, this undercounts the real context by roughly 1.4x-2x (measured
+    across the current seed corpus) and must be revisited then.
     """
     return sum(len(document.title) + len(document.body) for document in documents)
 
@@ -131,30 +141,35 @@ def assemble_within_budget(
 ) -> tuple[list[TopicCandidate], list[TopicCandidate]]:
     """Rule 3: degrade by whole topics, refuse only as a last resort.
 
-    1. Any candidate whose OWN context alone exceeds the budget raises
-       TopicBudgetExceeded immediately -- naming it -- regardless of what else
-       is being assembled: dropping every other topic could not make that one
-       fit, so refusing is the only option left (clause 2).
-    2. Otherwise, topics are dropped whole, lowest-score-first, until the
-       assembled combination fits the budget (clause 1). Every dropped topic
-       is returned, named, never partially truncated.
+    1. Topics are dropped whole, lowest-score-first, until the assembled
+       combination fits the budget (clause 1). Every dropped topic is
+       returned, named, never partially truncated.
+    2. Only once dropping can go no further (a single candidate remains, or
+       dropping already emptied the set) is what is left checked against the
+       budget: if that survivor's OWN context alone still exceeds it,
+       TopicBudgetExceeded is raised naming it -- dropping every OTHER topic
+       already happened and did not help, so refusing is the only option
+       left. An oversized topic that clause 1 would have dropped anyway
+       (because it scored lowest) is never refused on its own -- only the
+       one still standing after dropping is ever blamed.
 
-    Returns (kept, dropped), both ordered highest-score-first.
+    Returns (kept, dropped) -- kept highest-score-first, dropped lowest-score-first
+    (the order they were discarded in).
     """
     ordered = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
-
-    for candidate in ordered:
-        if candidate.context_chars > budget:
-            raise TopicBudgetExceeded(
-                candidate.topic, candidate.document_count, candidate.context_chars, budget,
-            )
 
     kept = list(ordered)
     dropped: list[TopicCandidate] = []
     total = sum(candidate.context_chars for candidate in kept)
-    while total > budget and kept:
+    while total > budget and len(kept) > 1:
         loser = kept.pop()  # ordered highest-first -- the last entry scores lowest
         dropped.append(loser)
         total -= loser.context_chars
+
+    if kept and kept[-1].context_chars > budget:
+        offender = kept[-1]
+        raise TopicBudgetExceeded(
+            offender.topic, offender.document_count, offender.context_chars, budget,
+        )
 
     return kept, dropped

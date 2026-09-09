@@ -196,10 +196,13 @@ a whole question, visibly, rather than silently elevating one source over a riva
 question.
 
 Today there is only ever one topic in play — `crop_slug` + `topic` name it directly, and there is
-no topic *selection* yet — so in practice only the single-topic refusal (clause 2) is reachable
-through this HTTP endpoint. The drop-whole-topics machinery (clause 1) is built and tested against
-constructed topic candidates in `tests/test_retrieval.py`, ready for the later slice that adds real
-multi-topic selection to call unchanged.
+no topic *selection* yet — so in practice a successful response's `dropped` field is always `[]`:
+with a single candidate, clause 1 never has anything else to drop it against, and only the
+single-topic refusal (clause 2) is reachable through this HTTP endpoint. The response shape
+already carries `dropped` on every successful call, though — not added later — so the later slice
+that adds real multi-topic selection populates it without a response-shape change. The
+drop-whole-topics machinery (clause 1) itself is built and tested against constructed topic
+candidates in `tests/test_retrieval.py`, ready for that slice to call unchanged.
 
 ## Architecture & design decisions
 

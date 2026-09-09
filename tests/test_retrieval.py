@@ -114,6 +114,23 @@ def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
         assert document["url"]
 
 
+def test_a_normal_response_always_carries_a_dropped_field(client):
+    """`dropped` is on every successful response, not added only once Slice 6
+    supplies real multi-topic selection to populate it -- see
+    app/schema/retrieval.py's TopicSetResponse and app/router/retrieval.py.
+    Today there is only ever one candidate, so it is always empty, but the
+    field itself is present now so the later slice is not a response-shape
+    change.
+    """
+    crop_id = _make_crop("basil")
+    _make_items(crop_id, "optimal-temperature", 2)
+
+    response = client.get("/retrieval/basil/optimal-temperature")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["dropped"] == []
+
+
 def test_unpublished_documents_are_excluded(client):
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12)
@@ -277,6 +294,24 @@ def test_k_is_configurable_via_env_var():
     assert result.stdout.strip() == "5"
 
 
+def test_context_token_budget_is_configurable_via_env_var():
+    """Same subprocess-isolation reasoning as test_k_is_configurable_via_env_var
+    above -- an import-time guard must not run in-process. Also pins the
+    derived CONTEXT_CHAR_BUDGET (token budget * CHARS_PER_TOKEN), so a typo'd
+    env var name silently falling back to the 8000-token default would be
+    caught here rather than passing the suite silently.
+    """
+    env = {**os.environ, "CONTEXT_TOKEN_BUDGET": "100"}
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import app.crud.retrieval as r; print(r.CONTEXT_TOKEN_BUDGET, r.CONTEXT_CHAR_BUDGET)"],
+        env=env, capture_output=True, text=True,
+        cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "100 400"
+
+
 def test_assemble_within_budget_keeps_everything_when_it_all_fits():
     candidates = [
         retrieval.TopicCandidate(topic="a", score=0.9, documents=[_document(body="x" * 100)]),
@@ -328,7 +363,7 @@ def test_assemble_within_budget_does_not_refuse_a_single_topic_exactly_at_budget
     assert dropped == []
 
 
-def test_assemble_within_budget_drops_whole_topics_lowest_score_first(monkeypatch):
+def test_assemble_within_budget_drops_whole_topics_lowest_score_first():
     """Rule 3 clause 1: when the combination exceeds the budget, drop whole
     topics, lowest-score-first, until it fits -- and name the dropped topics.
 
@@ -383,6 +418,55 @@ def test_assemble_within_budget_refuses_when_a_single_topic_alone_exceeds_budget
     assert excinfo.value.document_count == 5
 
 
+def test_assemble_within_budget_drops_an_oversized_low_scoring_topic_to_save_two_smaller_ones():
+    """Regression: the pre-fix code pre-checked every candidate for being
+    individually oversized BEFORE any dropping was attempted, so a single
+    huge, lowest-scoring topic caused a blanket refusal even though dropping
+    it (it scores lowest anyway) would have let two healthy topics through.
+    Two small, high-scoring topics that fit comfortably, plus one huge,
+    lowest-scoring topic that alone exceeds the budget -- the huge one must
+    be dropped, not cause every topic to be refused.
+    """
+    good_a = retrieval.TopicCandidate(topic="good-a", score=0.9, documents=[_document(body="a" * 20)])
+    good_b = retrieval.TopicCandidate(topic="good-b", score=0.8, documents=[_document(body="b" * 20)])
+    huge = retrieval.TopicCandidate(topic="huge", score=0.1, documents=[_document(body="h" * 1000)])
+    # good_a/good_b: len("doc 0") + 20 == 25 chars each, well under the 100-char
+    # budget below. huge alone: 5 + 1000 == 1005, alone exceeds the budget.
+    assert good_a.context_chars == 25
+    assert good_b.context_chars == 25
+    assert huge.context_chars == 1005
+
+    kept, dropped = retrieval.assemble_within_budget([good_a, good_b, huge], budget=100)
+
+    assert [c.topic for c in kept] == ["good-a", "good-b"]
+    assert [c.topic for c in dropped] == ["huge"]
+
+
+def test_assemble_within_budget_drops_the_lower_scored_oversized_topic_then_refuses_the_survivor():
+    """When BOTH candidates are individually oversized, the lower-scored one
+    must be dropped first (Rule 3 clause 1 still applies to it too), and only
+    THEN is the request refused -- citing the higher-scored survivor, never
+    the already-dropped topic, and never a silent empty result.
+    """
+    high = retrieval.TopicCandidate(
+        topic="high", score=0.9, documents=[_document(index=i, body="x" * 30) for i in range(5)],
+    )
+    low = retrieval.TopicCandidate(
+        topic="low", score=0.5, documents=[_document(index=i, body="y" * 40) for i in range(5)],
+    )
+    # high alone: 5 * (len("doc N") + 30) == 175; low alone: 5 * (len("doc N") + 40) == 225.
+    # Both exceed the 100-char budget below individually, low more so and
+    # lower-scored -- it must be the one dropped first.
+    assert high.context_chars == 175
+    assert low.context_chars == 225
+
+    with pytest.raises(retrieval.TopicBudgetExceeded) as excinfo:
+        retrieval.assemble_within_budget([high, low], budget=100)
+
+    assert excinfo.value.topic == "high"
+    assert excinfo.value.document_count == 5
+
+
 def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
     """HTTP-level equivalent of the refusal above, over the real endpoint:
     one topic whose combined document context alone exceeds the configured
@@ -404,3 +488,113 @@ def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
     assert detail["topic"] == "optimal-temperature"
     assert detail["document_count"] == 12
     assert detail["reason"] == "topic_alone_exceeds_context_budget"
+
+
+# --- topic casing/whitespace normalization ------------------------------------
+#
+# Nothing normalized Item.topic anywhere before this slice's fix: neither
+# scripts/seed.py's `_get_or_create` (Item(**lookup, **defaults) + session.add())
+# nor app/crud/item.py's create_item (model.Item(**body.model_dump())) passes
+# through Pydantic -- both are real ORM constructions -- so a Pydantic
+# field_validator on ItemBase alone would miss both. Item._normalize_topic
+# (app/model/model.py), a SQLAlchemy @validates hook, fires on ORM
+# attribute-set instead, which both paths go through.
+
+
+def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(client):
+    """Two documents posted via the real POST /items endpoint with a
+    casing/whitespace-variant topic must come back together as one topic
+    set, not two silently disjoint ones."""
+    crop_id = _make_crop("basil")
+
+    def _post(topic: str, title: str) -> None:
+        response = client.post(
+            "/items",
+            json=dict(
+                sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID,
+                crop_id=crop_id,
+                topic=topic,
+                title=title,
+                body="a body",
+                published=True,
+                source="s",
+                reference="r",
+                url="u",
+                read_directly=True,
+            ),
+        )
+        assert response.status_code == 201, response.text
+
+    _post("optimal-temperature", "lowercase")
+    _post(" Optimal-Temperature ", "cased and padded")
+
+    response = client.get("/retrieval/basil/optimal-temperature")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["document_count"] == 2
+
+
+def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(sync_db_session):
+    """scripts/seed.py's `_get_or_create` writes via `Item(**lookup, **defaults)`
+    + `session.add()` -- real ORM construction, bypassing HTTP and Pydantic
+    entirely. That is the corpus-generating path, so it must unify too."""
+    crop_id = _make_crop("basil")
+
+    def _write(topic: str, title: str) -> None:
+        item = Item(
+            sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID,
+            crop_id=crop_id,
+            topic=topic,
+            title=title,
+            body="a body",
+            published=True,
+            source="s",
+            reference="r",
+            url="u",
+            read_directly=True,
+        )
+        sync_db_session.add(item)
+
+    _write("optimal-temperature", "lowercase")
+    _write(" Optimal-Temperature ", "cased and padded")
+    sync_db_session.commit()
+
+    result = sync_db_session.query(Item).filter_by(crop_id=crop_id).all()
+    assert {item.topic for item in result} == {"optimal-temperature"}
+
+
+def test_normalization_does_not_retroactively_heal_a_pre_fix_row(client):
+    """Honest limitation, not a hidden one: a row written before this fix
+    existed -- simulated here via a Core-level `Item.__table__.insert()`,
+    which bypasses the ORM entirely and therefore the `@validates` hook too
+    -- is never retroactively normalized. A one-time backfill would be
+    needed for any real legacy data; the actual dev database (`db`/`cms`)
+    was checked this session and holds no non-normalized topic values today
+    (`SELECT DISTINCT topic FROM items WHERE topic <> lower(btrim(topic))`
+    returned zero rows), so no migration is written for a problem that does
+    not yet exist.
+    """
+    crop_id = _make_crop("basil")
+    with sync_engine.begin() as connection:
+        connection.execute(
+            Item.__table__.insert(),
+            [
+                dict(
+                    sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID,
+                    crop_id=crop_id,
+                    topic=" Optimal-Temperature ",  # never normalized -- Core insert
+                    title="legacy row",
+                    body="a body",
+                    published=True,
+                    source="s",
+                    reference="r",
+                    url="u",
+                    read_directly=True,
+                )
+            ],
+        )
+
+    response = client.get("/retrieval/basil/optimal-temperature")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["document_count"] == 0

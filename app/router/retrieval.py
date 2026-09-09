@@ -46,7 +46,7 @@ async def get_topic_set(
     # will use, so the refusal path is real, tested code, not a stub.
     candidate = TopicCandidate(topic=topic, score=0.0, documents=documents)
     try:
-        assemble_within_budget([candidate])
+        _kept, budget_dropped = assemble_within_budget([candidate])
     except TopicBudgetExceeded as exc:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -67,4 +67,11 @@ async def get_topic_set(
         context_chars=document_context_chars(documents),
         context_char_budget=CONTEXT_CHAR_BUDGET,
         chars_per_token=CHARS_PER_TOKEN,
+        dropped=[
+            retrieval_schema.DroppedTopic(
+                topic=d.topic, score=d.score,
+                document_count=d.document_count, context_chars=d.context_chars,
+            )
+            for d in budget_dropped
+        ],
     )

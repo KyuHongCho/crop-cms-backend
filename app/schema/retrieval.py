@@ -44,6 +44,15 @@ class RetrievedDocument(BaseModel):
     licence_note: str | None = None
 
 
+class DroppedTopic(BaseModel):
+    """A whole topic dropped to fit the budget -- named, never silently."""
+
+    topic: str
+    score: float
+    document_count: int
+    context_chars: int
+
+
 class TopicSetResponse(BaseModel):
     """The complete published document set for one crop and one topic.
 
@@ -66,6 +75,7 @@ class TopicSetResponse(BaseModel):
     context_chars: int
     context_char_budget: int
     chars_per_token: float
+    dropped: list[DroppedTopic] = []
 
 
 class BudgetRefusal(BaseModel):
@@ -84,12 +94,3 @@ class BudgetRefusal(BaseModel):
     context_chars: int
     context_char_budget: int
     message: str
-
-
-class DroppedTopic(BaseModel):
-    """A whole topic dropped to fit the budget -- named, never silently."""
-
-    topic: str
-    score: float
-    document_count: int
-    context_chars: int

@@ -2,7 +2,7 @@ from sqlalchemy import (
     Boolean, CheckConstraint, Column, ForeignKey, Index, Integer, String, Text,
     UniqueConstraint, text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from app.db.db import Base
 
@@ -126,6 +126,18 @@ class Item(Base):
     # The shared question, e.g. "optimal-temperature". Retrieval returns the
     # whole set for a topic, so contradicting sources arrive together.
     topic = Column(String(128))
+
+    @validates("topic")
+    def _normalize_topic(self, key, value):
+        """Without this, 'optimal-temperature' and 'Optimal-Temperature' form
+        two silently disjoint topic sets -- see app/crud/retrieval.py's
+        exact-match query. Fires on ORM attribute-set, covering both real
+        write paths: app/crud/item.py's create_item() and scripts/seed.py's
+        _get_or_create()."""
+        if value is None:
+            return value
+        return value.strip().lower()
+
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=False)
     published = Column(Boolean, nullable=False, server_default=text("false"))
