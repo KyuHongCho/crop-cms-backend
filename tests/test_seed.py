@@ -26,7 +26,11 @@ from scripts import seed
 
 _ADVISOR_PATH = os.environ.get("ADVISOR_PATH")
 if _ADVISOR_PATH and _ADVISOR_PATH not in sys.path:
-    sys.path.insert(0, _ADVISOR_PATH)
+    # append, not insert(0): insert puts /advisor ahead of /src AND the stdlib
+    # (measured). Nothing collides today only because the advisor's scripts/ and
+    # tests/ lack __init__.py, so this repo's regular packages win regardless of
+    # order -- a property of the advisor's layout, not one this file asserts.
+    sys.path.append(_ADVISOR_PATH)
 
 claims = pytest.importorskip(
     "crop_advisor.claims",
@@ -35,7 +39,7 @@ claims = pytest.importorskip(
         "mount at that path is empty) -- see docker-compose.yaml"
     ),
 )
-load_crop = pytest.importorskip("crop_advisor.ecocrop").load_crop
+ecocrop = pytest.importorskip("crop_advisor.ecocrop")
 
 
 def _items_by_topic(db_session, topic: str) -> list[Item]:
@@ -101,7 +105,7 @@ def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_sessi
     seed.main()
     seeded_sources = sorted(d.source for d in _items_by_topic(sync_db_session, "optimal-temperature"))
 
-    live_sources = sorted(c.source for c in claims.temperature_claims(load_crop("basil")))
+    live_sources = sorted(c.source for c in claims.temperature_claims(ecocrop.load_crop("basil")))
 
     assert seeded_sources == live_sources
 
@@ -117,7 +121,7 @@ def test_unpublished_draft_fixture_present(sync_db_session):
 
 def test_one_document_source_not_in_the_registry(sync_db_session):
     seed.main()
-    registry_sources = {c.source for c in claims.temperature_claims(load_crop("basil"))}
+    registry_sources = {c.source for c in claims.temperature_claims(ecocrop.load_crop("basil"))}
     assert seed.OFF_REGISTRY_SOURCE not in registry_sources
 
     items = list(sync_db_session.execute(select(Item)).scalars())
