@@ -209,6 +209,20 @@ jobs:
             One addition to the guideline's Verification block: as the first `**Ran:**` entry,
             quote one line verbatim from `${{ env.CORE_DIR }}/core/roles/review.md` with its line
             number, to show which instruction file you actually read.
+
+            A second addition, a standing review criterion, about the DIFF UNDER REVIEW's own
+            prose -- distinct from "slice integrity" above, which is this review process's own
+            normal vocabulary for a vertical slice (`${{ env.CORE_DIR }}/core/shared/vertical-slices.md`)
+            and is not what this is about. Any new or changed code comment, docstring, or README
+            prose in the diff that names crop-cms-backend's own internal planning-unit numbering
+            -- "Slice N", "this slice", "that slice", "a later slice" (as in a
+            plan-crop-cms-backend_*.md document's Slice 1, 2, 3...) -- is a finding; a reader of
+            this public repository has no reason to know that numbering exists. The plain English
+            word is not a finding and must not be flagged -- "top-k slice", "a slice of
+            documents", "never a silent slice" are this codebase's own correct vocabulary for a
+            truncated subset, unrelated to planning. When you find a real one, suggest the same
+            fact stated without naming the planning unit (e.g. "until Slice 6 builds topic
+            selection" -> "until topic selection is built"), not merely its deletion.
       # The run log reports how MANY calls were denied but never WHICH, so a too-narrow tool list
       # could only be widened by guesswork. Upload the agent's transcript instead and read them.
       # `if: always()` because the failing run is the interesting one.
@@ -299,6 +313,15 @@ jobs:
             One addition to the guideline's Re-verification block: as the first `**Re-ran:**` entry,
             quote one line verbatim from `${{ env.CORE_DIR }}/core/auditors/review-audit.md` with
             its line number, to show which instruction file you actually read.
+
+            A second addition: confirm the review correctly distinguished crop-cms-backend's own
+            internal planning-unit jargon ("Slice N", "this slice", naming a
+            plan-crop-cms-backend_*.md document's slice) IN THE DIFF UNDER REVIEW from both the
+            same word's ordinary technical use ("top-k slice") and from "slice integrity"/vertical-
+            slice terminology in your own criteria above -- neither of those two is what this is
+            about. A finding that flags "top-k slice" or the review process's own vocabulary is a
+            false positive; a real "Slice N" reference in the diff's comments that the review
+            missed is a gap you must raise.
       # Same transcript upload as the review job -- see the comment there. The artifact name
       # must differ or the two jobs collide on upload.
       - if: always()

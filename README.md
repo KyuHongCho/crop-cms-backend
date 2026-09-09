@@ -36,7 +36,7 @@ here. If a figure's only home is a document body, it is in the wrong system.
 | ✅ | Agentic **`review` → `review-audit`** stage in CI — an adversarially-audited review on a pull request, ported from [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) as [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) already does | **working** — `.github/workflows/agentic-review.yml`; runs on `opened`/`reopened`/`ready_for_review`, or on a `/agentic-review` comment. Advisory: it gates nothing |
 | ⏳ | Authentication | not built |
 | ⏳ | Embedding column + vector search over document bodies | not built — the model is undecided, and it is a real constraint (see below) |
-| ⏳ | Retrieval endpoint the advisor would actually call (crop + topic) | not built |
+| ✅ | Topic-set retrieval endpoint (crop + topic) — the **no-truncation guarantee** | **working** — `GET /retrieval/{crop_slug}/{topic}` returns every published document sharing a topic, never a top-k slice. No `limit` parameter exists in the API surface |
 | ⏳ | Frontend (`crop-cms-frontend/`) | not started |
 
 Known rough edges, recorded rather than hidden: `PATCH` does not exist, so there is no way to
@@ -150,10 +150,59 @@ up -d --wait`, then the two `exec` calls above — on every push and PR.
 | `GET` `POST` | `/sub-categories` | Unique per parent, not globally. `409` on a duplicate `slug`, naming the violated constraint |
 | `DELETE` | `/sub-categories/{id}` | `200 {"documents_refiled": n, "refiled_to": 1}` — the documents move to "Uncategorised", they are not deleted. `409` for "Uncategorised" itself |
 | `GET` `POST` | `/items` | One narrative document with its provenance |
+| `GET` | `/retrieval/{crop_slug}/{topic}` | Every **published** document sharing that crop and topic. No `limit` parameter, ever — see below. `404` for an unknown crop; `200` with an empty `documents` list for a topic with no published documents (there is no topic registry to 404 against); `413` naming the topic and its document count if that topic alone would exceed the context budget |
 
 `GET /items` returns **everything, unfiltered**. `published` defaults to false server-side, so
 a published-only filter would make every freshly created document invisible to the CMS that
-just created it. When the advisor needs published-only retrieval it gets a separate endpoint.
+just created it. When the advisor needs published-only retrieval it gets a separate endpoint —
+`/retrieval`, described next.
+
+### Topic-set retrieval: the no-truncation guarantee
+
+`GET /retrieval/{crop_slug}/{topic}` returns **every** published document sharing that topic for
+that crop — never a top-k slice. `app/model/model.py` states why: *"retrieval returns every
+document sharing a `topic` rather than a top-k slice -- otherwise a LIMIT silently picks a winner
+among disagreeing sources."* Basil's `optimal-temperature` topic carries three attributed,
+disagreeing claims (FAO ECOCROP, Chang/Alderson/Wright, Walters & Currey); a `LIMIT 1` or
+`LIMIT 2` over that set would not return "the best answer" — it would silently pick one side of an
+open disagreement. There is no `limit` parameter anywhere in this endpoint's surface, and none is
+coming.
+
+**The deliberate departure from the RAG course this project is built alongside.** The course
+teaches `similarity_search(query, k=N)` — a top-k slice of *documents*. This system does not do
+that. Once topic *selection* lands (needing chunk embeddings this repository does not have yet),
+`k` will select **topics**, by the topic's single best-matching passage (MAX, not
+mean — a mean would perversely penalise topics that hold more disagreeing sources, exactly the
+ones this design exists to surface). Every topic that selection picks still returns **complete**;
+`k` never truncates a topic's own document set.
+
+**Budget policy — degrade by whole topics, refuse only as a last resort.** Retrieved context is
+measured in **characters**, against a documented characters-per-token ratio (4 chars/token, the
+commonly cited rule of thumb for English prose) rather than a real tokeniser — the model provider
+is a later decision, and a tokeniser would be provider-specific regardless. Erring approximate is
+fine here because it only ever errs toward dropping early, never toward silently overrunning a
+real budget.
+
+1. If an assembled combination of topics would exceed the budget, whole topics are dropped,
+   lowest-scoring first, until it fits — and the dropped topics are named in the response.
+2. Only when a **single topic alone** exceeds the budget is the request refused (`413`), naming
+   that topic and its document count. Dropping every other topic could not have made it fit, so
+   there is nothing left to degrade.
+
+A topic is never partially truncated — every topic in a response is either complete or absent,
+named either way. This is compatible with the model's constraint above: that guarantee is about
+never picking a winner *within* one topic's disagreeing sources; dropping a whole topic discards
+a whole question, visibly, rather than silently elevating one source over a rival on the same
+question.
+
+Today there is only ever one topic in play — `crop_slug` + `topic` name it directly, and there is
+no topic *selection* yet — so in practice a successful response's `dropped` field is always `[]`:
+with a single candidate, clause 1 never has anything else to drop it against, and only the
+single-topic refusal (clause 2) is reachable through this HTTP endpoint. The response shape
+already carries `dropped` on every successful call, though — not added later — so real
+multi-topic selection, once it lands, populates it without a response-shape change. The
+drop-whole-topics machinery (clause 1) itself is built and tested against constructed topic
+candidates in `tests/test_retrieval.py`, ready to call unchanged once that lands.
 
 ## Architecture & design decisions
 
@@ -162,10 +211,12 @@ duplicates the whole tree. `crops` is its own table, and an item points at both 
 sub-category.
 
 **Nothing ranks contradicting sources.** There is deliberately no `priority`, `rank` or
-`is_primary` column on `items`. Retrieval is intended to return the whole set sharing a
-`topic`, never a top-k slice — a `LIMIT` silently picks a winner among sources that disagree.
-This mirrors the advisor's own rule, where basil's optimal temperature is carried as three
-attributed, disagreeing published claims rather than one.
+`is_primary` column on `items`. `GET /retrieval/{crop_slug}/{topic}` returns the whole set
+sharing a `topic`, never a top-k slice — a `LIMIT` silently picks a winner among sources that
+disagree. This mirrors the advisor's own rule, where basil's optimal temperature is carried as
+three attributed, disagreeing published claims rather than one. See "Topic-set retrieval: the
+no-truncation guarantee" above for the full policy, including the deliberate departure from the
+course's `similarity_search(query, k=N)` pattern.
 
 **The provenance rule is a database constraint, not a validator.** `items` carries a `CHECK`
 forbidding a row that is marked as read first-hand *and* names the paper it was read through

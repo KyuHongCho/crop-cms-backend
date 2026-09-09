@@ -78,7 +78,7 @@ services:
     # re-running -- "Skipping initialization" appears) -- only tmpfs is gone
     # after `restart`, `stop`+`start`, and `down`+`up` alike, so initdb always
     # re-runs. size=1g caps it -- uncapped it defaults to ~50% of host RAM;
-    # 200k rows measured at 478M, so this has headroom for this slice.
+    # 200k rows measured at 478M, so this has headroom for now.
     tmpfs:
       - /var/lib/postgresql/data:size=1g
     volumes:
