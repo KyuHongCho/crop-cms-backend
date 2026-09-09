@@ -60,6 +60,9 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
       pr: ${{ steps.decide.outputs.pr }}
+      # Scopes review-audit's comment dump to this run. Emitted here rather than in `review`
+      # because this job already has outputs and finishes before any comment the run files.
+      started_at: ${{ steps.decide.outputs.started_at }}
     steps:
       - id: decide
         # Every piece of event data arrives as an env var, never interpolated into the script.
@@ -78,6 +81,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          echo "started_at=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
 
           # A push invalidates any earlier review, so clear the labels — but do NOT re-run the
           # agents; that is what `/agentic-review` is for. This is the only reason `synchronize`
@@ -243,18 +247,27 @@ jobs:
           # that showed both labels at once.
           gh pr edit "${{ needs.gate.outputs.pr }}" --remove-label "Review ongoing" || true
           gh pr edit "${{ needs.gate.outputs.pr }}" --add-label "Audit ongoing"     || true
-      # Inline findings are in no `gh pr view` field -- only `gh api .../pulls/N/comments`,
-      # which the agent cannot call (outside --allowedTools). Round 3's auditor tried, was
-      # refused, and audited 3 of 6 findings blind. Dumping here needs no new tool grant.
-      # CORE_DIR is already untracked, so the auditor's `git status --porcelain` is unchanged.
+      # Inline findings appear in no `gh pr view` field -- only in
+      # `gh api .../pulls/N/comments`, which the agent cannot call: outside --allowedTools it
+      # fails with "This command requires approval". Dumping here keeps the agent read-only.
+      # CORE_DIR is already untracked, so the `git status --porcelain` the auditor reports is
+      # unchanged.
+      #
+      # The endpoint returns every review round the pull request has accumulated, so the dump
+      # is scoped to this run. `:?` is load-bearing: with the variable unset or empty,
+      # `env.X` is null and every comment compares >= it -- the filter would silently pass
+      # them all. [OUTDATED] marks a comment whose anchor has moved: `.line` goes null while
+      # `.original_line` still points into a superseded diff.
       - name: Dump the review's inline findings for the auditor
         env:
           GH_TOKEN: ${{ github.token }}
+          GATE_STARTED_AT: ${{ needs.gate.outputs.started_at }}
         run: |
+          : "${GATE_STARTED_AT:?gate emitted no started_at -- refusing to dump unscoped}"
           gh api "repos/${{ github.repository }}/pulls/${{ needs.gate.outputs.pr }}/comments" \
             --paginate \
-            --jq '.[] | select(.in_reply_to_id == null)
-                  | "### \(.path):\(.line // .original_line)  (r\(.id))\n\n\(.body)\n"' \
+            --jq '.[] | select(.in_reply_to_id == null and .created_at >= env.GATE_STARTED_AT)
+                  | "### \(.path):\(.line // .original_line // "?")\(if .line == null and .original_line != null then "  [OUTDATED]" else "" end)  (r\(.id))\n\n\(.body)\n"' \
             > "${{ env.CORE_DIR }}/review-inline-comments.md"
           echo "inline findings dumped: $(grep -c '^### ' "${{ env.CORE_DIR }}/review-inline-comments.md")"
       - id: agent
@@ -274,9 +287,11 @@ jobs:
 
             The review's INLINE findings are not in `gh pr view` output. Read them at:
               ${{ env.CORE_DIR }}/review-inline-comments.md
-            That file is half the review; the summary comment is the other half. If it is
-            empty, mark those findings unverified — never assert the review missed something
-            you did not read.
+            That file is half the review; the summary comment is the other half. It holds
+            this run's findings only — check the count against the summary's
+            `**Findings** — <N> inline, <M> here` line. An entry marked [OUTDATED] carries a
+            line number from a superseded diff; re-locate it before citing. Never assert the
+            review missed something you did not read.
 
             Read all three before you start. The guideline's comment structure is exact — follow it
             literally and post nothing outside it. In CI you hold read-only tools only.
