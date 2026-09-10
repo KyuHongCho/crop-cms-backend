@@ -293,10 +293,9 @@ review is advisory and gates nothing; only `stack` is a required check.
 The reviewer cannot run the suite, and that costs it real evidence. The shared verification
 rules (`core/shared/verify.md`) tell it to *run the relevant existing tests and read the
 output*, and — when no test covers a claim — to write a throwaway one, run it, and delete it
-afterwards. In CI it holds read-only tools (`Read`, `Grep`, `Glob` and read-only `git`/`gh`
-calls — see `agentic-review.yml`'s `--allowedTools`), so it can do neither: a claim it cannot
-ground is marked unverified rather than asserted. The suite is real and runs in `stack`; the
-reviewer just cannot reach it.
+afterwards. In CI its tool grant (`agentic-review.yml`'s `--allowedTools`) contains no test
+runner, so it can do neither: a claim it cannot ground is marked unverified rather than
+asserted. The suite is real and runs in `stack`; the reviewer just cannot reach it.
 
 ## Licence
 
