@@ -290,13 +290,13 @@ posts its findings — inline where they sit on a changed line — and `review-a
 second comment correcting or confirming them, having formed its own findings blind first. The
 review is advisory and gates nothing; only `stack` is a required check.
 
-It still has no test suite, and that costs the reviewer real evidence. The shared verification
+The reviewer cannot run the suite, and that costs it real evidence. The shared verification
 rules (`core/shared/verify.md`) tell it to *run the relevant existing tests and read the
 output*, and — when no test covers a claim — to write a throwaway one, run it, and delete it
-afterwards. In CI it holds read-only tools and cannot do the second half, so a claim it cannot
-ground is marked unverified rather than asserted. Hence "automated tests" sitting directly
-above it in the table: the loop works without a suite, it just does more work for weaker
-evidence.
+afterwards. In CI it holds read-only tools (`Read`, `Grep`, `Glob` and read-only `git`/`gh`
+calls — see `agentic-review.yml`'s `--allowedTools`), so it can do neither: a claim it cannot
+ground is marked unverified rather than asserted. The suite is real and runs in `stack`; the
+reviewer just cannot reach it.
 
 ## Licence
 
