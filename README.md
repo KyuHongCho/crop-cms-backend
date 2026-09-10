@@ -15,9 +15,9 @@ here. If a figure's only home is a document body, it is in the wrong system.
 > **Status: early. Building in progress — not finished.**
 > The stack runs end to end: PostgreSQL 17 + pgvector in Docker, a four-table schema whose
 > provenance rule is enforced by a database `CHECK`, and HTTP endpoints that read and write it.
-> There are **no automated tests**, **no authentication**, **no `DELETE` endpoint for
-> documents**, and **no embedding column** — so despite pgvector being installed, there is
-> no vector search yet.
+> There is **no authentication**, **no `DELETE` endpoint for documents**, and **no embedding
+> column** — so despite pgvector being installed, there is no vector search yet.
+> Automated tests do run — `pytest` against an isolated `cms_test` database; see Testing below.
 > **Nothing consumes this API**: the advisor has no client for it, verified. This README
 > describes only what actually runs; planned work is labelled as such.
 
