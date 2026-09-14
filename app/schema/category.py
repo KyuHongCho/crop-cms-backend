@@ -1,26 +1,20 @@
 """Request/response shapes for the knowledge taxonomy.
 
-Field names mirror app/model/model.py exactly, so crud can do
-`model.MainCategory(**body.model_dump())` with no translation layer -- which is
-precisely what a verbatim port of the course's schemas cannot do: its
-`subcategory_name` raises TypeError against this model, and its category body
-carries no `slug`, which surfaces as a NotNullViolation at commit() rather than
-as a validation error at the edge.
+Field names match app/model/model.py exactly, so crud can build a model straight
+from a request body -- `model.MainCategory(**body.model_dump())` -- with no
+renaming in between.
 
-Every length bound mirrors a column. Without them an over-long value reaches
-PostgreSQL, raises DataError, and FastAPI serves HTTP 500; with them the client
-gets 422 naming the field. Response models carry no bounds: their values come
-from columns that already enforce them, so a bound there could only ever reject
-data this service itself stored.
+Length limits copy the column sizes, so an over-long value is rejected with a
+422 naming the field instead of failing inside PostgreSQL as a 500. Response
+models have no limits: their values already came out of those columns.
 """
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class MainCategoryCreate(BaseModel):
     """Kind of knowledge: crop profile, research literature, cultivation
-    practice, pests and disorders (MainCategory's docstring in model.py). A
-    crop is NOT one -- it is an entity, so adding a crop does not duplicate
-    this tree."""
+    practice, pests and disorders. A crop is not a category -- crops have
+    their own table, so adding one does not copy this tree."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -32,9 +26,8 @@ class MainCategoryCreate(BaseModel):
         }
     )
 
-    # NOT NULL with no server default (MainCategory.slug). Omit it and the
-    # failure is a NotNullViolation at commit(), not a validation error at the
-    # boundary.
+    # Required: the column is NOT NULL with no default, so a missing slug is a
+    # 422 here rather than a database error at commit().
     slug: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     position: int = 0  # mirrors MainCategory.position server_default=text("0")
@@ -71,27 +64,24 @@ class SubCategoryResponse(BaseModel):
 
 
 class SubCategoryDeleteResponse(BaseModel):
-    """What the delete actually did.
+    """What the delete did: its documents were moved, not destroyed.
 
-    The documents are not destroyed -- a trigger refiles them to the
-    "Uncategorised" bucket first. An empty 204 would hide that, so the endpoint
-    answers 200 and says how many moved.
+    A trigger refiles them to "Uncategorised", so the endpoint answers 200 with
+    the count instead of an empty 204 that would hide the move.
     """
 
     documents_refiled: int
-    # Returned, not assumed: the caller should not have to know the bucket's id
-    # in advance to find its documents again.
+    # Returned so the caller can find the moved documents without knowing the
+    # bucket's id in advance.
     refiled_to: int
 
 
 class MainCategoryResponse(BaseModel):
-    """`subcategories` REQUIRES selectinload() in crud.
+    """`subcategories` must be loaded up front with selectinload() in crud.
 
-    A lazy load under the async session raises MissingGreenlet, and pydantic
-    wraps it in a ValidationError -- so `except MissingGreenlet` does not catch
-    it. This fires consistently, including in the session that just created the
-    child row, because expire_on_commit=False means the relationship was simply
-    never loaded.
+    Async SQLAlchemy cannot lazy-load a relationship on first access: it raises
+    MissingGreenlet, which pydantic wraps in a ValidationError, so the request
+    fails with a 500 (and `except MissingGreenlet` would not catch it).
     """
 
     model_config = ConfigDict(from_attributes=True)

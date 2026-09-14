@@ -1,24 +1,17 @@
 """Topic-set retrieval: the no-truncation guarantee.
 
-**The deliberate departure from the course.** The course this repository is
-built alongside teaches RAG as `similarity_search(query, k=N)` -- a top-k slice
-of *documents*. This system does not do that. `k` selects **topics**; every
-selected topic then returns **complete**.
+A common RAG pattern asks for the top-k most similar documents
+(`similarity_search(query, k=N)`). This system does not: `k` will select
+*topics*, and every selected topic returns *complete*.
 
-The reason is `app/model/model.py:92-94`, verbatim:
+Why: published sources disagree. Basil's optimal temperature is carried as
+three attributed claims that contradict each other (FAO ECOCROP,
+Chang/Alderson/Wright, Walters & Currey). A `LIMIT 1` or `LIMIT 2` over that set
+silently drops at least one of them, with nothing in the response to say so.
 
-    "retrieval returns every document sharing a `topic` rather than a top-k
-     slice -- otherwise a LIMIT silently picks a winner among disagreeing
-     sources."
-
-Basil's optimal temperature is carried as three attributed claims that
-contradict each other (FAO ECOCROP, Chang/Alderson/Wright, Walters & Currey).
-A `LIMIT 1` -- or a `LIMIT 2` -- over that set does not return "the best
-answer"; it returns *one side of an open disagreement*, silently, with nothing
-in the response to say a rival source was dropped. That is the failure this
-file exists to make impossible, so several tests below assert the *absence* of
-things (no LIMIT in the SQL, no `limit` parameter in the OpenAPI surface)
-rather than the presence of a feature.
+That is why several tests below check that something is *absent* -- no LIMIT
+in the SQL, no `limit` parameter in the API -- rather than that a feature is
+present.
 """
 import logging
 import os
@@ -94,11 +87,8 @@ def _document(topic: str = "t", body: str = "b", index: int = 0) -> RetrievedDoc
 
 
 def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
-    """Twelve is deliberately larger than any plausible `k` (k=3 today).
-
-    If retrieval were a top-k document slice -- what the course teaches -- this
-    would return 3. model.py:92-94 requires all twelve.
-    """
+    """Twelve is more than any plausible `k` (3 by default). A top-k slice would
+    return 3; this endpoint must return all twelve."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12)
 
@@ -115,13 +105,9 @@ def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
 
 
 def test_a_normal_response_always_carries_a_dropped_field(client):
-    """`dropped` is on every successful response, not added only once real
-    multi-topic selection exists to populate it -- see
-    app/schema/retrieval.py's TopicSetResponse and app/router/retrieval.py.
-    Today there is only ever one candidate, so it is always empty, but the
-    field itself is present now so that later work is not a response-shape
-    change.
-    """
+    """`dropped` is always present. With one topic per request today it is
+    always empty, but multi-topic selection can fill it later without changing
+    the response shape (TopicSetResponse in app/schema/retrieval.py)."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 2)
 
@@ -213,9 +199,8 @@ def test_the_sql_actually_executed_contains_no_limit(client, caplog):
 
 
 def test_the_api_surface_carries_no_limit_parameter(client):
-    """No `limit` parameter, per this endpoint's design goal. A caller must
-    not be able to ask for a truncated topic set at all -- not even by
-    opting in."""
+    """No `limit` parameter: a caller cannot ask for a truncated topic set,
+    even deliberately."""
     schema = client.get("/openapi.json").json()
     path = schema["paths"]["/retrieval/{crop_slug}/{topic}"]["get"]
     names = [parameter["name"] for parameter in path.get("parameters", [])]
@@ -235,13 +220,9 @@ def test_an_unknown_crop_is_404(client):
 
 
 def test_a_topic_with_no_published_documents_returns_an_empty_set_not_404(client):
-    """200 with zero documents, deliberately -- not 404.
-
-    `topic` is a free-text column with no registry table behind it, so there is
-    no such thing as "an unknown topic" to 404 on; and a 404 would be an
-    outright lie for a topic that exists but whose documents are all drafts,
-    which is exactly the case constructed here.
-    """
+    """200 with no documents, not 404: `topic` is free text with no registry
+    to check it against, and here the topic does exist -- its documents are
+    all unpublished drafts."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 3, published=False)
 
@@ -252,37 +233,26 @@ def test_a_topic_with_no_published_documents_returns_an_empty_set_not_404(client
     assert response.json()["documents"] == []
 
 
-# --- Rules 1-3 -- N3: decided here, only rule 3 built and tested here --------
+# --- Topic selection and the context budget ----------------------------------
 #
-# Rules 1 (MAX chunk similarity) and 2 (k topics) have no chunk/embedding table
-# to operate on yet, so they are not exercised through the HTTP retrieval
-# endpoint here -- there is no topic *selection* yet, only a direct crop+topic
-# lookup. What plan-1:130-142 requires here is that they are decided and
-# named; rule 3 (below) is additionally built and tested here, against
-# constructed TopicCandidates, so real topic selection can call it unchanged
-# once real MAX-similarity scores exist.
+# Three rules: (1) score a topic by its best-matching chunk, (2) keep the top k
+# topics, (3) fit the kept topics into the context budget. Rules 1 and 2 need
+# embeddings, which do not exist yet, so only k's value is checked. Rule 3 is
+# built and tested below with hand-made TopicCandidates, ready for real scores.
 
 
 def test_k_defaults_to_3():
-    """Rule 2: k = 3 topics, decided here (implemented once topic selection
-    exists).
-
-    Not exercised through the HTTP surface -- there is no topic *selection*
-    to apply it to yet -- so this asserts the named constant directly.
-    """
+    """Rule 2: k is 3 by default. There is no topic selection to run it
+    through yet, so this checks the constant directly."""
     assert retrieval.TOPIC_SELECTION_K == 3
 
 
 def test_k_is_configurable_via_env_var():
-    """Proved in a **subprocess**, not by `importlib.reload`-ing the shared
-    module in this process: reload rebinds `TopicBudgetExceeded` to a new
-    class object, but app/router/retrieval.py imported that class by value at
-    its own import time -- so its `except TopicBudgetExceeded` would stop
-    matching what a reloaded assemble_within_budget raises, corrupting every
-    test after it with an unrelated HTTP 500. (Verified: reproduced exactly
-    that failure while writing this test, tracked to this cause, and fixed by
-    switching to the subprocess isolation tests/test_seed.py already uses for
-    the same reason -- an import-time guard must not run in-process.)
+    """Runs in a subprocess because the value is read at import time.
+
+    Reloading the module in this process (importlib.reload) would create a new
+    TopicBudgetExceeded class that app/router/retrieval.py's `except` no
+    longer matches, breaking later tests with an unrelated 500.
     """
     env = {**os.environ, "TOPIC_SELECTION_K": "5"}
     result = subprocess.run(
@@ -297,12 +267,9 @@ def test_k_is_configurable_via_env_var():
 
 
 def test_context_token_budget_is_configurable_via_env_var():
-    """Same subprocess-isolation reasoning as test_k_is_configurable_via_env_var
-    above -- an import-time guard must not run in-process. Also pins the
-    derived CONTEXT_CHAR_BUDGET (token budget * CHARS_PER_TOKEN), so a typo'd
-    env var name silently falling back to the 8000-token default would be
-    caught here rather than passing the suite silently.
-    """
+    """Subprocess for the same reason as the test above. Also checks the
+    derived CONTEXT_CHAR_BUDGET (tokens x CHARS_PER_TOKEN), so a misspelled env
+    var that silently fell back to the default would fail here."""
     env = {**os.environ, "CONTEXT_TOKEN_BUDGET": "100"}
     result = subprocess.run(
         [sys.executable, "-c",
@@ -327,12 +294,9 @@ def test_assemble_within_budget_keeps_everything_when_it_all_fits():
 
 
 def test_assemble_within_budget_keeps_everything_when_combination_exactly_equals_budget():
-    """The exact-equality boundary for Rule 3 clause 1. plan-1:148 says drop
-    "until it fits" -- fitting AT the budget is still fitting, not exceeding
-    it. A `>` accidentally weakened to `>=` would drop something that never
-    needed to go, and nothing else in this file would catch that: every other
-    combination test here is comfortably under or over budget, never exactly on it.
-    """
+    """Boundary: a combination exactly AT the budget fits, so nothing is
+    dropped. Catches a `>` turned into `>=`; no other combination test sits
+    exactly on the budget."""
     a = retrieval.TopicCandidate(topic="a", score=0.9, documents=[_document(index=0, body="x" * 95)])
     b = retrieval.TopicCandidate(topic="b", score=0.5, documents=[_document(index=0, body="y" * 95)])
     # Each candidate is len("doc 0") + 95 == 100 characters; the budget below
@@ -347,12 +311,8 @@ def test_assemble_within_budget_keeps_everything_when_combination_exactly_equals
 
 
 def test_assemble_within_budget_does_not_refuse_a_single_topic_exactly_at_budget():
-    """The exact-equality boundary for Rule 3 clause 2. plan-1:149 refuses
-    only when a topic "exceeds" the budget -- landing exactly on it is not
-    exceeding it. A `>` accidentally weakened to `>=` would refuse a topic
-    that fits exactly, which nothing else in this file exercises: the other
-    refusal tests use topics comfortably over budget, never exactly on it.
-    """
+    """Boundary: a single topic exactly AT the budget is kept, not refused.
+    Catches a `>` turned into `>=`; the other refusal tests are well over."""
     candidate = retrieval.TopicCandidate(
         topic="exact", score=1.0, documents=[_document(index=0, body="z" * 95)],
     )
@@ -366,21 +326,14 @@ def test_assemble_within_budget_does_not_refuse_a_single_topic_exactly_at_budget
 
 
 def test_assemble_within_budget_drops_whole_topics_lowest_score_first():
-    """Rule 3 clause 1: when the combination exceeds the budget, drop whole
-    topics, lowest-score-first, until it fits -- and name the dropped topics.
-
-    Three topics, each individually well under the budget, whose COMBINATION
-    exceeds it. The two lowest-scoring must be dropped, named, in ascending
-    score order; the highest-scoring survives complete.
-    """
+    """Over budget: drop whole topics, lowest score first, until the rest
+    fits -- and name what was dropped. Each topic here fits alone; all three
+    together do not."""
     high = retrieval.TopicCandidate(topic="high", score=0.9, documents=[_document(body="h" * 40)])
     mid = retrieval.TopicCandidate(topic="mid", score=0.5, documents=[_document(body="m" * 40)])
     low = retrieval.TopicCandidate(topic="low", score=0.1, documents=[_document(body="l" * 40)])
-    # Each candidate alone is 40 + len("doc 0") = 45 chars -- well under the
-    # 50-char budget below, so none is refused individually. The combination
-    # is 135, over budget; dropping only "low" leaves 90, still over budget;
-    # dropping "mid" too leaves 45, which fits -- so both must go before the
-    # loop stops with only "high" (45 <= 50) remaining.
+    # Each is 45 chars (40 + len("doc 0")); the budget is 50. All three = 135,
+    # without "low" = 90, without "mid" too = 45, which fits.
 
     kept, dropped = retrieval.assemble_within_budget([mid, low, high], budget=50)
 
@@ -421,19 +374,13 @@ def test_assemble_within_budget_refuses_when_a_single_topic_alone_exceeds_budget
 
 
 def test_assemble_within_budget_drops_an_oversized_low_scoring_topic_to_save_two_smaller_ones():
-    """Regression: the pre-fix code pre-checked every candidate for being
-    individually oversized BEFORE any dropping was attempted, so a single
-    huge, lowest-scoring topic caused a blanket refusal even though dropping
-    it (it scores lowest anyway) would have let two healthy topics through.
-    Two small, high-scoring topics that fit comfortably, plus one huge,
-    lowest-scoring topic that alone exceeds the budget -- the huge one must
-    be dropped, not cause every topic to be refused.
-    """
+    """Regression: an oversized topic that also scores lowest is dropped,
+    letting the two smaller topics through. Earlier code checked for oversized
+    topics before dropping anything, and refused the whole request."""
     good_a = retrieval.TopicCandidate(topic="good-a", score=0.9, documents=[_document(body="a" * 20)])
     good_b = retrieval.TopicCandidate(topic="good-b", score=0.8, documents=[_document(body="b" * 20)])
     huge = retrieval.TopicCandidate(topic="huge", score=0.1, documents=[_document(body="h" * 1000)])
-    # good_a/good_b: len("doc 0") + 20 == 25 chars each, well under the 100-char
-    # budget below. huge alone: 5 + 1000 == 1005, alone exceeds the budget.
+    # good_a and good_b: 25 chars each (5 + 20). huge: 1005 (5 + 1000). Budget: 100.
     assert good_a.context_chars == 25
     assert good_b.context_chars == 25
     assert huge.context_chars == 1005
@@ -445,20 +392,16 @@ def test_assemble_within_budget_drops_an_oversized_low_scoring_topic_to_save_two
 
 
 def test_assemble_within_budget_drops_the_lower_scored_oversized_topic_then_refuses_the_survivor():
-    """When BOTH candidates are individually oversized, the lower-scored one
-    must be dropped first (Rule 3 clause 1 still applies to it too), and only
-    THEN is the request refused -- citing the higher-scored survivor, never
-    the already-dropped topic, and never a silent empty result.
-    """
+    """Both topics are too big on their own: drop the lower-scored one first,
+    then refuse, naming the survivor -- never the dropped topic, and never an
+    empty result."""
     high = retrieval.TopicCandidate(
         topic="high", score=0.9, documents=[_document(index=i, body="x" * 30) for i in range(5)],
     )
     low = retrieval.TopicCandidate(
         topic="low", score=0.5, documents=[_document(index=i, body="y" * 40) for i in range(5)],
     )
-    # high alone: 5 * (len("doc N") + 30) == 175; low alone: 5 * (len("doc N") + 40) == 225.
-    # Both exceed the 100-char budget below individually, low more so and
-    # lower-scored -- it must be the one dropped first.
+    # high: 5 x (5 + 30) = 175 chars; low: 5 x (5 + 40) = 225. Budget: 100.
     assert high.context_chars == 175
     assert low.context_chars == 225
 
@@ -470,16 +413,9 @@ def test_assemble_within_budget_drops_the_lower_scored_oversized_topic_then_refu
 
 
 def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
-    """HTTP-level equivalent of the refusal above, over the real endpoint:
-    one topic whose combined document context alone exceeds the configured
-    budget (CONTEXT_CHAR_BUDGET, default 32,000 chars) is refused (413),
-    naming the topic and its document count -- never silently truncated.
-
-    Twelve documents of 3,000 characters each assemble to 36,000+ characters
-    of context, comfortably past the default budget, without needing to
-    override any configuration -- so this exercises the real, deployed
-    default rather than a value only a test ever sets.
-    """
+    """Over HTTP: a topic too large for the default budget (32,000 chars) gets
+    a 413 naming the topic and its document count. Twelve 3,000-char documents
+    exceed the default, so no config override is needed."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12, body="x" * 3000)
 
@@ -494,13 +430,10 @@ def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
 
 # --- topic casing/whitespace normalization ------------------------------------
 #
-# Nothing normalized Item.topic anywhere before this fix: neither
-# scripts/seed.py's `_get_or_create` (Item(**lookup, **defaults) + session.add())
-# nor app/crud/item.py's create_item (model.Item(**body.model_dump())) passes
-# through Pydantic -- both are real ORM constructions -- so a Pydantic
-# field_validator on ItemBase alone would miss both. Item._normalize_topic
-# (app/model/model.py), a SQLAlchemy @validates hook, fires on ORM
-# attribute-set instead, which both paths go through.
+# Item.topic is normalized by a SQLAlchemy @validates hook on the model
+# (Item._normalize_topic), not a Pydantic validator: scripts/seed.py builds Item
+# objects directly and never goes through Pydantic. The hook covers both the
+# API and the seed script.
 
 
 def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(client):
@@ -537,9 +470,8 @@ def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(client):
 
 
 def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(sync_db_session):
-    """scripts/seed.py's `_get_or_create` writes via `Item(**lookup, **defaults)`
-    + `session.add()` -- real ORM construction, bypassing HTTP and Pydantic
-    entirely. That is the corpus-generating path, so it must unify too."""
+    """The seed script's write path: Item objects built directly with the ORM,
+    bypassing HTTP and Pydantic. It must normalize topics too."""
     crop_id = _make_crop("basil")
 
     def _write(topic: str, title: str) -> None:
@@ -566,16 +498,10 @@ def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(syn
 
 
 def test_normalization_does_not_retroactively_heal_a_pre_fix_row(client):
-    """Honest limitation, not a hidden one: a row written before this fix
-    existed -- simulated here via a Core-level `Item.__table__.insert()`,
-    which bypasses the ORM entirely and therefore the `@validates` hook too
-    -- is never retroactively normalized. A one-time backfill would be
-    needed for any real legacy data; the actual dev database (`db`/`cms`)
-    was checked this session and holds no non-normalized topic values today
-    (`SELECT DISTINCT topic FROM items WHERE topic <> lower(btrim(topic))`
-    returned zero rows), so no migration is written for a problem that does
-    not yet exist.
-    """
+    """Known limitation: rows written without the ORM are not normalized after
+    the fact. A Core insert (used here) skips @validates, so this row keeps its
+    original casing. Existing data would need a one-time backfill; none is
+    included because the dev database holds no un-normalized topics."""
     crop_id = _make_crop("basil")
     with sync_engine.begin() as connection:
         connection.execute(

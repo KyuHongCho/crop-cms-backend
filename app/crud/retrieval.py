@@ -1,17 +1,15 @@
 """Data access and the budget policy for topic-set retrieval.
 
-The centrepiece rule -- see `app/model/model.py:92-94` -- is that retrieval
-never picks a winner among documents disagreeing about the same topic: a
-selected topic returns **complete**, never a top-k slice.
+Retrieval never picks a winner among documents that disagree on the same topic:
+a selected topic comes back complete, never as a top-k slice.
 
-Three rules, decided here (N3 in plan-1). Only rule 3's machinery is built and
-tested now; rules 1 and 2 have no chunk/embedding table to operate on until
-that infrastructure exists, so they are recorded as named, tested
-constants/contracts here and wired to real scoring once it does.
+Three rules govern topic selection:
 
-    Rule 1 -- topic score = MAX chunk similarity.  Decided here, built later.
-    Rule 2 -- k = 3 topics.                        Decided here, built later.
-    Rule 3 -- budget policy (below).               Decided AND built here.
+    Rule 1 -- score a topic by its best-matching chunk.     Not built yet.
+    Rule 2 -- keep the top k topics (3 by default).         Only the constant exists.
+    Rule 3 -- fit the kept topics into the context budget.  Built and tested.
+
+Rules 1 and 2 need embeddings, which do not exist yet.
 """
 import os
 from dataclasses import dataclass
@@ -21,50 +19,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.model.model import Crop, Item
 
-# --- Rule 2: k = 3 topics -----------------------------------------------------
+# --- Rule 2: keep the top k topics --------------------------------------------
 #
-# Decided here, per plan-1:137/142. Not exercised until topic selection is
-# built -- there is no scoring machinery here to select *from* -- but named
-# and asserted now so the number is not invented later.
-# Configurable via env var so a future change can tune it without a code edit.
+# Unused until topic selection exists, but fixed and tested now so the number
+# is not invented later. Override with the TOPIC_SELECTION_K env var.
 TOPIC_SELECTION_K = int(os.environ.get("TOPIC_SELECTION_K", "3"))
 
-# --- Rule 3: budget policy, measured in characters ----------------------------
+# --- Rule 3: the context budget, measured in characters -----------------------
 #
-# A character count with a documented characters-per-token ratio, not a
-# tokeniser -- plan-1:171-180 defers the provider decision to immediately
-# after this point, so no tokeniser is importable yet, and a tokeniser would
-# be provider-specific regardless. 4 characters per token is the commonly
-# cited rule of thumb for English prose (matches OpenAI's own documented
-# approximation). Erring approximate is fine here because it errs toward
-# dropping early, never toward silently overrunning a real budget.
+# Characters, not tokens: there is no tokeniser yet because the model provider
+# is not chosen, and a tokeniser would be provider-specific anyway. 4 characters
+# per token is a common rule of thumb for English prose. It is an estimate, not
+# a guarantee -- see document_context_chars below for what it does not count.
 CHARS_PER_TOKEN = 4.0
 
-# A conservative default context budget in tokens, translated to characters
-# below. Configurable via env var for the same reason as TOPIC_SELECTION_K.
+# A conservative default budget in tokens, converted to characters below.
+# Override with the CONTEXT_TOKEN_BUDGET env var.
 CONTEXT_TOKEN_BUDGET = int(os.environ.get("CONTEXT_TOKEN_BUDGET", "8000"))
 CONTEXT_CHAR_BUDGET = int(CONTEXT_TOKEN_BUDGET * CHARS_PER_TOKEN)
 
 
 def topic_set_statement(crop_id: int, topic: str) -> Select:
-    """The complete published document set for one crop and one topic.
+    """Every published document for one crop and one topic.
 
-    No LIMIT, no relevance ORDER BY -- ordered by id only, for a stable
-    response shape. This is the exact statement the no-truncation guarantee
-    rests on: tests/test_retrieval.py compiles and executes this statement
-    directly and asserts LIMIT never appears in either form.
+    No LIMIT, and ordered by id only so the order is stable. tests/test_retrieval.py
+    checks for LIMIT in both the compiled statement and the SQL actually executed.
     """
     return (
         select(Item)
         .where(
             Item.crop_id == crop_id,
-            # Normalize the caller's input, not the indexed column -- wrapping
-            # Item.topic itself (e.g. func.lower(func.trim(Item.topic))) would
-            # defeat ix_items_crop_id_topic (verified via EXPLAIN: the topic
-            # half of the predicate falls back to a Filter/Recheck instead of
-            # an Index Cond). Item.topic itself is normalized on write by
-            # Item._normalize_topic (model.py), so the stored value is already
-            # comparable to this.
+            # Normalize the input, not the column: wrapping Item.topic in
+            # lower()/trim() would stop PostgreSQL using the
+            # ix_items_crop_id_topic index for it. Topics written through the
+            # ORM are already normalized (Item._normalize_topic in model.py).
             Item.topic == topic.strip().lower(),
             Item.published.is_(True),
         )
@@ -82,15 +70,13 @@ async def get_crop_id_by_slug(db: AsyncSession, crop_slug: str) -> int | None:
 
 
 def document_context_chars(documents: list[Item]) -> int:
-    """Character count of one topic's assembled context.
+    """Character count of one topic's context: titles and bodies only.
 
-    Title + body only. Provenance is currently assumed to never be inserted
-    into the LLM prompt itself (it would be attached as structured citation
-    metadata instead) -- but that is a design decision the chat feature
-    hasn't made yet, not a settled fact. If it ends up injecting provenance
-    text into the prompt, this undercounts the real context by roughly 1.4x-2x
-    (measured
-    across the current seed corpus) and must be revisited then.
+    Provenance (source, reference, URL, ...) is not counted, on the assumption
+    it will be attached as citation metadata rather than put into the prompt.
+    The chat feature has not decided that yet. If provenance does go into the
+    prompt, this undercounts by roughly 1.4x-2x (measured on the seed corpus)
+    and must be revisited.
     """
     return sum(len(document.title) + len(document.body) for document in documents)
 
@@ -99,10 +85,8 @@ def document_context_chars(documents: list[Item]) -> int:
 class TopicCandidate:
     """One topic's complete document set plus its selection score.
 
-    The score is opaque to this module -- it is only ever compared and
-    ordered, never computed here. That is what lets Rule 3 be built and
-    tested now with constructed scores, and reused unchanged once real MAX
-    chunk-similarity scores (Rule 1) exist.
+    The score is only compared here, never computed, so Rule 3 can be tested
+    now with made-up scores and reused unchanged once real scores (Rule 1) exist.
     """
 
     topic: str
@@ -119,11 +103,8 @@ class TopicCandidate:
 
 
 class TopicBudgetExceeded(Exception):
-    """Rule 3 clause 2: a single topic alone exceeds the budget.
-
-    Dropping every other topic would not help -- this one topic's own
-    context is already too large -- so this is refused rather than degraded.
-    """
+    """Rule 3: the one topic left, after any dropping, still exceeds the
+    budget on its own, so the request is refused rather than truncated."""
 
     def __init__(self, topic: str, document_count: int, context_chars: int, budget: int):
         self.topic = topic
@@ -140,22 +121,17 @@ def assemble_within_budget(
     candidates: list[TopicCandidate],
     budget: int = CONTEXT_CHAR_BUDGET,
 ) -> tuple[list[TopicCandidate], list[TopicCandidate]]:
-    """Rule 3: degrade by whole topics, refuse only as a last resort.
+    """Rule 3: drop whole topics to fit the budget; refuse only as a last resort.
 
-    1. Topics are dropped whole, lowest-score-first, until the assembled
-       combination fits the budget (clause 1). Every dropped topic is
-       returned, named, never partially truncated.
-    2. Only once dropping can go no further (a single candidate remains, or
-       dropping already emptied the set) is what is left checked against the
-       budget: if that survivor's OWN context alone still exceeds it,
-       TopicBudgetExceeded is raised naming it -- dropping every OTHER topic
-       already happened and did not help, so refusing is the only option
-       left. An oversized topic that clause 1 would have dropped anyway
-       (because it scored lowest) is never refused on its own -- only the
-       one still standing after dropping is ever blamed.
+    1. While the kept topics exceed the budget and more than one is left, drop
+       the lowest-scoring topic -- whole, never part of it. Dropped topics are
+       returned so the response can name them.
+    2. If the one topic left still exceeds the budget on its own, raise
+       TopicBudgetExceeded naming it. When other topics remain, an oversized
+       lowest-scoring topic is dropped by step 1 rather than refused.
 
-    Returns (kept, dropped) -- kept highest-score-first, dropped lowest-score-first
-    (the order they were discarded in).
+    Returns (kept, dropped): kept highest score first, dropped in the order
+    they were removed (lowest score first).
     """
     ordered = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
 

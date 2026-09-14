@@ -1,10 +1,8 @@
 """Data access for the knowledge taxonomy.
 
-The response shaping lives in app/schema/category.py, reached through
-from_attributes and the routers' response_model -- not hand-built here. The
-course's crud/category.py:22-38 assembles its response field by field across 17
-lines despite setting from_attributes on every class; that work is what
-response_model does for free.
+No response is built field by field here. Where a function returns ORM objects,
+the routers' response_model turns them into JSON through the schemas in
+app/schema/category.py (from_attributes).
 """
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession

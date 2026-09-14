@@ -78,7 +78,7 @@ def test_duplicate_slug_on_sub_categories_same_parent_returns_409(client):
 
 
 def test_same_slug_under_different_parents_both_return_201(client):
-    """"Unique per parent, not globally" (README.md:131). Verified this can
+    """"Unique per parent, not globally" (README.md, API table). Verified this can
     fail: temporarily adding a global UNIQUE(slug) constraint to
     sub_categories made this test fail; dropping it made it pass again.
     """
