@@ -9,9 +9,8 @@ from app.db.db import get_db
 router = APIRouter()
 
 
-# Unfiltered, deliberately: Item.published defaults to false server-side
-# (see model.py), so a published-only filter would hide every document the CMS
-# has just created from the CMS that created it.
+# Unfiltered, deliberately -- see get_items's docstring in app/crud/item.py
+# for why (Item.published defaults to false server-side).
 @router.get("/items", response_model=list[item_schema.ItemResponse])
 async def get_items(db: AsyncSession = Depends(get_db)):
     return await item_crud.get_items(db)
@@ -26,8 +25,9 @@ async def create_item(
     body: item_schema.ItemCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    # Both checked here rather than left to the foreign keys: an FK violation is
-    # an IntegrityError, which reaches the client as an opaque HTTP 500.
+    # Both checked here rather than left to the foreign keys, for the same
+    # reason as create_sub_category in app/router/category.py: an FK
+    # violation would otherwise reach the client as an opaque HTTP 500.
     if not await db.get(model.SubCategory, body.sub_category_id):
         raise HTTPException(status_code=404, detail="Sub-category not found")
     if not await db.get(model.Crop, body.crop_id):

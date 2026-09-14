@@ -1,17 +1,19 @@
 """Seed corpus tests.
 
 Runs against db-test/cms_test like every other test here (conftest.py's
-autouse _clean_database fixture TRUNCATEs first). scripts/seed.py itself
-never imports crop_advisor: its three `optimal-temperature` documents are
-pinned to literal source strings copied from crop_advisor/claims.py. The
-drift test below is what notices the two have diverged -- it needs a *live*
-import of the sibling repo, which is not always available: a developer who
-has not checked out crop-climate-advisor. (CI always has it -- both checkouts
-run before every other step.) That import is guarded with pytest.importorskip
-rather than a bare `import`, because a bare import that fails is a collection error --
-pytest exits 2 and reddens the *whole* file, including the tests below that
-need no such thing. test_bare_advisor_import_would_fail_collection proves
-that failure mode directly, and that the guard avoids it.
+autouse _clean_database fixture TRUNCATEs first). scripts/seed.py never
+imports crop_advisor: its three `optimal-temperature` documents are pinned
+to literal source strings copied from crop_advisor/claims.py. The drift
+test below notices when the two diverge, but needs a *live* import of the
+sibling repo -- not always available to a developer who has not checked
+out crop-climate-advisor (CI always has it; both checkouts run before
+every other step).
+
+That import is guarded with pytest.importorskip rather than a bare
+`import`, because a failed bare import is a collection error: pytest exits
+2 and reddens the *whole* file, including tests that need no such thing.
+test_bare_advisor_import_would_fail_collection proves that failure mode
+directly, and that the guard avoids it.
 """
 import os
 import pathlib
@@ -26,10 +28,12 @@ from scripts import seed
 
 _ADVISOR_PATH = os.environ.get("ADVISOR_PATH")
 if _ADVISOR_PATH and _ADVISOR_PATH not in sys.path:
-    # append, not insert(0): insert puts /advisor ahead of /src AND the stdlib
-    # (measured). Nothing collides today only because the advisor's scripts/ and
-    # tests/ lack __init__.py, so this repo's regular packages win regardless of
-    # order -- a property of the advisor's layout, not one this file asserts.
+    # append, not insert(0): insert(0) would put /advisor ahead of /src and the
+    # stdlib -- guaranteed by list.insert's own semantics, not something
+    # specific to this repo. Nothing collides only because the advisor's
+    # scripts/ and tests/ lack __init__.py, so this repo's regular packages
+    # win regardless of order -- a property of the advisor's layout, not one
+    # this file asserts.
     sys.path.append(_ADVISOR_PATH)
 
 claims = pytest.importorskip(
@@ -100,8 +104,9 @@ def test_three_temperature_documents_share_one_topic(sync_db_session):
 
 
 def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_session):
-    """The drift test proper. Fails at seed time if scripts/seed.py's pinned
-    literals stop matching what the advisor's registry actually returns."""
+    """The drift test proper. Fails when the test suite runs if
+    scripts/seed.py's pinned literals stop matching what the advisor's
+    registry actually returns."""
     seed.main()
     seeded_sources = sorted(d.source for d in _items_by_topic(sync_db_session, "optimal-temperature"))
 
@@ -130,15 +135,15 @@ def test_one_document_source_not_in_the_registry(sync_db_session):
 
 
 def test_bare_advisor_import_would_fail_collection():
-    """Regression test for the exact incident this design avoids: a bare
-    `import crop_advisor.claims` inside a test file, collected with no
-    ADVISOR_PATH on sys.path, makes pytest exit 2 -- a collection error that
-    reddens the whole suite, not just the tests that need the advisor.
+    """Regression test for the failure mode this design avoids: a bare
+    `import crop_advisor.claims`, collected with no ADVISOR_PATH on
+    sys.path, makes pytest exit 2 -- a collection error that reddens the
+    whole suite, not just the tests that need the advisor.
 
-    Reproduces it directly in a subprocess with ADVISOR_PATH stripped, then
-    asserts the *actual* guarded test_seed.py still collects clean (exit 0)
-    under the same stripped environment -- proving the importorskip guard is
-    what prevents the failure this test demonstrates.
+    Reproduces that directly in a subprocess with ADVISOR_PATH stripped,
+    then asserts the *actual* guarded test_seed.py still collects as a
+    clean skip (exit 5) under the same environment -- proving the
+    importorskip guard is what prevents the failure demonstrated above.
     """
     env = {k: v for k, v in os.environ.items() if k != "ADVISOR_PATH"}
 
@@ -163,9 +168,8 @@ def test_bare_advisor_import_would_fail_collection():
     )
     # 5 == "no tests collected": pytest's own code for a clean module-level
     # skip (importorskip fires during collection). That is the guard working
-    # as intended -- the failure mode this test guards against is 2
-    # ("Interrupted: N errors during collection"), asserted against directly
-    # above for the bare-import case.
+    # as intended -- the failure mode it guards against is 2 ("Interrupted:
+    # N errors during collection"), asserted above for the bare-import case.
     assert guarded.returncode == 5, (
         f"guarded test_seed.py did not collect as a clean skip with "
         f"ADVISOR_PATH unset (exit {guarded.returncode}, expected 5):\n"

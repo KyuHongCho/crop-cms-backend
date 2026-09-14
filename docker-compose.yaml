@@ -4,14 +4,14 @@ services:
     volumes:
       - ./dockerenv:/src/.venv
       - .:/src
-      # The sibling repo, read-only. Defaults to a true sibling directory
+      # The sibling repo, read-only, defaults to a true sibling directory
       # under the shared parent (local dev). ci.yml checks the sibling out
-      # onto the runner at that same relative path, so this default resolves
+      # onto the runner at that same relative path, so the default resolves
       # there too with no env var override -- ADVISOR_HOST_PATH exists for
       # any other layout (e.g. a checkout script that lands it elsewhere).
       # A bind mount to a path that does not exist silently creates an empty
-      # directory (verified), which is exactly why tests/test_seed.py's
-      # drift test uses pytest.importorskip rather than a bare import.
+      # directory, which is why tests/test_seed.py's drift test uses
+      # pytest.importorskip rather than a bare import.
       - ${ADVISOR_HOST_PATH:-../crop-climate-advisor}:/advisor:ro
     ports:
       - "8000:8000"
@@ -47,17 +47,16 @@ services:
       # -h is required, not decorative: the entrypoint's temporary init-time
       # server is socket-only (listen_addresses=''), so a socket-based
       # pg_isready reports "accepting connections" while initdb is still
-      # running underneath it -- `up -d --wait` can then return before the
-      # bootstrap finishes. Forcing TCP makes the check wait for the real
-      # server. Verified.
+      # running -- `up -d --wait` could then return before the bootstrap
+      # finishes. Forcing TCP makes the check wait for the real server.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d cms"]
       interval: 5s
       timeout: 3s
       retries: 10
   # A second, ephemeral Postgres server for the test suite -- not a second
   # database on `db`. profiles: [test] keeps it invisible to a plain
-  # `docker compose up` (verified: that starts 2 containers, not 3); it only
-  # starts with `--profile test`.
+  # `docker compose up` (that starts 2 containers, not 3); it only starts
+  # with `--profile test`.
   db-test:
     image: pgvector/pgvector:pg17
     profiles: ["test"]
@@ -67,17 +66,18 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      # initdb/01-init.sh:9 targets --dbname "$POSTGRES_DB", so this
-      # bootstraps cms_test with the same extension, role and grants as `db`
-      # -- the script itself is unmodified.
+      # initdb/01-init.sh's `--dbname "$POSTGRES_DB"` flag targets whichever
+      # database is passed in, so this bootstraps cms_test with the same
+      # extension, role and grants as `db` -- the script itself is
+      # unmodified.
       POSTGRES_DB: cms_test
       DB_USER: ${DB_USER:?set DB_USER in .env}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
-    # tmpfs, load-bearing: verified that container-writable-layer storage AND
-    # an anonymous volume both survive a restart (initdb then skips
-    # re-running -- "Skipping initialization" appears) -- only tmpfs is gone
-    # after `restart`, `stop`+`start`, and `down`+`up` alike, so initdb always
-    # re-runs. size=1g caps it -- uncapped it defaults to ~50% of host RAM;
+    # tmpfs, load-bearing: the container's writable layer and an anonymous
+    # volume both survive a restart (initdb then skips re-running --
+    # "Skipping initialization" appears); only tmpfs disappears on
+    # `restart`, `stop`+`start`, and `down`+`up` alike, so initdb always
+    # re-runs. size=1g caps it -- uncapped, it defaults to ~50% of host RAM;
     # 200k rows measured at 478M, so this has headroom for now.
     tmpfs:
       - /var/lib/postgresql/data:size=1g

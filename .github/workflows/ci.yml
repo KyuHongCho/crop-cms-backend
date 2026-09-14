@@ -18,9 +18,9 @@ env:
 jobs:
   stack:
     runs-on: ubuntu-latest
-    # Every step below assumes cwd = the repo root; this is that root now
-    # that a second repo is also checked out onto the runner (see the two
-    # checkouts immediately below).
+    # Every step below assumes cwd = the repo root. Two repos are checked out
+    # onto the runner (see immediately below), and this path is this one's
+    # root.
     defaults:
       run:
         working-directory: crop-cms-backend
@@ -30,20 +30,20 @@ jobs:
           path: crop-cms-backend
 
       # tests/test_seed.py's drift test needs a live import of
-      # crop_advisor.claims. Checking the sibling out side-by-side, at the
-      # same relative path (../crop-climate-advisor from crop-cms-backend/)
-      # that docker-compose.yaml's ADVISOR_HOST_PATH default already expects
-      # for local dev, means no env var override is needed here -- the one
-      # default serves both.
+      # crop_advisor.claims. Checking the sibling out at the same relative
+      # path (../crop-climate-advisor from crop-cms-backend/) that
+      # docker-compose.yaml's ADVISOR_HOST_PATH default already expects for
+      # local dev means no env var override is needed here -- one default
+      # serves both.
       - uses: actions/checkout@v7
         with:
           repository: KyuHongCho/crop-climate-advisor
           path: crop-climate-advisor
 
       - name: Compose file parses
-        # A key with no value -- `build:` with nothing after it -- makes the WHOLE
-        # file unusable, not just its own service. That shipped here once. This
-        # check costs a second and rules the class out.
+        # A key with no value -- `build:` with nothing after it -- makes the whole
+        # file unusable, not just its own service. This check costs a second and
+        # rules that class of error out.
         run: docker compose config -q
 
       - name: Image builds
@@ -60,31 +60,30 @@ jobs:
       - name: API answers over HTTP
         # `docker ps` reporting "Up" proves only that PID 1 is alive. Under
         # --reload the application can be dead inside a container that still
-        # reports healthy, which also shipped here once. Only a real response
-        # over the published port proves the app works.
+        # reports healthy. Only a real response over the published port
+        # proves the app works.
         run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
 
       - name: The seed tests really collect (they must not silently skip)
-        # tests/test_seed.py guards its advisor imports with pytest.importorskip
+        # tests/test_seed.py guards its advisor imports with pytest.importorskip,
         # so a missing sibling degrades to a clean skip -- correct for local dev,
-        # wrong here, where the checkouts above mean "absent" is always a bug.
-        # pytest has no built-in "fail on skip" (its strict= applies to xfail
-        # only) and an all-skip run exits 0, so the suite step below cannot
-        # catch it.
+        # wrong here, since the checkouts above mean "absent" is always a bug.
+        # pytest has no built-in "fail on skip" (strict= applies to xfail only),
+        # and an all-skip run exits 0, so the suite step below cannot catch it.
         #
-        # Asserting collection rather than importing named modules: any
-        # importorskip firing collapses the file to "no tests collected"
-        # (exit 5), so this covers every guarded module, including ones added
-        # later. Naming them one by one is what let crop_advisor.ecocrop slip
-        # through. -rs prints which guard fired and why. Needs no database.
+        # Asserting collection rather than importing named modules covers every
+        # guarded module, including ones added later, not just the ones named
+        # individually: any importorskip firing collapses the file to "no tests
+        # collected" (exit 5). -rs prints which guard fired and why. Needs no
+        # database.
         run: |
           docker compose exec -T cms python -m pytest tests/test_seed.py --collect-only -q -rs
 
       - name: Test suite runs against db-test/cms_test, never the dev database
         # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py already
-        # reads both from the environment (no application code change needed).
-        # migrate_db.py builds the schema fresh in cms_test first -- db-test is
-        # tmpfs-backed and starts empty every run.
+        # reads both from the environment. migrate_db.py builds the schema
+        # fresh in cms_test first -- db-test is tmpfs-backed and starts empty
+        # every run.
         run: |
           docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
             python -m app.db.migrate_db
@@ -93,7 +92,7 @@ jobs:
 
       - name: Migrations create every table
         # Guards the silent failure: if app/model/model.py is empty or never
-        # imported, create_all() succeeds and creates NOTHING. Asserting the
+        # imported, create_all() succeeds and creates nothing. Asserting the
         # count is what makes that visible.
         run: |
           docker compose exec -T cms python -m app.db.migrate_db
@@ -103,12 +102,11 @@ jobs:
           test "$count" = "4"
 
       - name: The Uncategorised bucket is seeded where the code expects it
-        # The bucket id has three homes -- the constants in model.py, the seed in
-        # migrate_db.py, and a literal inside the PL/pgSQL trigger body, because
-        # a trigger cannot read a Python constant. This asserts the database and
-        # the Python agree; nothing else would notice them drifting apart.
+        # See the constants' comment in app/model/model.py for why this id
+        # has three homes that must agree; this step asserts the database
+        # and the Python side actually do.
         #
-        # Then the sequences. Seeding an explicit id does NOT advance a SERIAL
+        # Then the sequences. Seeding an explicit id does not advance a SERIAL
         # sequence, so migrate_db.py setval's both. Without that the very next
         # insert collides on the primary key -- and a naive 409 handler would
         # report that UniqueViolation as "a category with that slug already
@@ -166,8 +164,8 @@ jobs:
             VALUES ('basil', 'basil', 'Ocimum basilicum');
           INSERT INTO main_categories (slug, name)
             VALUES ('research-literature', 'Research literature');
-          -- WHERE, because migrate_db.py now seeds an "Uncategorised" bucket
-          -- main category. Unqualified this creates a SECOND sub-category, and
+          -- WHERE, because migrate_db.py seeds an "Uncategorised" bucket
+          -- main category. Unqualified this creates a second sub-category, and
           -- the refile assertion further down stops being measurable.
           INSERT INTO sub_categories (main_category_id, slug, name)
             SELECT id, 'temperature-response', 'Temperature response'
@@ -187,7 +185,7 @@ jobs:
       - name: sub_category_id has no default and is still NOT NULL
         # The reason this design uses RESTRICT + a trigger rather than
         # ON DELETE SET DEFAULT: SET DEFAULT needs a column default, and a
-        # column default ALSO applies at INSERT. An INSERT omitting
+        # column default also applies at INSERT. An INSERT omitting
         # sub_category_id would then be filed under the bucket silently instead
         # of being refused. Asserting the absence of the default is what stops
         # someone "simplifying" this back.
@@ -250,7 +248,7 @@ jobs:
           echo "documents still present after the refused delete: $left"
           test "$left" = "1"
 
-      - name: The Uncategorised bucket cannot be deleted, full or EMPTY
+      - name: The Uncategorised bucket cannot be deleted, full or empty
         # Empty is the case that matters. Postgres alone protects the bucket only
         # while it holds a row; delete it empty and deleting a later sub-category
         # that still holds documents fails with an error naming `items`, a table
@@ -315,13 +313,13 @@ jobs:
       - name: The refile is load-independent, and the ORM copies can be made honest
         # passive_deletes=True suppresses only the pre-emptive SELECT; a
         # collection that happens to be loaded is still cascaded in Python.
-        # "all" is load-independent -- so this runs BOTH scenarios, one per
+        # "all" is load-independent -- so this runs both scenarios, one per
         # process, against the real configured mappers, and reads pg_constraint
-        # back on each run. Two shortcuts fail SILENTLY and were both hit while
-        # this was designed: mutating ForeignKey.ondelete never reaches the DDL
-        # (SQLAlchemy emits from the ForeignKeyConstraint), and mutating
-        # relationship.passive_deletes after configure_mappers() is not honoured
-        # by the OneToManyDP that drives the DELETE.
+        # back on each run. Two shortcuts fail silently: mutating
+        # ForeignKey.ondelete never reaches the DDL (SQLAlchemy emits from the
+        # ForeignKeyConstraint), and mutating relationship.passive_deletes
+        # after configure_mappers() is not honoured by the OneToManyDP that
+        # drives the DELETE.
         run: |
           for scenario in unloaded loaded; do
             docker compose exec -T cms python - "$scenario" <<'PY'
@@ -334,7 +332,7 @@ jobs:
               UNCATEGORISED_SUB_CATEGORY_ID as BUCKET,
           )
 
-          engine.echo = False  # db.py:16 sets echo=True; that log is not the evidence
+          engine.echo = False  # db.py sets echo=True by default; that log is not the evidence
 
           LOADED = sys.argv[1] == "loaded"
 
@@ -385,10 +383,10 @@ jobs:
                   assert all(s == BUCKET for _, s in rows), rows
                   print(f"loaded={LOADED!s:<5} db={rows}")
 
-                  # expire_on_commit=False (db.py:19) means nothing re-reads the
+                  # expire_on_commit=False in db.py means nothing re-reads the
                   # Item objects, so they still carry the pre-refile parent. The
-                  # handler does not serialize them, so nothing in production is
-                  # wrong today -- this pins the documented remedy.
+                  # handler never serialises them, so no production code path
+                  # is affected -- this test pins the documented remedy.
                   stale = [(i.id, i.sub_category_id) for i in items]
                   db.expire_all()
                   for i in items:

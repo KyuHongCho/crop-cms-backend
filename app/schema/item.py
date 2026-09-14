@@ -1,8 +1,8 @@
 """Request/response shapes for one narrative document and its provenance.
 
-The provenance block mirrors crop_advisor.claims.Claim field-for-field
-(crop-climate-advisor/crop_advisor/claims.py:40-47), so a document authored here
-maps onto a Claim with no rename table.
+The provenance block is modelled on crop_advisor.claims.Claim in the advisor
+repo, but is not a field-for-field mirror: `licence_note` has no counterpart
+there.
 
 Deliberately absent: opt_min / opt_max. Agronomic bands are the advisor's data,
 never CMS prose -- see Item's docstring in model.py. If a figure's only home is
@@ -21,22 +21,21 @@ class ItemBase(BaseModel):
     Create and Response both derive from this rather than Response inheriting
     Create, so that tightening an inbound rule can never turn a GET of an
     already-stored row into HTTP 500. That is not hypothetical: the database's
-    CHECK forbids read_directly=true WITH a via, but permits read_directly=false
+    CHECK forbids read_directly=true with a via, but permits read_directly=false
     with via=NULL, so a stricter write rule inherited by the response model
     would raise ResponseValidationError on rows the database happily holds.
     """
 
     sub_category_id: int
     crop_id: int
-    # The shared question, e.g. "optimal-temperature". Retrieval returns the
-    # whole set for a topic, so contradicting sources arrive together
-    # (see Item.topic). String(128) on that column.
+    # Mirrors Item.topic (see its comment in model.py for why retrieval
+    # groups by this field). String(128) on that column.
     topic: str | None = Field(default=None, max_length=128)
     title: str = Field(min_length=1, max_length=255)  # Item.title
     body: str = Field(min_length=1)                   # Text, no max
     published: bool = False                           # Item.published
 
-    # --- provenance, mirroring claims.py:40-47 ------------------------------
+    # --- provenance, mirroring claims.py's Claim -----------------------------
     source: str = Field(min_length=1, max_length=255)  # Item.source
     reference: str = Field(min_length=1)               # Text, no max
     url: str = Field(min_length=1)                     # Text, no max
@@ -73,8 +72,8 @@ class ItemCreate(ItemBase):
 
     @model_validator(mode="after")
     def _read_directly_excludes_via(self) -> "ItemCreate":
-        """Mirror of Claim.__post_init__ (claims.py:53-62) and of the database's
-        read_directly_excludes_via CHECK on Item.__table_args__.
+        """Mirror of Claim.__post_init__ (in the advisor repo) and of the
+        database's read_directly_excludes_via CHECK on Item.__table_args__.
 
         Without this the row is still rejected -- but by PostgreSQL, as an
         unhandled IntegrityError, which FastAPI serves as HTTP 500. With it the

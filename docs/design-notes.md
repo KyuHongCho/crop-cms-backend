@@ -19,11 +19,11 @@ full further down this file; the last two are documented next to the code they c
   refiled but not counted. Locking the sub-category first (`SELECT ... FOR UPDATE`) would close
   the gap; it is not worth it for a single-user CMS with no concurrent writer.
   [`app/crud/category.py`](../app/crud/category.py), `delete_sub_category`
-- **Topic normalization is not retroactive.** Topics are trimmed and lower-cased when written
+- **Topic normalisation is not retroactive.** Topics are trimmed and lower-cased when written
   through the ORM; rows inserted without it keep their original form and would need a one-time
-  backfill. None is included, because the dev database has no un-normalized topics.
+  backfill. None is included, because the dev database has no un-normalised topics.
   [`tests/test_retrieval.py`](../tests/test_retrieval.py),
-  `test_normalization_does_not_retroactively_heal_a_pre_fix_row`
+  `test_normalization_does_not_heal_a_row_written_without_the_orm`
 
 ## Topic-set retrieval: the no-truncation guarantee
 
@@ -57,7 +57,7 @@ into the prompt, the real context is roughly 1.4–2x larger (measured on the se
 2. Only when the topic left standing after that dropping **still exceeds the budget on its own**
    is the request refused (`413`), naming that topic and its document count. Dropping every other
    topic did not make it fit, so there is nothing left to degrade. When other topics remain, an
-   oversized lowest-scoring topic is dropped under clause 1 instead of refused.
+   oversized lowest-scoring topic is dropped under step 1 above instead of refused.
 
 A topic is never partially truncated — every topic in a response is either complete or absent,
 named either way. This is compatible with the model's constraint above: that guarantee is about
@@ -67,11 +67,11 @@ question.
 
 Today there is only ever one topic in play — `crop_slug` + `topic` name it directly, and there is
 no topic *selection* yet — so in practice a successful response's `dropped` field is always `[]`:
-with a single candidate, clause 1 never has anything else to drop it against, and only the
-single-topic refusal (clause 2) is reachable through this HTTP endpoint. The response shape
+with a single candidate, step 1 never has anything else to drop it against, and only the
+single-topic refusal (step 2) is reachable through this HTTP endpoint. The response shape
 already carries `dropped` on every successful call, though — not added later — so real
 multi-topic selection, once it lands, populates it without a response-shape change. The
-drop-whole-topics machinery (clause 1) itself is built and tested against constructed topic
+drop-whole-topics machinery (step 1) itself is built and tested against constructed topic
 candidates in `tests/test_retrieval.py`, ready to call unchanged once that lands.
 
 `GET /items`, by contrast, returns **everything, unfiltered**. `published` defaults to false

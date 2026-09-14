@@ -5,11 +5,12 @@ a selected topic comes back complete, never as a top-k slice.
 
 Three rules govern topic selection:
 
-    Rule 1 -- score a topic by its best-matching chunk.     Not built yet.
-    Rule 2 -- keep the top k topics (3 by default).         Only the constant exists.
-    Rule 3 -- fit the kept topics into the context budget.  Built and tested.
+    Rule 1 -- score a topic by its best-matching chunk.
+    Rule 2 -- keep the top k topics (3 by default).
+    Rule 3 -- fit the kept topics into the context budget.
 
-Rules 1 and 2 need embeddings, which do not exist yet.
+Rules 1 and 2 depend on embeddings, which this repository does not yet have;
+Rule 3 does not, and is built and tested below.
 """
 import os
 from dataclasses import dataclass
@@ -21,16 +22,16 @@ from app.model.model import Crop, Item
 
 # --- Rule 2: keep the top k topics --------------------------------------------
 #
-# Unused until topic selection exists, but fixed and tested now so the number
-# is not invented later. Override with the TOPIC_SELECTION_K env var.
+# Fixed and tested now so the number is not invented later, once topic
+# selection uses it. Override with the TOPIC_SELECTION_K env var.
 TOPIC_SELECTION_K = int(os.environ.get("TOPIC_SELECTION_K", "3"))
 
 # --- Rule 3: the context budget, measured in characters -----------------------
 #
-# Characters, not tokens: there is no tokeniser yet because the model provider
-# is not chosen, and a tokeniser would be provider-specific anyway. 4 characters
-# per token is a common rule of thumb for English prose. It is an estimate, not
-# a guarantee -- see document_context_chars below for what it does not count.
+# Characters, not tokens: a real tokeniser is provider-specific regardless
+# of choice, so this counts characters instead, using 4 characters per token
+# as a common rule of thumb for English prose. It is an estimate, not a
+# guarantee -- see document_context_chars below for what it does not count.
 CHARS_PER_TOKEN = 4.0
 
 # A conservative default budget in tokens, converted to characters below.
@@ -49,10 +50,10 @@ def topic_set_statement(crop_id: int, topic: str) -> Select:
         select(Item)
         .where(
             Item.crop_id == crop_id,
-            # Normalize the input, not the column: wrapping Item.topic in
+            # Normalise the input, not the column: wrapping Item.topic in
             # lower()/trim() would stop PostgreSQL using the
             # ix_items_crop_id_topic index for it. Topics written through the
-            # ORM are already normalized (Item._normalize_topic in model.py).
+            # ORM are already normalised (Item._normalize_topic in model.py).
             Item.topic == topic.strip().lower(),
             Item.published.is_(True),
         )
@@ -74,9 +75,8 @@ def document_context_chars(documents: list[Item]) -> int:
 
     Provenance (source, reference, URL, ...) is not counted, on the assumption
     it will be attached as citation metadata rather than put into the prompt.
-    The chat feature has not decided that yet. If provenance does go into the
-    prompt, this undercounts by roughly 1.4x-2x (measured on the seed corpus)
-    and must be revisited.
+    If provenance does go into the prompt instead, this undercounts by
+    roughly 1.4x-2x on the seed corpus and must be revisited.
     """
     return sum(len(document.title) + len(document.body) for document in documents)
 

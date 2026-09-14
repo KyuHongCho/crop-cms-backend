@@ -1,28 +1,28 @@
 """Seeds the basil corpus, pinned to the crop-climate-advisor registry.
 
-A **script, not a migration**: `app/router/crop.py:15-17` is GET-only (crops
-come from the advisor's ECOCROP data, not authored here) and there is no
-author endpoint for crops at all, so this writes through the ORM directly
-against the synchronous engine `app/db/migrate_db.py` already exposes.
+A **script, not a migration**: `get_crops` in `app/router/crop.py` is
+GET-only (crops come from the advisor's ECOCROP data, not authored here),
+and there is no author endpoint for crops at all -- so this writes
+directly through the ORM, using the synchronous engine
+`app/db/migrate_db.py` already exposes.
 
 The three `optimal-temperature` documents' `source` field is a **pinned
-literal**, copied by hand from `crop_advisor/claims.py` -- this module never
-imports `crop_advisor`. That is deliberate: pinning means a future edit to
-the advisor's registry does not silently change what this CMS says about
-basil. `tests/test_seed.py`'s drift test is what notices the two have
-diverged, at seed time -- not this script. (`reference`/`condition`/`via`/
-`url` are mostly, not always, exact copies -- see that test file's own notes;
-they are not drift-tested.)
+literal**, copied by hand from `crop_advisor/claims.py` (this module never
+imports `crop_advisor`). Pinning means a future edit to the advisor's
+registry cannot silently change what this CMS claims about basil;
+`tests/test_seed.py` has a drift test that catches the two diverging when
+the suite runs. (`reference`/`condition`/`via`/`url` are mostly, not
+always, exact copies, and are not drift-tested.)
 
 Idempotent for unchanged content: re-running updates the rows this script
-wrote rather than duplicating them, keyed on (crop, title, source) for
-documents and on slug for the category scaffold and the crop itself.
+already wrote instead of duplicating them, keyed on (crop, title, source)
+for documents and on slug for the category scaffold and crop.
 
-`source` is in the key so the script cannot adopt somebody else's document
-that happens to share a title -- but that makes the key wider, and there is
-no delete path here. Editing a `title` or `source` therefore inserts a new
-row and leaves the old one behind. After such an edit, remove the superseded
-row by hand or re-seed a fresh database; a re-run will not tidy up.
+`source` is part of the key so the script cannot adopt someone else's
+document that shares a title -- but that widens the key, and there is no
+delete path. Editing a `title` or `source` inserts a new row and leaves
+the old one behind; fix this by removing the superseded row by hand, or by
+re-seeding a fresh database.
 """
 from sqlalchemy.orm import Session
 
@@ -37,8 +37,8 @@ CROP = {
 }
 
 # The topic field, not the category tree, is what groups documents for
-# retrieval (model.py:121-123 -- "retrieval returns the whole set for a
-# topic"). One flat sub-category is enough here.
+# retrieval (see Item's docstring in app/model/model.py: "retrieval returns
+# every document sharing a `topic`..."). One flat sub-category is enough here.
 MAIN_CATEGORY = {"slug": "basil-content", "name": "Basil content"}
 SUB_CATEGORY = {"slug": "documents", "name": "Documents"}
 
@@ -192,7 +192,7 @@ _PEST_DOCS = [
         url="https://www.rhs.org.uk/herbs/basil/grow-your-own",
     ),
     dict(
-        # Deliberately NOT a registry source -- see OFF_REGISTRY_SOURCE above.
+        # Deliberately not a registry source -- see OFF_REGISTRY_SOURCE above.
         title="Folk remedy: basil planted beside tomatoes repels pests",
         body=(
             "Traditional companion-planting lore holds that basil grown beside "
