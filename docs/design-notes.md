@@ -32,9 +32,9 @@ that crop — never a top-k slice. `app/model/model.py` states why: *"retrieval 
 document sharing a `topic` rather than a top-k slice -- otherwise a LIMIT silently picks a winner
 among disagreeing sources."* Basil's `optimal-temperature` topic carries three attributed,
 disagreeing claims (FAO ECOCROP, Chang/Alderson/Wright, Walters & Currey); a `LIMIT 1` or
-`LIMIT 2` over that set would not return "the best answer" — it would silently pick one side of an
-open disagreement. There is no `limit` parameter anywhere in this endpoint's surface, and none is
-coming.
+`LIMIT 2` over that set would not return "the best answer" — it would silently drop at least one
+of them, with nothing in the response to say so. There is no `limit` parameter anywhere in this
+endpoint's surface, and none is coming.
 
 **The deliberate departure from common RAG practice.** A common RAG pattern is
 `similarity_search(query, k=N)` — a top-k slice of *documents*. This system does not do that. Once

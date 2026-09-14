@@ -101,7 +101,8 @@ if those tests would skip.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/crops` | Read-only; seeded to match crop-climate-advisor |
-| `GET` `POST` | `/main-categories`, `/sub-categories` | `409` on a duplicate `slug` |
+| `GET` `POST` | `/main-categories` | `409` on a duplicate `slug` |
+| `GET` `POST` | `/sub-categories` | Unique per parent, not globally; `409` on a duplicate `slug` under the same parent |
 | `DELETE` | `/main-categories/{id}` | `409` while it still has sub-categories |
 | `DELETE` | `/sub-categories/{id}` | Refiles its documents to "Uncategorised" and returns the count |
 | `GET` `POST` | `/items` | A document and its sources |
