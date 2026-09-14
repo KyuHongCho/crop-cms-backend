@@ -82,6 +82,10 @@ def test_same_slug_under_different_parents_both_return_201(client):
     under two different main categories must both succeed, because
     SubCategory's uniqueness is scoped to (main_category_id, slug), not slug
     alone.
+
+    Verified this can fail: temporarily adding a global UNIQUE(slug)
+    constraint to sub_categories made this test fail; dropping it made it
+    pass again.
     """
     mc1 = client.post(
         "/main-categories", json={"slug": "research-literature", "name": "RL"}

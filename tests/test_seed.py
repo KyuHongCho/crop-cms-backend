@@ -28,10 +28,12 @@ from scripts import seed
 
 _ADVISOR_PATH = os.environ.get("ADVISOR_PATH")
 if _ADVISOR_PATH and _ADVISOR_PATH not in sys.path:
-    # append, not insert(0): insert would put /advisor ahead of /src and the
-    # stdlib. Nothing collides only because the advisor's scripts/ and tests/
-    # lack __init__.py, so this repo's regular packages win regardless of
-    # order -- a property of the advisor's layout, not one this file asserts.
+    # append, not insert(0): insert(0) would put /advisor ahead of /src and the
+    # stdlib -- guaranteed by list.insert's own semantics, not something
+    # specific to this repo. Nothing collides only because the advisor's
+    # scripts/ and tests/ lack __init__.py, so this repo's regular packages
+    # win regardless of order -- a property of the advisor's layout, not one
+    # this file asserts.
     sys.path.append(_ADVISOR_PATH)
 
 claims = pytest.importorskip(

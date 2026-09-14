@@ -4,10 +4,13 @@ from sqlalchemy import create_engine, text
 # redefine Base here, or create_all() would act on an empty second registry.
 from app.db.db import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME, Base
 
-# app.model.model is imported twice below. This bare import registers its
-# classes on Base.metadata -- without it, create_all() succeeds and creates
-# nothing. The `from ... import` further down pulls the id constants from
-# the same module.
+# app.model.model is imported twice below: this bare import for its
+# registration side effect (it puts Crop/MainCategory/SubCategory/Item on
+# Base.metadata), the `from ... import` further down for the id constants.
+# Either import alone would trigger the registration -- Python fully executes
+# a module on its first import regardless of import form -- so this line
+# documents the dependency explicitly rather than being the only thing
+# providing it.
 import app.model.model  # noqa: F401
 from app.model.model import (
     UNCATEGORISED_MAIN_CATEGORY_ID,
