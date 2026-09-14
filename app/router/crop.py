@@ -9,11 +9,9 @@ router = APIRouter()
 
 
 # A crop is an entity, not a category -- see MainCategory's docstring in
-# model.py. Its four columns mirror FAO ECOCROP -- the same fields the
-# advisor's scripts/scrape_ecocrop.py writes. GET only: crops are seeded to
-# match the advisor's data/ecocrop/<slug>.json rather than authored here, and a
-# crop that still has documents cannot be deleted (Item.crop_id is ON DELETE
-# RESTRICT).
+# model.py. GET only, and Item.crop_id is ON DELETE RESTRICT -- see
+# app/schema/crop.py's module docstring for why (crops mirror the advisor's
+# ECOCROP data) and CropResponse for the column-to-JSON-field mapping.
 @router.get("/crops", response_model=list[crop_schema.CropResponse])
 async def get_crops(db: AsyncSession = Depends(get_db)):
     return await crop_crud.get_crops(db)

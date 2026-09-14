@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs ONCE, on first boot of an empty data directory, as the Postgres superuser.
+# Runs once, on first boot of an empty data directory, as the Postgres superuser.
 # Two jobs the application role cannot do for itself:
 #   1. pgvector is not a "trusted" extension - only a superuser may install it.
 #   2. Creating the least-privilege application role.

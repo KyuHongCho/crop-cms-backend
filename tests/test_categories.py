@@ -1,7 +1,8 @@
 """HTTP-level tests for the category endpoints, through TestClient.
 
-Seam: FastAPI's TestClient against app.main.app -- HTTP requests and JSON
-responses, never SQLAlchemy internals or ORM objects directly.
+Exercises the HTTP boundary: FastAPI's TestClient against app.main.app --
+HTTP requests and JSON responses, never SQLAlchemy internals or ORM objects
+directly.
 """
 import os
 
@@ -12,7 +13,7 @@ from tests.conftest import truncate_and_reseed
 
 
 def test_suite_talks_to_the_test_database_never_dev():
-    """Written first: every other test here TRUNCATEs tables between runs
+    """A safety check: every other test here TRUNCATEs tables between runs
     (conftest.py's autouse `_clean_database`). If this suite were ever
     pointed at `db`/`cms` it would wipe the dev database, not just fail
     loudly. `docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test` is
@@ -38,11 +39,10 @@ def test_desynced_sequence_is_not_reported_as_duplicate_slug(client):
     """A pkey collision from a desynced sequence must name the pkey
     constraint, not the slug constraint -- a blanket `IntegrityError -> 409`
     would report this as "a category with that slug already exists" even
-    though no slug was ever duplicated. See plan-2's "Preconditions on the
-    sibling plan" #1.
+    though no slug was ever duplicated.
     """
     with sync_engine.begin() as connection:
-        # is_called=false with value=1 makes the NEXT nextval() return 1
+        # is_called=false with value=1 makes the next nextval() return 1
         # itself -- colliding with the existing bucket row's id, a
         # UniqueViolation with nothing to do with any slug. (Sequences start
         # at 1; setval(..., 0, false) is out of range.)
@@ -59,9 +59,9 @@ def test_desynced_sequence_is_not_reported_as_duplicate_slug(client):
 
 def test_duplicate_slug_on_sub_categories_same_parent_returns_409(client):
     """Mirrors test_duplicate_slug_on_main_categories_returns_409, but through
-    a COMPOSITE constraint (SubCategory.__table_args__, model.py:66) rather
-    than a single-column one -- the two paths are not equivalent and neither
-    is exercised by the other's test.
+    a composite constraint (SubCategory.__table_args__) rather than a
+    single-column one -- the two paths are not equivalent and neither is
+    exercised by the other's test.
     """
     mc = client.post(
         "/main-categories", json={"slug": "research-literature", "name": "RL"}
@@ -78,9 +78,10 @@ def test_duplicate_slug_on_sub_categories_same_parent_returns_409(client):
 
 
 def test_same_slug_under_different_parents_both_return_201(client):
-    """"Unique per parent, not globally" (README.md, API table). Verified this can
-    fail: temporarily adding a global UNIQUE(slug) constraint to
-    sub_categories made this test fail; dropping it made it pass again.
+    """"Unique per parent, not globally" (README.md, API table): the same slug
+    under two different main categories must both succeed, because
+    SubCategory's uniqueness is scoped to (main_category_id, slug), not slug
+    alone.
     """
     mc1 = client.post(
         "/main-categories", json={"slug": "research-literature", "name": "RL"}
@@ -102,9 +103,8 @@ def test_same_slug_under_different_parents_both_return_201(client):
 
 
 def test_bucket_survives_truncate_and_reseed(client):
-    """Precondition #2 of plan-2's "Preconditions on the sibling plan": the
-    per-test TRUNCATE fixture must reseed the "Uncategorised" bucket, or
-    every test after the first one that touches it breaks.
+    """The per-test TRUNCATE fixture must reseed the "Uncategorised" bucket,
+    or every test after the first one that touches it breaks.
 
     Runs the exact fixture mechanism (truncate_and_reseed) a second time
     mid-test, simulating the boundary between two tests, then asserts the

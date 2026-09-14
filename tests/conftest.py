@@ -2,10 +2,10 @@
 
 Everything in this suite runs against `db-test`/`cms_test`, never the dev
 server's `db`/`cms` -- see test_categories.py::test_suite_talks_to_the_test_database_never_dev
-for the guard test proper. This module checks the same thing again,
-immediately before _clean_database TRUNCATEs anything: that fixture runs
-before every single test, so if it were ever pointed at the dev database it
-would not just fail loudly, it would wipe it.
+for the guard test proper. This module checks the same thing again, right
+before _clean_database TRUNCATEs anything, since that fixture runs before
+every test: if it were ever pointed at the dev database, it would not just
+fail loudly, it would wipe it.
 """
 import os
 
@@ -34,11 +34,10 @@ def truncate_and_reseed() -> None:
     """TRUNCATE every content table and put the 'Uncategorised' bucket back.
 
     Reused by `_clean_database` below and, mid-test, by
-    test_categories.py::test_bucket_survives_truncate_and_reseed -- which
-    exercises this exact function a second time within one test to
-    demonstrate precondition #2 of plan-2's "Preconditions on the sibling
-    plan": a per-test TRUNCATE that does not reseed the bucket (main_category
-    id 1 / sub_category id 1) breaks every test after the first one that
+    test_categories.py::test_bucket_survives_truncate_and_reseed, which
+    calls this function a second time within one test. That demonstrates
+    why a per-test TRUNCATE must reseed the bucket (main_category id 1 /
+    sub_category id 1) -- skipping it would break every later test that
     touches it.
 
     Uses migrate_db.py's own sync engine and SEED_BUCKET_SQL rather than

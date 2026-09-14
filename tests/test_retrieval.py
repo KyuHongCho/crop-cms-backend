@@ -105,8 +105,8 @@ def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
 
 
 def test_a_normal_response_always_carries_a_dropped_field(client):
-    """`dropped` is always present. With one topic per request today it is
-    always empty, but multi-topic selection can fill it later without changing
+    """`dropped` is always present, even though a single-topic request never
+    populates it: multi-topic selection can fill it later without changing
     the response shape (TopicSetResponse in app/schema/retrieval.py)."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 2)
@@ -176,8 +176,9 @@ def test_the_topic_set_statement_compiles_without_a_limit():
 
 
 def test_the_sql_actually_executed_contains_no_limit(client, caplog):
-    """The other half of the pair above: `echo=True` (app/db/db.py:16) logs
-    every statement, so what PostgreSQL was really asked is observable."""
+    """The other half of the pair above: `engine.echo = True` (app/db/db.py's
+    default) logs every statement, so what PostgreSQL was really asked is
+    observable."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12)
 
@@ -191,8 +192,9 @@ def test_the_sql_actually_executed_contains_no_limit(client, caplog):
         if "FROM items" in record.getMessage()
     ]
     assert logged, (
-        "no SELECT against items was logged -- echo=True (db.py:16) should have "
-        "logged it; this test cannot see a LIMIT it never captured"
+        "no SELECT against items was logged -- engine.echo (db.py's default of "
+        "True) should have logged it; this test cannot see a LIMIT it never "
+        "captured"
     )
     for statement in logged:
         assert "LIMIT" not in statement.upper(), statement
@@ -236,14 +238,15 @@ def test_a_topic_with_no_published_documents_returns_an_empty_set_not_404(client
 # --- Topic selection and the context budget ----------------------------------
 #
 # Three rules: (1) score a topic by its best-matching chunk, (2) keep the top k
-# topics, (3) fit the kept topics into the context budget. Rules 1 and 2 need
-# embeddings, which do not exist yet, so only k's value is checked. Rule 3 is
-# built and tested below with hand-made TopicCandidates, ready for real scores.
+# topics, (3) fit the kept topics into the context budget. Rules 1 and 2
+# depend on embeddings, so only k's value is checked directly. Rule 3 is
+# built and tested below with hand-made TopicCandidates, ready for real
+# scores from Rules 1 and 2 once they exist.
 
 
 def test_k_defaults_to_3():
-    """Rule 2: k is 3 by default. There is no topic selection to run it
-    through yet, so this checks the constant directly."""
+    """Rule 2: k is 3 by default. Checked directly, since no code drives it
+    through real topic selection."""
     assert retrieval.TOPIC_SELECTION_K == 3
 
 
@@ -359,8 +362,9 @@ def test_assemble_within_budget_never_partially_truncates_a_kept_topic():
 
 
 def test_assemble_within_budget_refuses_when_a_single_topic_alone_exceeds_budget():
-    """Rule 3 clause 2: refuse only when a single topic ALONE exceeds the
-    budget -- dropping every other topic could not make it fit."""
+    """Rule 3's refusal step (see assemble_within_budget): refuse only when a
+    single topic alone exceeds the budget -- dropping every other topic could
+    not make it fit."""
     oversized = retrieval.TopicCandidate(
         topic="huge", score=1.0, documents=[_document(index=i, body="x" * 1000) for i in range(5)],
     )
@@ -374,9 +378,10 @@ def test_assemble_within_budget_refuses_when_a_single_topic_alone_exceeds_budget
 
 
 def test_assemble_within_budget_drops_an_oversized_low_scoring_topic_to_save_two_smaller_ones():
-    """Regression: an oversized topic that also scores lowest is dropped,
-    letting the two smaller topics through. Earlier code checked for oversized
-    topics before dropping anything, and refused the whole request."""
+    """Regression guard: an oversized topic that also scores lowest is
+    dropped, letting the two smaller topics through -- checking for an
+    oversized topic must happen after dropping, not before, or the whole
+    request would be refused instead."""
     good_a = retrieval.TopicCandidate(topic="good-a", score=0.9, documents=[_document(body="a" * 20)])
     good_b = retrieval.TopicCandidate(topic="good-b", score=0.8, documents=[_document(body="b" * 20)])
     huge = retrieval.TopicCandidate(topic="huge", score=0.1, documents=[_document(body="h" * 1000)])
@@ -428,9 +433,9 @@ def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
     assert detail["reason"] == "topic_alone_exceeds_context_budget"
 
 
-# --- topic casing/whitespace normalization ------------------------------------
+# --- topic casing/whitespace normalisation -----------------------------------
 #
-# Item.topic is normalized by a SQLAlchemy @validates hook on the model
+# Item.topic is normalised by a SQLAlchemy @validates hook on the model
 # (Item._normalize_topic), not a Pydantic validator: scripts/seed.py builds Item
 # objects directly and never goes through Pydantic. The hook covers both the
 # API and the seed script.
@@ -471,7 +476,7 @@ def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(client):
 
 def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(sync_db_session):
     """The seed script's write path: Item objects built directly with the ORM,
-    bypassing HTTP and Pydantic. It must normalize topics too."""
+    bypassing HTTP and Pydantic. It must normalise topics too."""
     crop_id = _make_crop("basil")
 
     def _write(topic: str, title: str) -> None:
@@ -497,11 +502,11 @@ def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(syn
     assert {item.topic for item in result} == {"optimal-temperature"}
 
 
-def test_normalization_does_not_retroactively_heal_a_pre_fix_row(client):
-    """Known limitation: rows written without the ORM are not normalized after
+def test_normalization_does_not_heal_a_row_written_without_the_orm(client):
+    """Known limitation: rows written without the ORM are not normalised after
     the fact. A Core insert (used here) skips @validates, so this row keeps its
     original casing. Existing data would need a one-time backfill; none is
-    included because the dev database holds no un-normalized topics."""
+    included because the dev database holds no un-normalised topics."""
     crop_id = _make_crop("basil")
     with sync_engine.begin() as connection:
         connection.execute(
@@ -510,7 +515,7 @@ def test_normalization_does_not_retroactively_heal_a_pre_fix_row(client):
                 dict(
                     sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID,
                     crop_id=crop_id,
-                    topic=" Optimal-Temperature ",  # never normalized -- Core insert
+                    topic=" Optimal-Temperature ",  # never normalised -- Core insert
                     title="legacy row",
                     body="a body",
                     published=True,

@@ -1,17 +1,19 @@
 """Response shapes for topic-set retrieval.
 
-There is deliberately **no request shape and no `limit` field** anywhere in
-this module. The endpoint takes a crop and a topic and returns the whole set:
-see `app/model/model.py:92-94` -- "retrieval returns every document sharing a
-`topic` rather than a top-k slice -- otherwise a LIMIT silently picks a winner
-among disagreeing sources." A `limit` a caller could opt into is still a way to
-pick that winner, so it does not exist to be opted into.
+There is deliberately **no request shape and no `limit` field** anywhere
+in this module. The endpoint takes a crop and a topic and returns the
+whole set: see Item's docstring in `app/model/model.py` -- "retrieval
+returns every document sharing a `topic` rather than a top-k slice --
+otherwise a LIMIT silently picks a winner among disagreeing sources." An
+opt-in `limit` would still let a caller pick that winner, so none is
+offered.
 
 `RetrievedDocument` deliberately does not reuse `app/schema/item.py`'s
 `ItemResponse`. That one is the CMS's authoring view and carries
-`sub_category_id` -- filing metadata, which the retrieval consumer has no use
-for and which is not provenance. The overlap is not accidental duplication:
-the two shapes answer to different callers and are free to diverge.
+`sub_category_id` -- filing metadata the retrieval consumer has no use
+for, and which is not provenance. The overlap is not accidental
+duplication: the two shapes answer to different callers and are free to
+diverge.
 """
 from typing import Literal
 
@@ -34,7 +36,7 @@ class RetrievedDocument(BaseModel):
     title: str
     body: str
 
-    # --- provenance, mirroring crop_advisor/claims.py:40-47 -----------------
+    # --- provenance, modelled on crop_advisor/claims.py's Claim -------------
     source: str
     reference: str
     url: str
@@ -79,7 +81,8 @@ class TopicSetResponse(BaseModel):
 
 
 class BudgetRefusal(BaseModel):
-    """Rule 3 clause 2: refuse only when a single topic alone exceeds the budget.
+    """Rule 3's refusal step (see assemble_within_budget): refuse only when a
+    single topic alone exceeds the budget.
 
     Carried as the `detail` of an HTTP 413. Naming the topic and its document
     count is the whole point -- the refusal has to be more useful than a

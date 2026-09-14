@@ -12,7 +12,7 @@ DB_NAME = os.getenv("DB_NAME", "cms")
 # psycopg 3 serves async here and sync in migrate_db.py, so one driver covers both.
 ASYNC_DB_URL = f"postgresql+psycopg_async://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# echo=True logs every statement: useful while learning, noisy in production.
+# echo=True logs every statement -- noisy in production.
 engine = create_async_engine(ASYNC_DB_URL, echo=True)
 
 async_session = sessionmaker(

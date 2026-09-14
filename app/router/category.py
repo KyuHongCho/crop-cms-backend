@@ -15,18 +15,17 @@ async def _raise_from_integrity_error(db: AsyncSession, exc: IntegrityError) -> 
 
     23505 (unique_violation) -> 409, naming the constraint that actually
     fired via exc.orig.diag.constraint_name. A blanket `IntegrityError -> 409`
-    would report a desynced sequence's pkey collision (constraint
+    would misreport a desynced sequence's pkey collision (constraint
     "main_categories_pkey") as "a category with that slug already exists"
-    (constraint "main_categories_slug_key") -- see plan-2's "Preconditions on
-    the sibling plan" #1. Naming the real constraint is what tells the two
-    apart.
+    (constraint "main_categories_slug_key"); naming the real constraint
+    tells the two apart.
 
-    23514 (check_violation) -> 422, kept as a documented drift backstop, like
-    the P0001 handler in delete_sub_category below. Neither category table
-    carries a CHECK constraint today, so this branch is not reachable through
-    this router -- it exists for the day one is added here, the way
-    schema/item.py:ItemCreate's own validator already returns 422 for
-    Item.read_directly_excludes_via before the database is ever asked.
+    23514 (check_violation) -> 422, a documented drift backstop (see the
+    P0001 handler in delete_sub_category below). Neither category table has
+    a CHECK constraint today, so this branch is unreachable here -- it
+    exists for the day one is added, mirroring how
+    schema/item.py:ItemCreate's validator already returns 422 for
+    Item.read_directly_excludes_via before the database is asked.
 
     Anything else is re-raised untouched: a real bug (a typo'd column, a
     missing table) must stay a 500, not be dressed up as a conflict.
@@ -47,9 +46,8 @@ async def _raise_from_integrity_error(db: AsyncSession, exc: IntegrityError) -> 
     raise exc
 
 
-# "main category" = kind of knowledge (crop profile, research literature,
-# cultivation practice, pests and disorders). A crop is NOT one -- see
-# MainCategory's docstring in model.py.
+# "main category" = kind of knowledge -- see MainCategory's docstring in
+# model.py for what that means and why a crop is not one.
 @router.get(
     "/main-categories",
     response_model=list[category_schema.MainCategoryResponse],
@@ -108,7 +106,7 @@ async def delete_main_category(
     main_category_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete an EMPTY main category. One with sub-categories is refused.
+    """Delete an empty main category. One with sub-categories is refused.
 
     Refused rather than cascaded: deleting "research literature" should not
     quietly take every document filed beneath it. Delete the sub-categories
@@ -143,7 +141,7 @@ async def delete_sub_category(
     sub_category_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a sub-category. Its documents are REFILED, never destroyed.
+    """Delete a sub-category. Its documents are refiled, never destroyed.
 
     200 with a count, not an empty 204: the documents move, and the caller
     should be told where. The move is done by a trigger in the database, so

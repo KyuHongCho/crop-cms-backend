@@ -15,9 +15,8 @@ import app.schema.category as category_schema
 async def get_main_categories(db: AsyncSession) -> list[model.MainCategory]:
     """selectinload is mandatory, not an optimisation.
 
-    MainCategoryResponse reads .subcategories; a lazy load under the async
-    session raises MissingGreenlet, which pydantic wraps in a ValidationError
-    and FastAPI serves as HTTP 500.
+    See MainCategoryResponse's docstring (app/schema/category.py) for why a
+    lazy load under the async session would turn this into an HTTP 500.
     """
     result = await db.execute(
         select(model.MainCategory)
@@ -33,7 +32,7 @@ async def create_main_category(
     main_category = model.MainCategory(**body.model_dump())
     db.add(main_category)
     await db.commit()
-    # expire_on_commit=False (db.py:19) keeps the scalar columns readable here
+    # expire_on_commit=False in db.py keeps the scalar columns readable here
     # without a refresh -- but .subcategories was never loaded, and
     # MainCategoryResponse reads it. Without this line the create returns 500.
     await db.refresh(main_category, ["subcategories"])
@@ -91,15 +90,15 @@ async def delete_sub_category(
 ) -> int:
     """Delete a sub-category and report how many documents were refiled.
 
-    The refiling is not done here -- the trigger in app/db/migrate_db.py moves
-    the documents as part of the same statement, so psql behaves like this
-    endpoint. All this adds is the count, taken first, because afterwards the
-    moved documents look exactly like ones already in the bucket.
+    The refiling happens in the trigger in app/db/migrate_db.py, not here:
+    it moves the documents as part of the same DELETE, so psql behaves the
+    same way. This only adds the count, taken first, since afterwards the
+    moved documents look identical to ones already in the bucket.
 
-    That count can under-report: a document inserted between the count and the
-    DELETE is refiled but not counted. Locking the sub-category first
-    (SELECT ... FOR UPDATE) would close the gap, and is deliberately not paid
-    for -- this is a single-user CMS with no concurrent writer.
+    The count can under-report a document inserted between the count and
+    the DELETE -- refiled but not counted. Locking the sub-category first
+    (SELECT ... FOR UPDATE) would close that gap but is not worth it here:
+    this is a single-user CMS with no concurrent writer.
     """
     refiled = await db.scalar(
         select(func.count())

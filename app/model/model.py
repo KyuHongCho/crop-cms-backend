@@ -7,9 +7,10 @@ from sqlalchemy.orm import relationship, validates
 from app.db.db import Base
 
 # The "Uncategorised" bucket: where a deleted sub-category's documents are
-# refiled to, instead of being destroyed. app/db/migrate_db.py writes this same
-# number into the seeded rows and into the trigger, which cannot read a Python
-# constant. CI checks the seeded ids still match these.
+# refiled to, instead of being destroyed. Its id lives in three places that
+# must agree: these constants, the seed SQL in app/db/migrate_db.py, and the
+# trigger body there, which cannot read a Python constant. CI checks the
+# seeded ids still match these.
 UNCATEGORISED_MAIN_CATEGORY_ID = 1
 UNCATEGORISED_SUB_CATEGORY_ID = 1
 
@@ -28,15 +29,16 @@ class Crop(Base):
 
     # "all", not True. True only skips the look-ahead SELECT; it does not stop
     # SQLAlchemy blanking the foreign key of documents already in memory, which
-    # breaks NOT NULL and makes the delete a 500. Nothing loads them today, so
-    # True would look fine -- "all" is what keeps it fine after someone adds a
-    # selectinload, by leaving the decision to PostgreSQL either way.
+    # breaks NOT NULL and makes the delete a 500. No code path here loads them
+    # eagerly, so True would look identical to "all" -- but "all" is what keeps
+    # the delete correct once something does add a selectinload, by leaving the
+    # decision to PostgreSQL either way.
     items = relationship("Item", back_populates="crop", passive_deletes="all")
 
 
 class MainCategory(Base):
     """Kind of knowledge: crop profile, research literature, cultivation
-    practice, pests and disorders. Crop is NOT a category -- it is an entity,
+    practice, pests and disorders. Crop is not a category -- it is an entity,
     so adding a crop does not duplicate this tree."""
 
     __tablename__ = "main_categories"
@@ -85,7 +87,7 @@ class SubCategory(Base):
 class Item(Base):
     """One narrative document with its provenance.
 
-    Holds prose ABOUT agronomic figures, never the figures: bands live in the
+    Holds prose about agronomic figures, never the figures: bands live in the
     advisor's ECOCROP data and claims module.
 
     There is deliberately no priority, rank or is_primary column. Documents that
@@ -102,11 +104,10 @@ class Item(Base):
             "NOT (read_directly AND coalesce(btrim(via), '') <> '')",
             name="read_directly_excludes_via",
         ),
-        # `items_pkey` was the only index before `ix_items_crop_id_topic`
-        # below was added (verified via `\d items`). Retrieval's
-        # whole-topic-set query filters on exactly this pair --
-        # app/crud/retrieval.py:topic_set_statement -- so without it every
-        # retrieval request is a sequential scan of `items`.
+        # Composite index on (crop_id, topic): retrieval's whole-topic-set
+        # query (app/crud/retrieval.py:topic_set_statement) filters on
+        # exactly this pair, so without it every retrieval request is a
+        # sequential scan of `items`.
         Index("ix_items_crop_id_topic", "crop_id", "topic"),
     )
 

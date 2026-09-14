@@ -4,8 +4,10 @@ from sqlalchemy import create_engine, text
 # redefine Base here, or create_all() would act on an empty second registry.
 from app.db.db import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME, Base
 
-# Importing the model module is what registers its classes on Base.metadata.
-# Without this, create_all() succeeds and creates nothing. One import per file.
+# app.model.model is imported twice below. This bare import registers its
+# classes on Base.metadata -- without it, create_all() succeeds and creates
+# nothing. The `from ... import` further down pulls the id constants from
+# the same module.
 import app.model.model  # noqa: F401
 from app.model.model import (
     UNCATEGORISED_MAIN_CATEGORY_ID,
@@ -19,11 +21,9 @@ engine = create_engine(DB_URL, echo=True)
 
 # --- the "Uncategorised" bucket -------------------------------------------
 #
-# Where a deleted sub-category's documents are refiled to. Its id lives in three
-# places that must agree: the constants in model.py, the seed below, and the
-# trigger body -- which cannot read Python, so its copy is filled in here, next
-# to the seed, where the two cannot drift apart. CI re-reads the seeded rows and
-# checks them against the constants.
+# Where a deleted sub-category's documents are refiled to. See the
+# constants' comment in model.py for why this id is duplicated here and in
+# the trigger body below, rather than read from Python.
 #
 # Inserting an explicit id does not move the table's id counter along, so both
 # are reset with setval afterwards. Skip that and the next INSERT collides with

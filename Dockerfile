@@ -4,10 +4,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/src
 WORKDIR /src
 
-# The production-target / ARG INSTALL_DEV split is deliberately dropped:
-# build: . in docker-compose.yaml passes no args, so a conditional branch
-# would be reachable only by a `docker build --build-arg` nothing here
-# performs. The dev image simply carries the test tooling; docs/design-notes.md says so.
+# Installs both requirement files unconditionally, so dev tooling (pytest,
+# httpx2, ...) ships in the same image as the application -- see
+# docs/design-notes.md's "Dev tooling" paragraph for why.
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install -r requirements.txt -r requirements-dev.txt
 

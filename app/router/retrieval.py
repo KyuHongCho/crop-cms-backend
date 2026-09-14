@@ -1,6 +1,7 @@
 """Topic-set retrieval: crop + topic in, the complete published document set
 out. See app/crud/retrieval.py for why there is no `limit` parameter here and
-none is ever coming -- app/model/model.py:92-94 is the constraint.
+none is ever coming -- Item's docstring in app/model/model.py is the
+constraint.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +34,8 @@ async def get_topic_set(
 
     No `limit`. Every published document sharing `topic` for this crop comes
     back, or the request is refused (413) naming the topic and its document
-    count, per Rule 3 clause 2 -- never a silent slice.
+    count, per Rule 3's refusal step (see assemble_within_budget) -- never a
+    silent slice.
     """
     crop_id = await retrieval_crud.get_crop_id_by_slug(db, crop_slug)
     if crop_id is None:
@@ -41,9 +43,10 @@ async def get_topic_set(
 
     documents = await retrieval_crud.get_topic_set(db, crop_id, topic)
 
-    # A single candidate today -- there is no topic *selection* yet
-    # (Rules 1/2). Routed through the same Rule 3 policy multi-topic selection
-    # will use, so the refusal path is real, tested code, not a stub.
+    # One candidate per request: topic *selection* (Rules 1/2) is not part of
+    # this path. It is routed through the same Rule 3 policy multi-topic
+    # selection will use, so the refusal path is real, tested code, not a
+    # stub.
     candidate = TopicCandidate(topic=topic, score=0.0, documents=documents)
     try:
         _kept, budget_dropped = assemble_within_budget([candidate])
