@@ -223,6 +223,25 @@ jobs:
             truncated subset, unrelated to planning. When you find a real one, suggest the same
             fact stated without naming the planning unit (e.g. "until Slice 6 builds topic
             selection" -> "until topic selection is built"), not merely its deletion.
+      # Same fail-open gap this job's harness shares with review-audit's own agent step: a run can
+      # finish `is_error=false, conclusion=success` after composing its summary comment as plain
+      # assistant text, without ever calling `gh pr comment` to post it -- reproduced for
+      # review-audit on a real run; this job shares the identical `claude-code-action` mechanism.
+      - name: Confirm the review actually posted its comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.gate.outputs.pr }}
+          GATE_STARTED_AT: ${{ needs.gate.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          : "${GATE_STARTED_AT:?gate emitted no started_at -- refusing to check unscoped}"
+          found=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            | jq -s --arg since "$GATE_STARTED_AT" \
+            '[.[][] | select(.created_at >= $since and (.body | test("^### Review ")))] | length')
+          if [ "$found" -eq 0 ]; then
+            echo "::error::review's agent step exited successfully but never posted its '### Review —' summary comment. Failing this job so finalize does not label the PR 'Review finished'."
+            exit 1
+          fi
       # The run log reports how MANY calls were denied but never WHICH, so a too-narrow tool list
       # could only be widened by guesswork. Upload the agent's transcript instead and read them.
       # `if: always()` because the failing run is the interesting one.
@@ -341,13 +360,18 @@ jobs:
           # per-page output is piped into a real `jq -s` (slurp) call, which both supports `--arg`
           # and merges every page into one array before filtering -- `--paginate` alone, without
           # slurping, leaves `found` as one number per page (e.g. "0\n0"), which silently PASSES
-          # the check below instead of failing it, confirmed by reproducing it locally. `set -euo
-          # pipefail` above closes the other silent-pass path: without it, a failed `gh api` call
-          # still lets `found` become empty, `[ "$found" -eq 0 ]` then errors instead of matching,
-          # and the step exits 0 -- also confirmed by reproducing it locally.
+          # the check below instead of failing it, confirmed by reproducing it locally. `jq -s` on
+          # its own already turns a failed/empty `gh api` call into a clean `found=0` (confirmed:
+          # `printf '' | jq -s '[.[][]]|length'` -> `0`), so `set -euo pipefail` is NOT what closes
+          # that path -- it is here for the one thing `jq -s` cannot recover from: malformed JSON
+          # (e.g. a truncated or non-JSON API response), where `jq` itself errors with no output,
+          # reproducing the original silent pass unless the script aborts first (confirmed).
+          # The heading match also tolerates the separator drifting from the guideline's literal
+          # em dash to a plain hyphen, since an LLM -- not a template -- produces it (confirmed:
+          # both forms match; "### Review --"/"### Review-audit -" do not cross-match each other).
           found=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
             | jq -s --arg since "$GATE_STARTED_AT" \
-            '[.[][] | select(.created_at >= $since and (.body | test("^### Review-audit —")))] | length')
+            '[.[][] | select(.created_at >= $since and (.body | test("^### Review-audit ")))] | length')
           if [ "$found" -eq 0 ]; then
             echo "::error::review-audit's agent step exited successfully but never posted its '### Review-audit —' comment. Failing this job so finalize does not label the PR 'Review finished'."
             exit 1
