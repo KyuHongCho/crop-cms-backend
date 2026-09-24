@@ -256,7 +256,7 @@ jobs:
 
   review-audit:
     needs: [gate, review]
-    if: always() && needs.gate.outputs.run == 'true'
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
