@@ -80,26 +80,49 @@ jobs:
           docker compose exec -T cms python -m pytest tests/test_seed.py --collect-only -q -rs
 
       - name: Test suite runs against db-test/cms_test, never the dev database
-        # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py already
-        # reads both from the environment. migrate_db.py builds the schema
-        # fresh in cms_test first -- db-test is tmpfs-backed and starts empty
-        # every run.
+        # -e overrides DB_HOST/DB_NAME for this exec only; app/db/db.py and
+        # alembic/env.py already read both from the environment. `alembic
+        # upgrade head` builds the schema fresh in cms_test first -- db-test
+        # is tmpfs-backed and starts empty every run, so this always starts
+        # from base, never needing `stamp head` (that is only for a database
+        # `create_all()` already built -- see the next step's comment).
+        # migrate_db.py no longer runs in CI at all: its reset_database() is
+        # now guarded to refuse once `alembic_version` exists.
         run: |
           docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
-            python -m app.db.migrate_db
+            alembic upgrade head
           docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
             python -m pytest -q
 
-      - name: Migrations create every table
-        # Guards the silent failure: if app/model/model.py is empty or never
-        # imported, create_all() succeeds and creates nothing. Asserting the
-        # count is what makes that visible.
+      - name: Migrations create the content tables, the index and alembic_version
+        # Guards the silent failure Alembic itself can produce: autogenerate
+        # diffs the target database's current schema against the models, so
+        # running it against an already-built database (confirmed by doing
+        # so) finds nothing different and emits an empty `upgrade()` with no
+        # error -- run that migration and it would create nothing, exactly
+        # like the old create_all()-is-empty trap this step already guarded
+        # against. A fresh runner has no volume, so `db`'s `cms` is empty
+        # here and `alembic upgrade head` (not `stamp head`) is what a
+        # genuinely fresh deployment would run.
+        #
+        # The assertion is a named set, not a bare count: `alembic upgrade
+        # head` now also creates `alembic_version`, so "4" stopped meaning
+        # "the schema" and started meaning "one content table short".
         run: |
-          docker compose exec -T cms python -m app.db.migrate_db
-          count=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
-            "SELECT count(*) FROM pg_tables WHERE schemaname='public';" | tr -d '[:space:]')
-          echo "tables created: $count"
-          test "$count" = "4"
+          docker compose exec -T cms alembic upgrade head
+          tables=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT string_agg(tablename, ',' ORDER BY tablename)
+               FROM pg_tables
+              WHERE schemaname = 'public' AND tablename <> 'alembic_version';" \
+            | tr -d '[:space:]')
+          echo "content tables created: $tables"
+          test "$tables" = "crops,items,main_categories,sub_categories"
+          version_table=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT count(*) FROM pg_tables
+              WHERE schemaname = 'public' AND tablename = 'alembic_version';" \
+            | tr -d '[:space:]')
+          echo "alembic_version present: $version_table"
+          test "$version_table" = "1"
 
       - name: The Uncategorised bucket is seeded where the code expects it
         # See the constants' comment in app/model/model.py for why this id

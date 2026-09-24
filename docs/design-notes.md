@@ -208,12 +208,15 @@ asserted. The suite is real and runs in `stack`; the reviewer just cannot reach 
 app/
   main.py            FastAPI app, router registration
   db/db.py           async engine, session factory, the single declarative Base
-  db/migrate_db.py   sync engine, drop_all + create_all, the "Uncategorised" seed
-                     and the BEFORE DELETE refile trigger
+  db/migrate_db.py   sync engine; the "Uncategorised" seed SQL and the BEFORE DELETE
+                     refile trigger SQL, both reused by alembic/versions/*_baseline.py.
+                     Its own drop_all + create_all path is now a guarded pre-Alembic
+                     artifact -- it refuses to run once alembic_version exists.
   model/model.py     Crop, MainCategory, SubCategory, Item — the contract everything matches
   schema/            Pydantic request/response shapes
   crud/              data access — queries and commits (routers do 404 pre-checks)
   router/            HTTP surface
+alembic/             schema migrations, run inside the cms container (`alembic upgrade head`)
 scripts/seed.py      the basil demo corpus — idempotent, keyed on (crop, title, source)
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI
