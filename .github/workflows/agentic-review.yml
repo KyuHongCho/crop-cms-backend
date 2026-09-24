@@ -334,15 +334,20 @@ jobs:
           PR: ${{ needs.gate.outputs.pr }}
           GATE_STARTED_AT: ${{ needs.gate.outputs.started_at }}
         run: |
+          set -euo pipefail
           : "${GATE_STARTED_AT:?gate emitted no started_at -- refusing to check unscoped}"
-          # `gh api`'s own `-q/--jq` flag takes exactly one string argument -- it is not the `jq`
-          # binary and does not accept `jq`'s `--arg`. Piping into a real `jq` call, as below, is
-          # what actually supports it: passing `--arg` to `gh api --jq` directly instead (an
-          # earlier version of this line did) errors with "accepts 1 arg(s), received 4" and would
-          # have failed this check on every PR, whether or not review-audit actually posted.
+          # `gh api`'s `--jq` cannot take `jq`'s `--arg`, and cannot be combined with `--slurp`
+          # either (confirmed: `--slurp` is not supported with `--jq`). So the raw, one-array-
+          # per-page output is piped into a real `jq -s` (slurp) call, which both supports `--arg`
+          # and merges every page into one array before filtering -- `--paginate` alone, without
+          # slurping, leaves `found` as one number per page (e.g. "0\n0"), which silently PASSES
+          # the check below instead of failing it, confirmed by reproducing it locally. `set -euo
+          # pipefail` above closes the other silent-pass path: without it, a failed `gh api` call
+          # still lets `found` become empty, `[ "$found" -eq 0 ]` then errors instead of matching,
+          # and the step exits 0 -- also confirmed by reproducing it locally.
           found=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
-            | jq --arg since "$GATE_STARTED_AT" \
-            '[.[] | select(.created_at >= $since and (.body | test("^### Review-audit —")))] | length')
+            | jq -s --arg since "$GATE_STARTED_AT" \
+            '[.[][] | select(.created_at >= $since and (.body | test("^### Review-audit —")))] | length')
           if [ "$found" -eq 0 ]; then
             echo "::error::review-audit's agent step exited successfully but never posted its '### Review-audit —' comment. Failing this job so finalize does not label the PR 'Review finished'."
             exit 1
