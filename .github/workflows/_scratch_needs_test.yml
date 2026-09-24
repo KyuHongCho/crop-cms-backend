@@ -1,5 +1,7 @@
 name: Scratch - needs/always semantics test
-on: workflow_dispatch
+on:
+  pull_request:
+    types: [opened]
 
 jobs:
   gate:
