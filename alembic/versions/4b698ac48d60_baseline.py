@@ -15,16 +15,44 @@ The trigger and the "Uncategorised" bucket row are added by hand: they are
 not SQLAlchemy-mapped constructs, so autogenerate cannot see them, but
 `app/db/migrate_db.py` is guarded off once this table exists (see its
 reset_database()), so this migration is now the only thing that puts them
-on a fresh database. Reusing migrate_db.py's own SQL constants -- the same
-ones tests/conftest.py already imports -- keeps one source of truth rather
-than a second copy of the bucket id and trigger body to drift out of sync.
+on a fresh database. Their SQL is written out below with the ids already
+resolved, rather than imported from migrate_db.py: a migration is a frozen
+record of what a database was given, so a later edit to the bucket id or the
+trigger body must arrive as a new revision, not by silently changing this one.
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
-from app.db.migrate_db import CREATE_REFILE_TRIGGER_SQL, SEED_BUCKET_SQL
+SEED_BUCKET_SQL = """
+INSERT INTO main_categories (id, slug, name, position)
+     VALUES (1, 'uncategorised', 'Uncategorised', 0);
+INSERT INTO sub_categories (id, main_category_id, slug, name, position)
+     VALUES (1, 1,
+             'uncategorised', 'Uncategorised', 0);
+SELECT setval('main_categories_id_seq', (SELECT max(id) FROM main_categories));
+SELECT setval('sub_categories_id_seq',  (SELECT max(id) FROM sub_categories));
+"""
+
+CREATE_REFILE_TRIGGER_SQL = """
+CREATE OR REPLACE FUNCTION refile_items_to_uncategorised() RETURNS trigger AS $$
+BEGIN
+    IF OLD.id = 1 THEN
+        RAISE EXCEPTION
+            'the "Uncategorised" sub-category cannot be deleted: it is where documents from deleted sub-categories are refiled to';
+    END IF;
+    UPDATE items
+       SET sub_category_id = 1
+     WHERE sub_category_id = OLD.id;
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER refile_items_before_sub_category_delete
+    BEFORE DELETE ON sub_categories
+    FOR EACH ROW EXECUTE FUNCTION refile_items_to_uncategorised();
+"""
 
 # revision identifiers, used by Alembic.
 revision: str = '4b698ac48d60'

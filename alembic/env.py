@@ -20,8 +20,10 @@ from app.db.db import ASYNC_DB_URL, Base
 config = context.config
 
 # Overrides alembic.ini's placeholder: one source of truth for the URL,
-# consistent with app/db/migrate_db.py's DB_URL construction.
-config.set_main_option("sqlalchemy.url", ASYNC_DB_URL)
+# consistent with app/db/migrate_db.py's DB_URL construction. The "%" is
+# doubled because set_main_option runs the value through ConfigParser
+# interpolation, which rejects a bare "%" (a DB_PASSWORD may contain one).
+config.set_main_option("sqlalchemy.url", ASYNC_DB_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

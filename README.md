@@ -115,12 +115,12 @@ docker compose exec cms alembic downgrade base  # undo them all -- DROPS every t
 The one-time exception is the database this repository shipped with before Alembic existed: it
 already has the tables (built by the retired `python -m app.db.migrate_db`), so applying the
 baseline migration to it fails with `DuplicateTable`. That database's `alembic_version` was set to
-head with `alembic stamp head` — which only records the migration as applied and runs none of its
-SQL, so it does **not** by itself bring the schema in line with what the migration would produce.
-Any DDL the baseline migration adds beyond what `migrate_db.py` already created (for example an
-index) still has to be applied by hand once, after which `alembic check` reporting no drift is what
-actually confirms reconciliation — not the `stamp head` step alone. A database created after this
-point always uses `alembic upgrade head`, which needs no such manual follow-up.
+head with `alembic stamp head`, which records the migration as applied and runs none of its SQL.
+That is sufficient: the baseline emits nothing that database lacks. The tables, the
+`ix_items_crop_id_topic` index (declared in `Item.__table_args__`), the bucket row and the refile
+trigger were all built by `migrate_db.py`. `alembic check` reporting no drift confirms the tables
+and index only; it cannot see the bucket row or the trigger. A database created after this point
+always uses `alembic upgrade head`, which needs no stamp.
 
 [`app/db/migrate_db.py`](app/db/migrate_db.py) stays in the tree as a guarded pre-Alembic learning
 artifact: it now refuses to run at all once `alembic_version` exists, so it can never be pointed at

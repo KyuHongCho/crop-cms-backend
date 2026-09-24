@@ -108,6 +108,10 @@ jobs:
         # The assertion is a named set, not a bare count: `alembic upgrade
         # head` now also creates `alembic_version`, so "4" stopped meaning
         # "the schema" and started meaning "one content table short".
+        #
+        # `alembic check` then diffs the migrated schema against the models,
+        # which is what catches an empty or incomplete later revision; the
+        # table-set assertion above only pins the current schema.
         run: |
           docker compose exec -T cms alembic upgrade head
           tables=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
@@ -123,6 +127,7 @@ jobs:
             | tr -d '[:space:]')
           echo "alembic_version present: $version_table"
           test "$version_table" = "1"
+          docker compose exec -T cms alembic check
 
       - name: The Uncategorised bucket is seeded where the code expects it
         # See the constants' comment in app/model/model.py for why this id

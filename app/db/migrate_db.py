@@ -70,15 +70,16 @@ CREATE TRIGGER refile_items_before_sub_category_delete
 
 def reset_database():
     # Once a database has an `alembic_version` table, Alembic owns its schema
-    # history. drop_all()+create_all() here would destroy that schema and
-    # rebuild an identical-looking one with no migration history behind it --
-    # the next `alembic upgrade head` would then fail with DuplicateTable,
-    # confirmed by running it against an already-built dev database: the
-    # migration's `op.create_table` calls collide with tables that already
-    # exist. The two are mutually exclusive by design, not merely by
-    # convention, so this refuses rather than warns. Kept only as a guarded
-    # pre-Alembic learning artifact -- CI no longer calls this function at
-    # all.
+    # history. drop_all() here would leave that table standing -- it belongs
+    # to Alembic's own metadata, not to Base.metadata -- so the rebuild would
+    # be a schema Alembic never produced, sitting behind a version row that
+    # still claims head. The next `alembic upgrade head` then finds nothing to
+    # run and exits 0, so the divergence is silent. (DuplicateTable is the
+    # other case: upgrading a create_all()-built database that was never
+    # stamped -- see the README's Migrations section.) The two are mutually
+    # exclusive by design, not merely by convention, so this refuses rather
+    # than warns. Kept only as a guarded pre-Alembic learning artifact -- CI
+    # no longer calls this function at all.
     with engine.begin() as connection:
         managed = connection.execute(
             text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
