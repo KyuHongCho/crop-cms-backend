@@ -223,10 +223,11 @@ jobs:
             truncated subset, unrelated to planning. When you find a real one, suggest the same
             fact stated without naming the planning unit (e.g. "until Slice 6 builds topic
             selection" -> "until topic selection is built"), not merely its deletion.
-      # Same fail-open gap this job's harness shares with review-audit's own agent step: a run can
-      # finish `is_error=false, conclusion=success` after composing its summary comment as plain
-      # assistant text, without ever calling `gh pr comment` to post it -- reproduced for
-      # review-audit on a real run; this job shares the identical `claude-code-action` mechanism.
+      # Same fail-open gap review-audit's own equivalent step exists to close: by design,
+      # claude-code-action's `conclusion` output reflects only whether the agent process itself
+      # ended without an SDK error, not whether `gh pr comment` was ever actually called. The
+      # `jq -s`/`--arg`/`set -euo pipefail` reasoning is identical to review-audit's copy below --
+      # see the comment there.
       - name: Confirm the review actually posted its comment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -255,7 +256,7 @@ jobs:
 
   review-audit:
     needs: [gate, review]
-    if: needs.gate.outputs.run == 'true'
+    if: always() && needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -341,12 +342,12 @@ jobs:
             about. A finding that flags "top-k slice" or the review process's own vocabulary is a
             false positive; a real "Slice N" reference in the diff's comments that the review
             missed is a gap you must raise.
-      # claude-code-action's own `conclusion` output only reflects whether the agent process ended
-      # without an SDK error -- it has no idea whether a `gh pr comment` call actually happened.
-      # Confirmed empirically: a run can finish with is_error=false, subtype=success, zero
-      # permission denials, and a fully-composed, guideline-correct comment -- as plain assistant
-      # text that was never wrapped in a tool call -- and still report `conclusion: success`. This
-      # step closes that gap by checking for the actual artifact, not the agent's self-report.
+      # By design, claude-code-action's `conclusion` output reflects only whether the agent
+      # process itself ended without an SDK error -- nothing about which tools, if any, it called.
+      # A run that composes a correct `### Review-audit —` comment as plain assistant text,
+      # without ever invoking `gh pr comment`, would report `conclusion: success` exactly the same
+      # as a run that actually posted it. This step closes that gap by checking for the actual
+      # artifact, not the agent's self-report.
       - name: Confirm the audit actually posted its comment
         env:
           GH_TOKEN: ${{ github.token }}
