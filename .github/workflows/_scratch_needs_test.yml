@@ -1,0 +1,32 @@
+name: Scratch - needs/always semantics test
+on: workflow_dispatch
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.set.outputs.run }}
+    steps:
+      - id: set
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+
+  review_fails:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+
+  review_audit_no_always:
+    needs: [gate, review_fails]
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "review_audit_no_always RAN"
+
+  review_audit_with_always:
+    needs: [gate, review_fails]
+    if: always() && needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "review_audit_with_always RAN"
