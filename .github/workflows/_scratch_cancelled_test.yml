@@ -1,0 +1,27 @@
+name: Scratch - cancelled syntax test
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.set.outputs.run }}
+    steps:
+      - id: set
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+
+  review_fails:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+
+  review_audit_cancelled_syntax:
+    needs: [gate, review_fails]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "review_audit_cancelled_syntax RAN despite review_fails failing"
