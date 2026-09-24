@@ -322,6 +322,26 @@ jobs:
             about. A finding that flags "top-k slice" or the review process's own vocabulary is a
             false positive; a real "Slice N" reference in the diff's comments that the review
             missed is a gap you must raise.
+      # claude-code-action's own `conclusion` output only reflects whether the agent process ended
+      # without an SDK error -- it has no idea whether a `gh pr comment` call actually happened.
+      # Confirmed empirically: a run can finish with is_error=false, subtype=success, zero
+      # permission denials, and a fully-composed, guideline-correct comment -- as plain assistant
+      # text that was never wrapped in a tool call -- and still report `conclusion: success`. This
+      # step closes that gap by checking for the actual artifact, not the agent's self-report.
+      - name: Confirm the audit actually posted its comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.gate.outputs.pr }}
+          GATE_STARTED_AT: ${{ needs.gate.outputs.started_at }}
+        run: |
+          : "${GATE_STARTED_AT:?gate emitted no started_at -- refusing to check unscoped}"
+          found=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq --arg since "$GATE_STARTED_AT" \
+            '[.[] | select(.created_at >= $since and (.body | test("^### Review-audit —")))] | length')
+          if [ "$found" -eq 0 ]; then
+            echo "::error::review-audit's agent step exited successfully but never posted its '### Review-audit —' comment. Failing this job so finalize does not label the PR 'Review finished'."
+            exit 1
+          fi
       # Same transcript upload as the review job -- see the comment there. The artifact name
       # must differ or the two jobs collide on upload.
       - if: always()
