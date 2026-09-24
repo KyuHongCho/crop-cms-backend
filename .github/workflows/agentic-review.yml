@@ -223,6 +223,26 @@ jobs:
             truncated subset, unrelated to planning. When you find a real one, suggest the same
             fact stated without naming the planning unit (e.g. "until Slice 6 builds topic
             selection" -> "until topic selection is built"), not merely its deletion.
+      # Same fail-open gap review-audit's own equivalent step exists to close: by design,
+      # claude-code-action's `conclusion` output reflects only whether the agent process itself
+      # ended without an SDK error, not whether `gh pr comment` was ever actually called. The
+      # `jq -s`/`--arg`/`set -euo pipefail` reasoning is identical to review-audit's copy below --
+      # see the comment there.
+      - name: Confirm the review actually posted its comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.gate.outputs.pr }}
+          GATE_STARTED_AT: ${{ needs.gate.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          : "${GATE_STARTED_AT:?gate emitted no started_at -- refusing to check unscoped}"
+          found=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            | jq -s --arg since "$GATE_STARTED_AT" \
+            '[.[][] | select(.created_at >= $since and (.body | test("^### Review ")))] | length')
+          if [ "$found" -eq 0 ]; then
+            echo "::error::review's agent step exited successfully but never posted its '### Review —' summary comment. Failing this job so finalize does not label the PR 'Review finished'."
+            exit 1
+          fi
       # The run log reports how MANY calls were denied but never WHICH, so a too-narrow tool list
       # could only be widened by guesswork. Upload the agent's transcript instead and read them.
       # `if: always()` because the failing run is the interesting one.
@@ -236,7 +256,7 @@ jobs:
 
   review-audit:
     needs: [gate, review]
-    if: needs.gate.outputs.run == 'true'
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -322,6 +342,41 @@ jobs:
             about. A finding that flags "top-k slice" or the review process's own vocabulary is a
             false positive; a real "Slice N" reference in the diff's comments that the review
             missed is a gap you must raise.
+      # By design, claude-code-action's `conclusion` output reflects only whether the agent
+      # process itself ended without an SDK error -- nothing about which tools, if any, it called.
+      # A run that composes a correct `### Review-audit —` comment as plain assistant text,
+      # without ever invoking `gh pr comment`, would report `conclusion: success` exactly the same
+      # as a run that actually posted it. This step closes that gap by checking for the actual
+      # artifact, not the agent's self-report.
+      - name: Confirm the audit actually posted its comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.gate.outputs.pr }}
+          GATE_STARTED_AT: ${{ needs.gate.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          : "${GATE_STARTED_AT:?gate emitted no started_at -- refusing to check unscoped}"
+          # `gh api`'s `--jq` cannot take `jq`'s `--arg`, and cannot be combined with `--slurp`
+          # either (confirmed: `--slurp` is not supported with `--jq`). So the raw, one-array-
+          # per-page output is piped into a real `jq -s` (slurp) call, which both supports `--arg`
+          # and merges every page into one array before filtering -- `--paginate` alone, without
+          # slurping, leaves `found` as one number per page (e.g. "0\n0"), which silently PASSES
+          # the check below instead of failing it, confirmed by reproducing it locally. `jq -s` on
+          # its own already turns a failed/empty `gh api` call into a clean `found=0` (confirmed:
+          # `printf '' | jq -s '[.[][]]|length'` -> `0`), so `set -euo pipefail` is NOT what closes
+          # that path -- it is here for the one thing `jq -s` cannot recover from: malformed JSON
+          # (e.g. a truncated or non-JSON API response), where `jq` itself errors with no output,
+          # reproducing the original silent pass unless the script aborts first (confirmed).
+          # The heading match also tolerates the separator drifting from the guideline's literal
+          # em dash to a plain hyphen, since an LLM -- not a template -- produces it (confirmed:
+          # both forms match; "### Review --"/"### Review-audit -" do not cross-match each other).
+          found=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            | jq -s --arg since "$GATE_STARTED_AT" \
+            '[.[][] | select(.created_at >= $since and (.body | test("^### Review-audit ")))] | length')
+          if [ "$found" -eq 0 ]; then
+            echo "::error::review-audit's agent step exited successfully but never posted its '### Review-audit —' comment. Failing this job so finalize does not label the PR 'Review finished'."
+            exit 1
+          fi
       # Same transcript upload as the review job -- see the comment there. The artifact name
       # must differ or the two jobs collide on upload.
       - if: always()
