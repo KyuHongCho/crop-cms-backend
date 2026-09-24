@@ -48,11 +48,11 @@ over MCP, `POST /chat`, then conversation context and caching.
   [`app/model/model.py`](app/model/model.py) · [why](docs/design-notes.md#data-model-and-integrity)
 - **Deleting a category never deletes documents.** `ON DELETE RESTRICT` plus a `BEFORE DELETE`
   trigger refiles them to "Uncategorised", so `psql` and bulk SQL follow the same rule as the API.
-  [`app/db/migrate_db.py`](app/db/migrate_db.py) · [why](docs/design-notes.md#data-model-and-integrity)
+  [`alembic/versions/`](alembic/versions/) · [why](docs/design-notes.md#data-model-and-integrity)
 - **CI runs the real migration, not just `create_all()`.** `alembic upgrade head` builds the schema
-  from an empty database and the generated `upgrade()` is checked non-empty before being committed
-  — autogenerating against an already-built database instead emits a migration that silently does
-  nothing.
+  from an empty database, CI asserts the tables it produced, and `alembic check` fails the build if
+  a revision leaves the schema behind the models — autogenerating against an already-built database
+  instead emits a migration that silently does nothing.
   [`alembic/versions/`](alembic/versions/) · [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - **Tests cannot touch the dev database.** The suite runs on a separate throwaway Postgres, and a
   guard fails immediately if it is pointed anywhere else.
@@ -112,15 +112,14 @@ docker compose exec cms alembic upgrade head    # apply every migration not yet 
 docker compose exec cms alembic downgrade base  # undo them all -- DROPS every table, all data with it
 ```
 
-The one-time exception is the database this repository shipped with before Alembic existed: it
-already has the tables (built by the retired `python -m app.db.migrate_db`), so applying the
-baseline migration to it fails with `DuplicateTable`. That database's `alembic_version` was set to
-head with `alembic stamp head`, which records the migration as applied and runs none of its SQL.
-That is sufficient: the baseline emits nothing that database lacks. The tables, the
-`ix_items_crop_id_topic` index (declared in `Item.__table_args__`), the bucket row and the refile
-trigger were all built by `migrate_db.py`. `alembic check` reporting no drift confirms the tables
-and index only; it cannot see the bucket row or the trigger. A database created after this point
-always uses `alembic upgrade head`, which needs no stamp.
+The exception is a `pg-data` volume that predates Alembic: it already has the tables (built by the
+retired `python -m app.db.migrate_db`), so applying the baseline migration to it fails with
+`DuplicateTable`. Run `docker compose exec cms alembic stamp head` against it once, which records
+the migration as applied and runs none of its SQL. Then run `docker compose exec cms alembic check`:
+a volume built before `ix_items_crop_id_topic` existed reports that index as missing, and
+`docker compose exec db sh -c 'psql -U "$DB_USER" -d cms -c "CREATE INDEX ix_items_crop_id_topic ON items (crop_id, topic)"'`
+adds it. `alembic check` cannot see the bucket row or the refile trigger. A database created after
+this point always uses `alembic upgrade head`, which needs no stamp.
 
 [`app/db/migrate_db.py`](app/db/migrate_db.py) stays in the tree as a guarded pre-Alembic learning
 artifact: it now refuses to run at all once `alembic_version` exists, so it can never be pointed at

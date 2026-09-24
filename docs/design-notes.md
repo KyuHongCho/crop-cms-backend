@@ -209,7 +209,8 @@ app/
   main.py            FastAPI app, router registration
   db/db.py           async engine, session factory, the single declarative Base
   db/migrate_db.py   sync engine; the "Uncategorised" seed SQL and the BEFORE DELETE
-                     refile trigger SQL, both reused by alembic/versions/*_baseline.py.
+                     refile trigger SQL, copied -- deliberately not imported --
+                     into alembic/versions/*_baseline.py, which is frozen.
                      Its own drop_all + create_all path is now a guarded pre-Alembic
                      artifact -- it refuses to run once alembic_version exists.
   model/model.py     Crop, MainCategory, SubCategory, Item — the contract everything matches

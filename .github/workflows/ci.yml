@@ -85,14 +85,27 @@ jobs:
         # upgrade head` builds the schema fresh in cms_test first -- db-test
         # is tmpfs-backed and starts empty every run, so this always starts
         # from base, never needing `stamp head` (that is only for a database
-        # `create_all()` already built -- see the next step's comment).
-        # migrate_db.py no longer runs in CI at all: its reset_database() is
+        # `create_all()` already built -- see the README's Migrations section).
+        # migrate_db.py's reset_database() no longer runs in CI at all: it is
         # now guarded to refuse once `alembic_version` exists.
         run: |
           docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
             alembic upgrade head
           docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
             python -m pytest -q
+
+      - name: Migrations downgrade to base and re-upgrade cleanly
+        # downgrade() is documented in the README as a supported command but
+        # nothing else here runs it, so a wrong drop order or a table it forgets
+        # would ship green. db-test is throwaway and the suite above has finished
+        # with it. `alembic check` proves the re-upgraded schema matches the models.
+        run: |
+          docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+            alembic downgrade base
+          docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+            alembic upgrade head
+          docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
+            alembic check
 
       - name: Migrations create the content tables, the index and alembic_version
         # Guards the silent failure Alembic itself can produce: autogenerate
@@ -131,11 +144,11 @@ jobs:
 
       - name: The Uncategorised bucket is seeded where the code expects it
         # See the constants' comment in app/model/model.py for why this id
-        # has three homes that must agree; this step asserts the database
-        # and the Python side actually do.
+        # is hard-coded in the baseline migration and must agree with it; this
+        # step asserts the database and the Python side actually do.
         #
         # Then the sequences. Seeding an explicit id does not advance a SERIAL
-        # sequence, so migrate_db.py setval's both. Without that the very next
+        # sequence, so the baseline's SEED_BUCKET_SQL setval's both. Without that the very next
         # insert collides on the primary key -- and a naive 409 handler would
         # report that UniqueViolation as "a category with that slug already
         # exists". Asserting the new rows come back at id=2 is what catches it.
@@ -192,7 +205,7 @@ jobs:
             VALUES ('basil', 'basil', 'Ocimum basilicum');
           INSERT INTO main_categories (slug, name)
             VALUES ('research-literature', 'Research literature');
-          -- WHERE, because migrate_db.py seeds an "Uncategorised" bucket
+          -- WHERE, because the baseline migration seeds an "Uncategorised" bucket
           -- main category. Unqualified this creates a second sub-category, and
           -- the refile assertion further down stops being measurable.
           INSERT INTO sub_categories (main_category_id, slug, name)
