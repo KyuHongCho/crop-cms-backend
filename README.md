@@ -29,11 +29,12 @@ source that disagrees reaches the answer.
 | Document store — 4 tables, sources recorded per document | Embeddings and vector search |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | `POST /chat` |
 | Category delete that refiles documents instead of deleting them | Authentication |
-| Test suite on an isolated database, run in CI | Editing (`PATCH`) and deleting documents |
-| AI code review on pull requests (advisory) | Frontend and deployment |
+| Database migrations (Alembic), exercised for real in CI | Editing (`PATCH`) and deleting documents |
+| Test suite on an isolated database, run in CI | Frontend and deployment |
+| AI code review on pull requests (advisory) | |
 
-Remaining work in the build plan: database migrations (Alembic), embeddings, vector search that
-selects topics, advisor tools over MCP, `POST /chat`, then conversation context and caching.
+Remaining work in the build plan: embeddings, vector search that selects topics, advisor tools
+over MCP, `POST /chat`, then conversation context and caching.
 
 ## Engineering highlights
 
@@ -47,7 +48,12 @@ selects topics, advisor tools over MCP, `POST /chat`, then conversation context 
   [`app/model/model.py`](app/model/model.py) · [why](docs/design-notes.md#data-model-and-integrity)
 - **Deleting a category never deletes documents.** `ON DELETE RESTRICT` plus a `BEFORE DELETE`
   trigger refiles them to "Uncategorised", so `psql` and bulk SQL follow the same rule as the API.
-  [`app/db/migrate_db.py`](app/db/migrate_db.py) · [why](docs/design-notes.md#data-model-and-integrity)
+  [`alembic/versions/`](alembic/versions/) · [why](docs/design-notes.md#data-model-and-integrity)
+- **CI runs the real migration, not just `create_all()`.** `alembic upgrade head` builds the schema
+  from an empty database, CI asserts the tables it produced, and `alembic check` fails the build if
+  a revision leaves the schema behind the models — autogenerating against an already-built database
+  instead emits a migration that silently does nothing.
+  [`alembic/versions/`](alembic/versions/) · [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 - **Tests cannot touch the dev database.** The suite runs on a separate throwaway Postgres, and a
   guard fails immediately if it is pointed anywhere else.
   [`tests/conftest.py`](tests/conftest.py) · [why](docs/design-notes.md#testing-details)
@@ -72,8 +78,8 @@ EOF
 # 2. Start the API and the database
 docker compose up -d --build
 
-# 3. Create the tables and the refile trigger — this WIPES every row, every run
-docker compose exec cms python -m app.db.migrate_db
+# 3. Create the tables, the index and the refile trigger
+docker compose exec cms alembic upgrade head
 
 # 4. Load the basil demo corpus (13 documents across 5 topics)
 docker compose exec cms python -m scripts.seed
@@ -88,13 +94,39 @@ API on `localhost:8000` (interactive docs at `/docs`); PostgreSQL on `127.0.0.1:
 
 ```bash
 docker compose --profile test up -d --wait
-docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms python -m app.db.migrate_db
+docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms alembic upgrade head
 docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms python -m pytest -q
 ```
 
 The seed tests need [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor)
 checked out next to this repo; without it they skip. CI checks the sibling out and fails the build
 if those tests would skip.
+
+## Migrations
+
+Schema changes go through Alembic (`alembic/`), run **inside the `cms` container, never from the
+host venv** — the container supplies `DB_PASSWORD`, `DB_HOST=db` and `greenlet`, which the async
+template needs and SQLAlchemy does not install on every platform (Apple Silicon, for one).
+
+```bash
+docker compose exec cms alembic upgrade head    # apply every migration not yet run
+docker compose exec cms alembic downgrade base  # undo them all -- DROPS every table, all data with it
+```
+
+The exception is a `pg-data` volume that predates Alembic: it already has the tables (built by the
+retired `python -m app.db.migrate_db`), so applying the baseline migration to it fails with
+`DuplicateTable`. Run `docker compose exec cms alembic stamp head` against it once, which records
+the migration as applied and runs none of its SQL. Then run `docker compose exec cms alembic check`:
+a volume built before `ix_items_crop_id_topic` existed reports that index as missing, and
+`docker compose exec db sh -c 'psql -U "$DB_USER" -d cms -c "CREATE INDEX ix_items_crop_id_topic ON items (crop_id, topic)"'`
+adds it. `alembic check` cannot see the bucket row or the refile trigger. A database created after
+this point always uses `alembic upgrade head`, which needs no stamp.
+
+[`app/db/migrate_db.py`](app/db/migrate_db.py) stays in the tree because `tests/conftest.py`, three
+test modules and `scripts/seed.py` import its sync `engine`, and `conftest.py` its `SEED_BUCKET_SQL`.
+Its own `reset_database()` path (`drop_all` + `create_all`) is a guarded pre-Alembic artifact: it
+refuses to run once `alembic_version` exists, so it can never be pointed at a database Alembic
+manages. A test asserts that refusal.
 
 ## API
 

@@ -69,6 +69,30 @@ CREATE TRIGGER refile_items_before_sub_category_delete
 
 
 def reset_database():
+    # Once a database has an `alembic_version` table, Alembic owns its schema
+    # history. drop_all() here would leave that table standing -- it belongs
+    # to Alembic's own metadata, not to Base.metadata -- so the rebuild would
+    # be a schema Alembic never produced, sitting behind a version row that
+    # still claims head. The next `alembic upgrade head` then finds nothing to
+    # run and exits 0, so the divergence is silent. (DuplicateTable is the
+    # other case: upgrading a create_all()-built database that was never
+    # stamped -- see the README's Migrations section.) The two are mutually
+    # exclusive by design, not merely by convention, so this refuses rather
+    # than warns. Kept only as a guarded pre-Alembic learning artifact -- the
+    # only automated caller is tests/test_migrate_db_guard.py, which asserts
+    # the refusal.
+    with engine.begin() as connection:
+        managed = connection.execute(
+            text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+        ).scalar()
+    if managed:
+        raise RuntimeError(
+            "refusing to run: this database has an 'alembic_version' table, "
+            "so Alembic manages its schema now. Use `alembic upgrade head` "
+            "(fresh database) or `alembic stamp head` (already has these "
+            "tables) instead of migrate_db.py."
+        )
+
     # drop_all() destroys every mapped table and its rows. Fine while the schema
     # is still changing; never run it against real content.
     Base.metadata.drop_all(bind=engine)
@@ -79,4 +103,4 @@ def reset_database():
 
 
 if __name__ == "__main__":
-    reset_database()
+    raise SystemExit("retired: use `alembic upgrade head` (see README, Migrations)")

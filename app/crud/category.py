@@ -90,7 +90,7 @@ async def delete_sub_category(
 ) -> int:
     """Delete a sub-category and report how many documents were refiled.
 
-    The refiling happens in the trigger in app/db/migrate_db.py, not here:
+    The refiling happens in the database trigger, not here:
     it moves the documents as part of the same DELETE, so psql behaves the
     same way. This only adds the count, taken first, since afterwards the
     moved documents look identical to ones already in the bucket.
