@@ -8,10 +8,10 @@ from app.db.db import Base
 
 # The "Uncategorised" bucket: where a deleted sub-category's documents are
 # refiled to, instead of being destroyed. Its id lives in these constants and,
-# hard-coded, in the seed SQL and trigger body of
-# alembic/versions/4b698ac48d60_baseline.py, which cannot read a Python
-# constant and build every fresh database (app/db/migrate_db.py's copies are
-# built from these constants). CI checks the seeded ids still match these.
+# hard-coded, in the seed SQL and trigger body under alembic/versions/, which
+# build every fresh database and are frozen, so they do not import these
+# constants (app/db/migrate_db.py's copies are built from them). CI checks the
+# seeded ids still match these.
 UNCATEGORISED_MAIN_CATEGORY_ID = 1
 UNCATEGORISED_SUB_CATEGORY_ID = 1
 
@@ -77,9 +77,9 @@ class SubCategory(Base):
     position = Column(Integer, nullable=False, server_default=text("0"))
 
     main_category = relationship("MainCategory", back_populates="subcategories")
-    # As above -- except the database never has to refuse here: the trigger in
-    # alembic/versions/4b698ac48d60_baseline.py refiles the documents to the bucket first, leaving
-    # RESTRICT nothing to block.
+    # As above -- except the database never has to refuse here: the trigger
+    # refile_items_before_sub_category_delete refiles the documents first,
+    # leaving RESTRICT nothing to block.
     items = relationship(
         "Item", back_populates="sub_category", passive_deletes="all",
     )
@@ -115,8 +115,8 @@ class Item(Base):
     id = Column(Integer, primary_key=True)
     # RESTRICT, and deliberately no default. This line alone reads as "deleting
     # a sub-category is refused" -- it is not; the BEFORE DELETE trigger
-    # refile_items_before_sub_category_delete (alembic/versions/4b698ac48d60_baseline.py) refiles the
-    # documents first, and RESTRICT only catches what it missed.
+    # refile_items_before_sub_category_delete refiles the documents first, and
+    # RESTRICT only catches what it missed.
     # ON DELETE SET DEFAULT would refile without a trigger, but it needs a
     # column default, and defaults apply on INSERT too: a new document missing
     # sub_category_id would be filed under the bucket instead of rejected.

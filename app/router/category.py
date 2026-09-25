@@ -145,7 +145,7 @@ async def delete_sub_category(
 
     200 with a count, not an empty 204: the documents move, and the caller
     should be told where. The move is done by a trigger in the database, so
-    psql behaves the same way -- see alembic/versions/4b698ac48d60_baseline.py.
+    psql behaves the same way.
     """
     sub_category = await db.get(model.SubCategory, sub_category_id)
     if not sub_category:
