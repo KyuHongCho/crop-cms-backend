@@ -13,7 +13,7 @@ the index below are Alembic's own output, unedited.
 
 The trigger and the "Uncategorised" bucket row are added by hand: they are
 not SQLAlchemy-mapped constructs, so autogenerate cannot see them, but
-`app/db/migrate_db.py` is guarded off once this table exists (see its
+`app/db/migrate_db.py` is guarded off once `alembic_version` exists (see its
 reset_database()), so this migration is now the only thing that puts them
 on a fresh database. Their SQL is written out below with the ids already
 resolved, rather than imported from migrate_db.py: a migration is a frozen

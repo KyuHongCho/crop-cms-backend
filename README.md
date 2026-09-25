@@ -105,7 +105,8 @@ if those tests would skip.
 ## Migrations
 
 Schema changes go through Alembic (`alembic/`), run **inside the `cms` container, never from the
-host venv** — the async template needs `greenlet`, which is installed there but not on the host.
+host venv** — the container supplies `DB_PASSWORD`, `DB_HOST=db` and `greenlet`, which the async
+template needs and SQLAlchemy does not install on every platform (Apple Silicon, for one).
 
 ```bash
 docker compose exec cms alembic upgrade head    # apply every migration not yet run
