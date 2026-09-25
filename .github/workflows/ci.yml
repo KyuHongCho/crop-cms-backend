@@ -86,8 +86,9 @@ jobs:
         # is tmpfs-backed and starts empty every run, so this always starts
         # from base, never needing `stamp head` (that is only for a database
         # `create_all()` already built -- see the README's Migrations section).
-        # migrate_db.py's reset_database() no longer runs in CI at all: it is
-        # now guarded to refuse once `alembic_version` exists.
+        # migrate_db.py's reset_database() runs in CI only inside
+        # tests/test_migrate_db_guard.py, which asserts it refuses once
+        # `alembic_version` exists.
         run: |
           docker compose exec -T -e DB_HOST=db-test -e DB_NAME=cms_test cms \
             alembic upgrade head

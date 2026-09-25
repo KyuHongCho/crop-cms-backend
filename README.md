@@ -121,9 +121,11 @@ a volume built before `ix_items_crop_id_topic` existed reports that index as mis
 adds it. `alembic check` cannot see the bucket row or the refile trigger. A database created after
 this point always uses `alembic upgrade head`, which needs no stamp.
 
-[`app/db/migrate_db.py`](app/db/migrate_db.py) stays in the tree as a guarded pre-Alembic learning
-artifact: it now refuses to run at all once `alembic_version` exists, so it can never be pointed at
-a database Alembic manages. CI no longer calls it.
+[`app/db/migrate_db.py`](app/db/migrate_db.py) stays in the tree because `tests/conftest.py`, three
+test modules and `scripts/seed.py` import its sync `engine`, and `conftest.py` its `SEED_BUCKET_SQL`.
+Its own `reset_database()` path (`drop_all` + `create_all`) is a guarded pre-Alembic artifact: it
+refuses to run once `alembic_version` exists, so it can never be pointed at a database Alembic
+manages. A test asserts that refusal.
 
 ## API
 

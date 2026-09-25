@@ -78,8 +78,9 @@ def reset_database():
     # other case: upgrading a create_all()-built database that was never
     # stamped -- see the README's Migrations section.) The two are mutually
     # exclusive by design, not merely by convention, so this refuses rather
-    # than warns. Kept only as a guarded pre-Alembic learning artifact -- CI
-    # no longer calls this function at all.
+    # than warns. Kept only as a guarded pre-Alembic learning artifact -- the
+    # only automated caller is tests/test_migrate_db_guard.py, which asserts
+    # the refusal.
     with engine.begin() as connection:
         managed = connection.execute(
             text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
