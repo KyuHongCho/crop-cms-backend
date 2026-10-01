@@ -123,7 +123,8 @@ That boundary is **a convention with a tripwire, not enforcement**:
 or `item_chunks`, but it only searches source text, and the database still lets the application
 role read every table: `cms_app` owns them all and can re-grant itself, so one role cannot enforce
 it. A second database role was considered and rejected on budget.
-[Why no vector index yet](docs/design-notes.md#no-vector-index-yet)
+
+`item_chunks` carries no HNSW or IVFFlat index yet: [why](docs/design-notes.md#no-vector-index-yet).
 
 ## Migrations
 

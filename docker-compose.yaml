@@ -23,13 +23,12 @@ services:
       DB_NAME: cms
       PYTHONPATH: /src
       ADVISOR_PATH: /advisor
-      # Provider keys, injected at run time -- never in the image
+      # Provider key, injected at run time -- never in the image
       # (.dockerignore) and never committed (.gitignore). Bare ${VAR},
       # deliberately not ${VAR:?}: the non-AI endpoints must still start
-      # without them, and the suite runs offline (a fake embedder; no model
-      # call), so CI never sets either one.
+      # without it, and the suite runs offline (a fake embedder; no model
+      # call), so CI never sets it.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     depends_on:
       db:
         condition: service_healthy

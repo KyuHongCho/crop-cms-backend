@@ -4,6 +4,7 @@ Every test here runs offline: FakeEmbedder is passed in explicitly, or
 selected by name, and no test needs OPENAI_API_KEY.
 """
 import math
+import sys
 
 import pytest
 from sqlalchemy import select, text
@@ -17,6 +18,7 @@ from app.chat.embeddings import (
 )
 from app.db.migrate_db import engine as sync_engine
 from app.model.model import UNCATEGORISED_SUB_CATEGORY_ID, Crop, Item, ItemChunk
+from scripts import reindex as reindex_script
 from scripts import seed
 from scripts.reindex import reindex
 
@@ -190,4 +192,17 @@ def test_dry_run_counts_without_a_key_and_writes_nothing(monkeypatch):
     result = reindex(sync_engine, dry_run=True, out=lines.append)
     assert result.chunks == SEED_DOCUMENTS and result.embedded == 0
     assert f"{SEED_DOCUMENTS} chunks" in lines[0]
+    assert _count("SELECT count(*) FROM item_chunks") == 0
+
+
+def test_the_cli_entry_point_runs(monkeypatch, capsys):
+    """README step 5 runs `python -m scripts.reindex`; the tests above call
+    reindex() directly, so this drives main() itself."""
+    seed.main()
+    monkeypatch.setattr(sys, "argv", ["reindex", "--dry-run"])
+    monkeypatch.setattr(sync_engine, "echo", sync_engine.echo)  # main() turns it off
+    reindex_script.main()
+    out = capsys.readouterr().out
+    assert f"{SEED_DOCUMENTS} documents, {SEED_DOCUMENTS} chunks" in out
+    assert "dry run: nothing embedded, nothing written" in out
     assert _count("SELECT count(*) FROM item_chunks") == 0

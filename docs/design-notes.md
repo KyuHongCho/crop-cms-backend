@@ -38,7 +38,7 @@ endpoint's surface, and none is coming.
 
 **The deliberate departure from common RAG practice.** A common RAG pattern is
 `similarity_search(query, k=N)` — a top-k slice of *documents*. This system does not do that. Once
-topic *selection* lands (over the chunk embeddings in `item_chunks`), `k` will
+topic *selection* lands (over the chunk embeddings the `published_item_chunks` view exposes), `k` will
 select **topics**, by the topic's single best-matching passage (MAX, not mean — a mean would
 perversely penalise topics that hold more disagreeing sources, exactly the ones this design exists
 to surface). Every topic that selection picks still returns **complete**; `k` never truncates a
