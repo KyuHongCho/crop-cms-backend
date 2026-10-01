@@ -148,7 +148,9 @@ scan is exact where HNSW is approximate. Because the column is `vector(1536)` â€
 index can be added later as a new migration with no column change.
 
 `model` is stored on every row, so a table holding vectors from two embedders is detectable, and
-`scripts/reindex.py` re-embeds a chunk whose stored model differs from the current one.
+`scripts/reindex.py` re-embeds a chunk whose stored model differs from the current one. Each row
+also has two timestamps: `created_at` is when the row was first inserted and never changes;
+`embedded_at` is when its current vector was produced, and moves on every re-embed.
 
 ## Local ports
 

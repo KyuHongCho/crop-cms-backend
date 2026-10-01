@@ -27,7 +27,7 @@ metadata, which app/chat/ is not allowed to name
 import argparse
 from dataclasses import dataclass, field
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Engine
 
@@ -99,6 +99,9 @@ def _write(engine: Engine, plan: _DocumentPlan, vectors: list[list[float]], mode
                     content_hash=statement.excluded.content_hash,
                     embedding=statement.excluded.embedding,
                     model=statement.excluded.model,
+                    # A new vector, so a new embed time. created_at is left
+                    # alone: it records the row's first insert.
+                    embedded_at=func.now(),
                 ),
             ))
         connection.execute(

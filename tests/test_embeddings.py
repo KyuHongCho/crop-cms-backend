@@ -131,6 +131,35 @@ def test_title_only_edit_also_re_embeds(sync_db_session):
     assert after.content.startswith(item.title + "\n")
 
 
+def test_a_new_chunk_is_embedded_when_it_is_created():
+    seed.main()
+    _run()
+    # Both come from now() in the inserting transaction, so they are equal.
+    assert _count("SELECT count(*) FROM item_chunks WHERE embedded_at IS DISTINCT FROM created_at") == 0
+
+
+def test_re_embedding_moves_embedded_at_but_not_created_at(sync_db_session):
+    seed.main()
+    _run()
+    item = sync_db_session.execute(select(Item).order_by(Item.id)).scalars().first()
+    # Backdated, so "moved" does not depend on two transactions' now() differing.
+    with sync_engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE item_chunks SET created_at = created_at - interval '1 hour', "
+            "embedded_at = embedded_at - interval '1 hour'"
+        ))
+    before = _chunks_of(sync_db_session, item.id)[0]
+    created_before, embedded_before = before.created_at, before.embedded_at
+
+    item.title = item.title + " (revised)"
+    sync_db_session.commit()
+    assert _run().embedded == 1
+
+    after = _chunks_of(sync_db_session, item.id)[0]
+    assert after.created_at == created_before
+    assert after.embedded_at > embedded_before
+
+
 def test_switching_embedder_re_embeds_rather_than_mixing_models():
     class OtherFake(FakeEmbedder):
         model = "other-fake"

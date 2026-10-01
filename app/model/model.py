@@ -190,4 +190,8 @@ class ItemChunk(Base):
     embedding = Column(Vector(EMBEDDING_DIMENSIONS), nullable=False)
     # Per row, so a table holding vectors from two models is detectable.
     model = Column(String(64), nullable=False)
+    # When the row was first inserted; a re-embed never changes it.
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # When the current vector was produced: set on insert, reset by
+    # scripts/reindex.py on every re-embed.
+    embedded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
