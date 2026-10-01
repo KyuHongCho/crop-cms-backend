@@ -69,9 +69,11 @@ Trade-offs, known limits and the full rationale: [`docs/design-notes.md`](docs/d
 Requires Docker.
 
 ```bash
-# 1. Secrets (.env is git- and docker-ignored): fill in the two passwords;
+# 1. Secrets (.env is git- and docker-ignored): generates the two passwords;
 #    OPENAI_API_KEY is only needed for step 5
-[ -f .env ] || cp .env.example .env
+[ -f .env ] || { cp .env.example .env && sed -i.bak \
+  -e "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" \
+  -e "s/^DB_PASSWORD=$/DB_PASSWORD=$(openssl rand -hex 16)/" .env && rm .env.bak; }
 
 # 2. Start the API and the database
 docker compose up -d --build
@@ -82,7 +84,8 @@ docker compose exec cms alembic upgrade head
 # 4. Load the basil demo corpus (13 documents across 5 topics)
 docker compose exec cms python -m scripts.seed
 
-# 5. Embed every document (13 chunks); --dry-run prints the count without calling OpenAI
+# 5. Embed every document (13 chunks); needs OPENAI_API_KEY -- without one, skip this
+#    step: step 6 does not read embeddings. --dry-run prints the count without calling OpenAI
 docker compose exec cms python -m scripts.reindex --dry-run
 docker compose exec cms python -m scripts.reindex
 
@@ -120,7 +123,7 @@ view exposes only published documents, and is what the chat layer (`app/chat/`) 
 
 That boundary is **a convention with a tripwire, not enforcement**:
 `tests/test_chat_layer_isolation.py` fails if a module under `app/chat/` names `Item`, `ItemChunk`
-or `item_chunks`, but it only searches source text, and the database still lets the application
+or `item_chunks`, or reads `items` in SQL or as `table("items")`, but it only searches source text, and the database still lets the application
 role read every table: `cms_app` owns them all and can re-grant itself, so one role cannot enforce
 it. A second database role was considered and rejected on budget.
 

@@ -90,7 +90,8 @@ def _write(engine: Engine, plan: _DocumentPlan, vectors: list[list[float]], mode
             statement = insert(_chunks).values([
                 dict(item_id=plan.item_id, chunk_index=index, content=text,
                      content_hash=digest, embedding=vector, model=model)
-                for (index, text, digest), vector in zip(plan.to_embed, vectors)
+                # strict: a short vector list must fail, not drop trailing chunks.
+                for (index, text, digest), vector in zip(plan.to_embed, vectors, strict=True)
             ])
             connection.execute(statement.on_conflict_do_update(
                 index_elements=[_chunks.c.item_id, _chunks.c.chunk_index],
