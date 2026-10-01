@@ -1,6 +1,7 @@
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, ForeignKey, Index, Integer, String, Text,
-    UniqueConstraint, text,
+    Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String,
+    Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.orm import relationship, validates
 
@@ -156,3 +157,37 @@ class Item(Base):
 
     crop = relationship("Crop", back_populates="items")
     sub_category = relationship("SubCategory", back_populates="items")
+
+
+# text-embedding-3-small's output size. Under pgvector's 2,000-dimension
+# index cap, so an index can be added later without changing the column.
+EMBEDDING_DIMENSIONS = 1536
+
+
+class ItemChunk(Base):
+    """One embedded slice of a document, written by scripts/reindex.py.
+
+    Every document is embedded, published or not: publishing is a metadata
+    flip, filtered at read time by the `published_item_chunks` view
+    (alembic/versions/*_published_item_chunks_view.py). The chat layer reads
+    that view, never this table.
+
+    No relationship() to Item, deliberately: chunks are written by one
+    script through Core statements, and ON DELETE CASCADE below removes them
+    with their document without SQLAlchemy loading them.
+    """
+
+    __tablename__ = "item_chunks"
+    __table_args__ = (UniqueConstraint("item_id", "chunk_index"),)
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)
+    # sha256 hex of `content` -- the embedded text, title included, so a
+    # title-only edit also re-embeds.
+    content_hash = Column(String(64), nullable=False)
+    embedding = Column(Vector(EMBEDDING_DIMENSIONS), nullable=False)
+    # Per row, so a table holding vectors from two models is detectable.
+    model = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

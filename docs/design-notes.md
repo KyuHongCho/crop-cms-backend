@@ -38,7 +38,7 @@ endpoint's surface, and none is coming.
 
 **The deliberate departure from common RAG practice.** A common RAG pattern is
 `similarity_search(query, k=N)` — a top-k slice of *documents*. This system does not do that. Once
-topic *selection* lands (needing chunk embeddings this repository does not have yet), `k` will
+topic *selection* lands (over the chunk embeddings in `item_chunks`), `k` will
 select **topics**, by the topic's single best-matching passage (MAX, not mean — a mean would
 perversely penalise topics that hold more disagreeing sources, exactly the ones this design exists
 to surface). Every topic that selection picks still returns **complete**; `k` never truncates a
@@ -132,9 +132,23 @@ cannot be indexed as `vector`. That does not rule such a model out. `halfvec` in
 4,000 dimensions, and an HNSW index on `halfvec(3072)` builds over real rows here with the
 planner using it — verified on this stack. Keeping the column as `vector(3072)` and indexing a
 `halfvec` cast also works, but only for queries written to match that expression; the naive
-query falls back to a sequential scan with no error. So what is open is the model and which of
-those two column shapes to use — not whether 3072 fits. That is why there is no embedding
-column yet.
+query falls back to a sequential scan with no error.
+
+**Decided: OpenAI `text-embedding-3-small`, 1536 dimensions, a plain `vector(1536)` column.**
+1536 is under the 2,000-dimension cap, so neither `halfvec` nor a newer pgvector is needed.
+`text-embedding-3-large` (3072) would have forced the `halfvec` route above for an index this
+corpus does not need yet (next section).
+
+### No vector index yet
+
+`item_chunks` has no HNSW or IVFFlat index. The seed corpus is 13 chunks, 12 of them published.
+With an HNSW index built over those 13 rows, the planner still chose a sequential scan for a
+nearest-neighbour `ORDER BY embedding <=> ... LIMIT 3` (checked with `EXPLAIN`), and a sequential
+scan is exact where HNSW is approximate. Because the column is `vector(1536)` — under the cap — an
+index can be added later as a new migration with no column change.
+
+`model` is stored on every row, so a table holding vectors from two embedders is detectable, and
+`scripts/reindex.py` re-embeds a chunk whose stored model differs from the current one.
 
 ## Local ports
 
@@ -213,12 +227,14 @@ app/
                      into alembic/versions/*_baseline.py, which is frozen.
                      Its own drop_all + create_all path is now a guarded pre-Alembic
                      artifact -- it refuses to run once alembic_version exists.
-  model/model.py     Crop, MainCategory, SubCategory, Item — the contract everything matches
+  model/model.py     Crop, MainCategory, SubCategory, Item, ItemChunk — the contract everything matches
   schema/            Pydantic request/response shapes
   crud/              data access — queries and commits (routers do 404 pre-checks)
   router/            HTTP surface
+  chat/              embedder seam and chunking; reads the published_item_chunks view only
 alembic/             schema migrations, run inside the cms container (`alembic upgrade head`)
 scripts/seed.py      the basil demo corpus — idempotent, keyed on (crop, title, source)
+scripts/reindex.py   embeds every document into item_chunks; skips unchanged chunks
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI
 docs/                design notes (this file)

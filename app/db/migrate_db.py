@@ -89,8 +89,7 @@ def reset_database():
         raise RuntimeError(
             "refusing to run: this database has an 'alembic_version' table, "
             "so Alembic manages its schema now. Use `alembic upgrade head` "
-            "(fresh database) or `alembic stamp head` (already has these "
-            "tables) instead of migrate_db.py."
+            "instead of migrate_db.py (see the README's Migrations section)."
         )
 
     # drop_all() destroys every mapped table and its rows. Fine while the schema

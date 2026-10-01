@@ -84,7 +84,7 @@ jobs:
         # alembic/env.py already read both from the environment. `alembic
         # upgrade head` builds the schema fresh in cms_test first -- db-test
         # is tmpfs-backed and starts empty every run, so this always starts
-        # from base, never needing `stamp head` (that is only for a database
+        # from base, never needing `alembic stamp` (that is only for a database
         # `create_all()` already built -- see the README's Migrations section).
         # migrate_db.py's reset_database() runs in CI only inside
         # tests/test_migrate_db_guard.py, which asserts it refuses once
@@ -134,7 +134,15 @@ jobs:
               WHERE schemaname = 'public' AND tablename <> 'alembic_version';" \
             | tr -d '[:space:]')
           echo "content tables created: $tables"
-          test "$tables" = "crops,items,main_categories,sub_categories"
+          test "$tables" = "crops,item_chunks,items,main_categories,sub_categories"
+          # A view is invisible to pg_tables and to `alembic check`, so the
+          # published filter the chat layer reads is asserted on its own.
+          views=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
+            "SELECT string_agg(viewname, ',' ORDER BY viewname)
+               FROM pg_views WHERE schemaname = 'public';" \
+            | tr -d '[:space:]')
+          echo "views created: $views"
+          test "$views" = "published_item_chunks"
           version_table=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
             "SELECT count(*) FROM pg_tables
               WHERE schemaname = 'public' AND tablename = 'alembic_version';" \
@@ -388,6 +396,8 @@ jobs:
                       "items_sub_category_id_fkey": "r",
                       "items_crop_id_fkey": "r",
                       "sub_categories_main_category_id_fkey": "r",
+                      # CASCADE on purpose: a chunk is derived data, see ItemChunk.
+                      "item_chunks_item_id_fkey": "c",
                   }, f"the DDL does not match the mappers' intent: {rules}"
                   assert SubCategory.items.property.passive_deletes == "all"
                   assert "delete-orphan" not in SubCategory.items.property.cascade
