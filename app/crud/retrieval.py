@@ -3,14 +3,8 @@
 Retrieval never picks a winner among documents that disagree on the same topic:
 a selected topic comes back complete, never as a top-k slice.
 
-Three rules govern topic selection:
-
-    Rule 1 -- score a topic by its best-matching chunk.
-    Rule 2 -- keep the top k topics (3 by default).
-    Rule 3 -- fit the kept topics into the context budget.
-
-Rules 1 and 2 need topic selection over the published_item_chunks embeddings,
-which is not built yet; Rule 3 does not, and is built and tested below.
+Rules 0-2 (the floor, best-chunk scoring, top k) live in app/chat/retrieval.py.
+Rule 3 -- fit the kept topics into the context budget -- is built and tested below.
 """
 import os
 from dataclasses import dataclass

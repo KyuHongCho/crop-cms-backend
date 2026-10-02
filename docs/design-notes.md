@@ -160,8 +160,9 @@ the model forbids for sources that disagree.
 
 - **Rule 0 — the floor.** A topic whose score is below `TOPIC_SCORE_FLOOR` is dropped; if none
   clears it, `NoRelevantTopics` is raised and the system abstains. The floor works on whole
-  topics only: within `optimal-temperature` one query scored its three sources 0.0976 / 0.0729 /
-  0.0538, so any per-document floor in that range would keep some and drop others.
+  topics only: a design-time measurement (embedder and date not recorded here) scored the three
+  sources of `optimal-temperature` for one query at 0.0976 / 0.0729 / 0.0538, so any per-document
+  floor in that range would keep some and drop others.
   It ships at **`-1.0`**, not `0.0`: cosine similarity is in `[-1, 1]`, so `-1.0` is the only
   true no-op, whereas `0.0` already drops a topic whose best chunk is slightly anti-correlated
   with the question. The course's `0.4` does not port: it sits on LangChain's normalised `[0, 1]`
@@ -169,7 +170,9 @@ the model forbids for sources that disagree.
   `scripts/calibrate_floor.py` once the corpus is embedded with the real model.
 - **Rule 1 — MAX, not mean.** A mean penalises topics holding many disagreeing sources, which is
   perverse in a system built to surface them. Scores are grouped by `(crop_id, topic)`, since a
-  topic name is only unique within a crop.
+  topic name is only unique within a crop. Scoring still spans every crop: add a crop filter
+  before a second crop is seeded or `POST /chat` lands, or a question about one crop can select
+  another crop's topic.
 - **Rule 2 — `k = 3`**, the existing `TOPIC_SELECTION_K`. The SQL `LIMIT` applies to topics;
   each selected topic's documents are fetched in a second query with none.
 - **Rule 3 — the budget**, `assemble_within_budget`, reused unchanged.
@@ -182,11 +185,8 @@ retrieval router was rejected: it hardcodes `score=0.0` and takes the topic expl
 can never abstain.
 
 **Calibration record:** not yet run. Run `docker compose exec -T cms python -m scripts.calibrate_floor`
-after the corpus is re-embedded with `text-embedding-3-small`, and paste the output here.
-
-```
-<RECORDED OUTPUT PLACEHOLDER: scripts/calibrate_floor.py, real embeddings, date, corpus size>
-```
+after the corpus is re-embedded with `text-embedding-3-small`, and paste the output here. Until
+then `TOPIC_SCORE_FLOOR` stays at its no-op default.
 
 ## Local ports
 
@@ -269,7 +269,7 @@ app/
   schema/            Pydantic request/response shapes
   crud/              data access — queries and commits (routers do 404 pre-checks)
   router/            HTTP surface
-  chat/              embedder seam, chunking, topic selection; reads the published_item_chunks view only
+  chat/              embedder seam, chunking, topic selection; scores from the published_item_chunks view
 alembic/             schema migrations, run inside the cms container (`alembic upgrade head`)
 scripts/seed.py      the basil demo corpus — idempotent, keyed on (crop, title, source)
 scripts/reindex.py   embeds every document into item_chunks; skips unchanged chunks

@@ -42,6 +42,8 @@ from app.crud.retrieval import (
 # chosen before real embeddings exist -- scripts/calibrate_floor.py measures
 # it -- and the course's 0.4 does not port: it sits on LangChain's normalised
 # [0,1] relevance scale, not raw cosine.
+#
+# Override with the TOPIC_SCORE_FLOOR env var (read at import time).
 TOPIC_SCORE_FLOOR = float(os.environ.get("TOPIC_SCORE_FLOOR", "-1.0"))
 
 # Only the columns this module reads; not a mapped class. Read through

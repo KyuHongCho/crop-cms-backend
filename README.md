@@ -27,12 +27,12 @@ source that disagrees reaches the answer.
 | Works today | Not built yet |
 |---|---|
 | Document store — 4 tables, sources recorded per document | `POST /chat` |
-| Embeddings for every document, offline-testable (`scripts/reindex.py`) | |
-| Vector topic selection — `python -m scripts.ask "<question>"` | |
-| Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
-| Category delete that refiles documents instead of deleting them | Authentication |
-| Database migrations (Alembic), exercised for real in CI | Editing (`PATCH`) and deleting documents |
-| Test suite on an isolated database, run in CI | Frontend and deployment |
+| Embeddings for every document, offline-testable (`scripts/reindex.py`) | Authentication |
+| Vector topic selection — `python -m scripts.ask "<question>"` | Editing (`PATCH`) and deleting documents |
+| Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | Frontend and deployment |
+| Category delete that refiles documents instead of deleting them | |
+| Database migrations (Alembic), exercised for real in CI | |
+| Test suite on an isolated database, run in CI | |
 | AI code review on pull requests (advisory) | |
 
 Remaining work in the build plan: advisor tools

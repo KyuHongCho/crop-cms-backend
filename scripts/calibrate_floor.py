@@ -5,7 +5,7 @@
 Needs a corpus embedded with the real embedder (OPENAI_API_KEY, `scripts.reindex`).
 Under EMBEDDER=fake the scores are noise and the output means nothing.
 
-For each labelled question below, scores every topic (Rule 1: best chunk) and
+For each labelled question below, scores the topics (Rule 1: best chunk) and
 splits the scores into the topic the question is about (on-topic) and the rest
 (off-topic). A good floor sits between the highest off-topic score and the
 lowest on-topic score; if the ranges overlap, no floor separates them and that
