@@ -206,6 +206,13 @@ jobs:
             Read all three before you start. The guideline's comment structure is exact -- follow it
             literally and post nothing outside it. In CI you hold read-only tools only.
 
+            You post the comment by running this Bash command, with the comment text on stdin:
+              gh pr comment ${{ needs.gate.outputs.pr }} --body-file - <<'EOF'
+              <the comment>
+              EOF
+            Do NOT use --body "$(...)": the permission layer refuses it. Writing the comment as your
+            final reply posts nothing, and this job fails when no comment was posted.
+
             One addition to the guideline's Verification block: as the first `**Ran:**` entry,
             quote one line verbatim from `${{ env.CORE_DIR }}/core/roles/review.md` with its line
             number, to show which instruction file you actually read.
@@ -329,6 +336,13 @@ jobs:
 
             Read all three before you start. The guideline's comment structure is exact -- follow it
             literally and post nothing outside it. In CI you hold read-only tools only.
+
+            You post the comment by running this Bash command, with the comment text on stdin:
+              gh pr comment ${{ needs.gate.outputs.pr }} --body-file - <<'EOF'
+              <the comment>
+              EOF
+            Do NOT use --body "$(...)": the permission layer refuses it. Writing the comment as your
+            final reply posts nothing, and this job fails when no comment was posted.
 
             One addition to the guideline's Re-verification block: as the first `**Re-ran:**` entry,
             quote one line verbatim from `${{ env.CORE_DIR }}/core/auditors/review-audit.md` with
