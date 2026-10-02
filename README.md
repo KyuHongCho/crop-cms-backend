@@ -26,15 +26,16 @@ source that disagrees reaches the answer.
 
 | Works today | Not built yet |
 |---|---|
-| Document store — 4 tables, sources recorded per document | Vector search |
-| Embeddings for every document, offline-testable (`scripts/reindex.py`) | `POST /chat` |
+| Document store — 4 tables, sources recorded per document | `POST /chat` |
+| Embeddings for every document, offline-testable (`scripts/reindex.py`) | |
+| Vector topic selection — `python -m scripts.ask "<question>"` | |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them | Authentication |
 | Database migrations (Alembic), exercised for real in CI | Editing (`PATCH`) and deleting documents |
 | Test suite on an isolated database, run in CI | Frontend and deployment |
 | AI code review on pull requests (advisory) | |
 
-Remaining work in the build plan: vector search that selects topics, advisor tools
+Remaining work in the build plan: advisor tools
 over MCP, `POST /chat`, then conversation context and caching.
 
 ## Engineering highlights
@@ -93,6 +94,10 @@ docker compose exec cms python -m scripts.reindex
 
 # 6. Ask for one topic — returns 3 documents, one per disagreeing source
 curl localhost:8000/retrieval/basil/optimal-temperature
+
+# 7. Ask a question — selects the best-matching topics by vector similarity and prints each in
+#    full with its sources. Needs step 5 (embeddings) and OPENAI_API_KEY.
+docker compose exec -T cms python -m scripts.ask "how hot should basil be?"
 ```
 
 API on `localhost:8000` (interactive docs at `/docs`); PostgreSQL on `127.0.0.1:5432`, loopback only.
@@ -129,6 +134,19 @@ or `item_chunks`, or reads `items` in SQL or as `table("items")`, but it only se
 text, and the database still lets the application role read every table: `cms_app` owns them all
 and can re-grant itself, so one role cannot enforce it. A second database role was considered and
 rejected on budget.
+
+## Topic selection
+
+`app/chat/retrieval.py` finds the topics a question is about, then returns each one **complete**.
+A topic scores as its single best-matching chunk (`MAX`, not the mean, which would penalise topics
+with many disagreeing sources); the top `TOPIC_SELECTION_K` (3) topics are kept; their whole
+document sets follow, with no `LIMIT`. `TOPIC_SCORE_FLOOR` lets the system abstain
+(`NoRelevantTopics`) when no topic is relevant enough. It ships dark at `-1.0`, a no-op for cosine
+similarity, until `scripts/calibrate_floor.py` has been run on real embeddings:
+[why](docs/design-notes.md#vector-topic-selection).
+`FakeEmbedder` vectors carry no meaning, so ranking is tested with hand-built vectors
+([`tests/test_topic_expansion.py`](tests/test_topic_expansion.py)), and `scripts.ask` offline only
+checks the plumbing.
 
 `item_chunks` carries no HNSW or IVFFlat index yet: [why](docs/design-notes.md#no-vector-index-yet).
 
