@@ -170,9 +170,9 @@ the model forbids for sources that disagree.
   `scripts/calibrate_floor.py` once the corpus is embedded with the real model.
 - **Rule 1 — MAX, not mean.** A mean penalises topics holding many disagreeing sources, which is
   perverse in a system built to surface them. Scores are grouped by `(crop_id, topic)`, since a
-  topic name is only unique within a crop. Scoring still spans every crop: add a crop filter
-  before a second crop is seeded or `POST /chat` lands, or a question about one crop can select
-  another crop's topic.
+  topic name is only unique within a crop. Pass `crop_id` (`scripts.ask --crop SLUG`) to score one crop
+  only; without it every crop competes, so with more than one crop a question about one can select
+  another's topic. `POST /chat` must pass it.
 - **Rule 2 — `k = 3`**, the existing `TOPIC_SELECTION_K`. The SQL `LIMIT` applies to topics;
   each selected topic's documents are fetched in a second query with none.
 - **Rule 3 — the budget**, `assemble_within_budget`, reused unchanged.

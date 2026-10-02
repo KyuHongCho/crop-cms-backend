@@ -23,7 +23,7 @@ Functions take a synchronous Session. An async caller can reach them through
 import os
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import column, func, select, table
+from sqlalchemy import column, func, select, table, true
 from sqlalchemy.orm import Session
 
 from app.chat.embeddings import EMBEDDING_DIMENSIONS, Embedder
@@ -63,7 +63,10 @@ class NoRelevantTopics(Exception):
 
 
 def score_topics(
-    session: Session, query_vector: list[float], k: int = TOPIC_SELECTION_K
+    session: Session,
+    query_vector: list[float],
+    k: int = TOPIC_SELECTION_K,
+    crop_id: int | None = None,
 ) -> list[tuple[int, str, float]]:
     """Rule 1 and the SQL half of Rule 2: (crop_id, topic, score) for the k
     best topics, best first.
@@ -72,12 +75,15 @@ def score_topics(
     penalise topics holding many disagreeing sources -- perverse in a system
     built to surface them. LIMIT applies to topics, never to documents.
     Grouped by (crop_id, topic): a topic name is only unique within a crop.
+    With `crop_id`, only that crop's topics compete; without it every crop does,
+    so a question about one crop can select another's topic.
     """
     similarity = 1 - _view.c.embedding.cosine_distance(query_vector)
     score = func.max(similarity).label("score")
     statement = (
         select(_view.c.crop_id, _view.c.topic, score)
         .where(_view.c.topic.is_not(None))
+        .where(_view.c.crop_id == crop_id if crop_id is not None else true())
         .group_by(_view.c.crop_id, _view.c.topic)
         .order_by(score.desc(), _view.c.topic)
         .limit(k)
@@ -121,11 +127,12 @@ def retrieve_topics(
     embedder: Embedder,
     k: int = TOPIC_SELECTION_K,
     floor: float = TOPIC_SCORE_FLOOR,
+    crop_id: int | None = None,
 ) -> tuple[list[TopicCandidate], list[TopicCandidate]]:
     """Rules 0-3 end to end. Returns (kept, dropped_for_budget).
 
     Raises NoRelevantTopics (Rule 0) or TopicBudgetExceeded (Rule 3).
     """
     (query_vector,) = embedder.embed([question])
-    candidates = fetch_candidates(session, score_topics(session, query_vector, k))
+    candidates = fetch_candidates(session, score_topics(session, query_vector, k, crop_id))
     return assemble_within_budget(select_topics(candidates, k, floor))

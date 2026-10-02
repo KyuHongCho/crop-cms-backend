@@ -208,6 +208,34 @@ def test_a_topic_name_shared_by_two_crops_is_scored_per_crop(session):
         (pytest.approx(0.9), 1), (pytest.approx(0.4), 1)]
 
 
+def test_crop_id_limits_scoring_to_one_crop(session):
+    basil, crop_b = _crop("basil"), _crop("crop-b")
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)])
+    _doc(crop_b, "optimal-temperature", 0, [mix(0.90)])
+    both, _ = retrieve_topics(session, "q", FixedEmbedder())
+    only_basil, _ = retrieve_topics(session, "q", FixedEmbedder(), crop_id=basil)
+    assert [{d.crop_id for d in c.documents} for c in both] == [{crop_b}, {basil}]
+    assert [(c.score, {d.crop_id for d in c.documents}) for c in only_basil] == [
+        (pytest.approx(0.30), {basil})]
+
+
+def test_a_crop_with_no_chunks_abstains(session):
+    basil, crop_b = _crop("basil"), _crop("crop-b")
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)])
+    with pytest.raises(NoRelevantTopics):
+        retrieve_topics(session, "q", FixedEmbedder(), crop_id=crop_b)
+
+
+def test_ask_prints_only_the_requested_crop(session):
+    basil, crop_b = _crop("basil"), _crop("crop-b")
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)])
+    _doc(crop_b, "optimal-temperature", 0, [mix(0.90)])
+    lines: list[str] = []
+    assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append, crop_id=basil) == 0
+    headers = [l.strip() for l in lines if l.strip().startswith("==")]
+    assert headers == ["== optimal-temperature  (score 0.3000, 1 documents)"]
+
+
 # --- Done 1: the basil corpus ------------------------------------------------
 
 def _seeded_corpus_with_temperature_near_the_query():
@@ -248,11 +276,8 @@ def test_ask_runs_end_to_end_offline_with_the_fake_embedder(session):
     assert 1 <= sum(1 for line in lines if line.startswith("\n==")) <= 3
 
 
-def test_ask_abstains_below_the_floor(session, monkeypatch):
+def test_ask_abstains_below_the_floor(session):
     _seeded_corpus_with_temperature_near_the_query()
-    import app.chat.retrieval as r
-    monkeypatch.setattr(r.retrieve_topics, "__defaults__",
-                        (r.TOPIC_SELECTION_K, 0.99))
     lines: list[str] = []
-    assert ask("anything", embedder=FixedEmbedder(), session=session, out=lines.append) == 1
+    assert ask("anything", embedder=FixedEmbedder(), session=session, out=lines.append, floor=0.99) == 1
     assert lines[0].startswith("abstain:")

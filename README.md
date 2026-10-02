@@ -140,7 +140,8 @@ rejected on budget.
 `app/chat/retrieval.py` finds the topics a question is about, then returns each one **complete**.
 A topic scores as its single best-matching chunk (`MAX`, not the mean, which would penalise topics
 with many disagreeing sources); the top `TOPIC_SELECTION_K` (3) topics are kept; their whole
-document sets follow, with no `LIMIT`. `TOPIC_SCORE_FLOOR` lets the system abstain
+document sets follow, with no `LIMIT`. Scoring can be limited to one crop (`crop_id`, or
+`scripts.ask --crop SLUG`); without it every crop competes. `TOPIC_SCORE_FLOOR` lets the system abstain
 (`NoRelevantTopics`) when no topic is relevant enough. It ships dark at `-1.0`, a no-op for cosine
 similarity, until `scripts/calibrate_floor.py` has been run on real embeddings:
 [why](docs/design-notes.md#vector-topic-selection).
