@@ -152,6 +152,41 @@ index can be added later as a new migration with no column change.
 also has two timestamps: `created_at` is when the row was first inserted and never changes;
 `embedded_at` is when its current vector was produced, and moves on every re-embed.
 
+## Vector topic selection
+
+[`app/chat/retrieval.py`](../app/chat/retrieval.py) selects topics for a question. All four rules
+act on whole topics; none ranks or filters documents inside a topic, which is the winner-picking
+the model forbids for sources that disagree.
+
+- **Rule 0 — the floor.** A topic whose score is below `TOPIC_SCORE_FLOOR` is dropped; if none
+  clears it, `NoRelevantTopics` is raised and the system abstains. The floor works on whole
+  topics only: the sources inside one topic can disagree, and they score differently for the same
+  question, so a per-document floor would keep some of them and drop others.
+  It ships at **`-1.0`**, not `0.0`: cosine similarity is in `[-1, 1]`, so `-1.0` is the only
+  true no-op, whereas `0.0` already drops a topic whose best chunk is slightly anti-correlated
+  with the question. The course's `0.4` does not port: it sits on LangChain's normalised `[0, 1]`
+  relevance scale, and this code uses raw cosine. Choose the value with
+  `scripts/calibrate_floor.py` once the corpus is embedded with the real model.
+- **Rule 1 — MAX, not mean.** A mean penalises topics holding many disagreeing sources, which is
+  perverse in a system built to surface them. Scores are grouped by `(crop_id, topic)`, since a
+  topic name is only unique within a crop. Pass `crop_id` (`scripts.ask --crop SLUG`) to score one crop
+  only; without it every crop competes, so with more than one crop a question about one can select
+  another's topic. `POST /chat` must pass it.
+- **Rule 2 — `k = 3`**, the existing `TOPIC_SELECTION_K`. The SQL `LIMIT` applies to topics;
+  each selected topic's documents are fetched in a second query with none.
+- **Rule 3 — the budget**, `assemble_within_budget`, reused unchanged.
+
+Topics are scored from the `published_item_chunks` view, but the view has no title or provenance
+and the chat layer may not name the raw tables, so each topic's documents come from
+`topic_set_statement` in `app/crud/retrieval.py` — the same query `GET /retrieval` uses, so
+"a topic's complete published document set" has one definition. Wiring a floor into the existing
+retrieval router was rejected: it hardcodes `score=0.0` and takes the topic explicitly, so it
+can never abstain.
+
+**Calibration record:** not yet run. Run `docker compose exec -T cms python -m scripts.calibrate_floor`
+after the corpus is re-embedded with `text-embedding-3-small`, and paste the output here. Until
+then `TOPIC_SCORE_FLOOR` stays at its no-op default.
+
 ## Local ports
 
 The API is published on **8000**, and PostgreSQL on **5432** — the default port, so a GUI
@@ -233,10 +268,12 @@ app/
   schema/            Pydantic request/response shapes
   crud/              data access — queries and commits (routers do 404 pre-checks)
   router/            HTTP surface
-  chat/              embedder seam and chunking; reads the published_item_chunks view only
+  chat/              embedder seam, chunking, topic selection; scores from the published_item_chunks view
 alembic/             schema migrations, run inside the cms container (`alembic upgrade head`)
 scripts/seed.py      the basil demo corpus — idempotent, keyed on (crop, title, source)
 scripts/reindex.py   embeds every document into item_chunks; skips unchanged chunks
+scripts/ask.py       asks a question, prints the selected topics in full with provenance
+scripts/calibrate_floor.py  on-topic vs off-topic score distributions, for TOPIC_SCORE_FLOOR
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI
 docs/                design notes (this file)
