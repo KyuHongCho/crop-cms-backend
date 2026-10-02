@@ -2,8 +2,9 @@
 
 The chat layer reads published content through the `published_item_chunks`
 view. This test is a convention with a tripwire, not enforcement: it greps
-source text, so a name assembled at run time would get past it, and the
-database itself still lets the application role read every table.
+source text, so a name assembled at run time would get past it, as would an
+SQL form the patterns below do not list (FROM ONLY items, a comma join); and
+the database itself still lets the application role read every table.
 
 Word boundaries are required, not a substring search: `"item_chunks" in src`
 also matches the legitimate view name `published_item_chunks` and would fail
@@ -22,7 +23,7 @@ FORBIDDEN = [re.compile(p, flags) for p, flags in (
     # The raw documents table carries the drafts the published_item_chunks view
     # filters out. Not a bare \bitems\b, which dict.items() would trip: only the
     # SQL positions, and SQLAlchemy Core's table("items", ...).
-    (r"\b(?:from|join|into|update)\s+items\b", re.IGNORECASE),
+    (r"""\b(?:from|join|into|update)\s+(?:"?public"?\.)?["']?items\b""", re.IGNORECASE),
     (r"""\btable\(\s*["']items["']""", 0),
 )]
 
@@ -51,8 +52,11 @@ def test_chat_module_does_not_name_the_raw_tables(path):
         ("from app.model.model import ItemChunk", [r"\bItemChunk\b"]),
         ("ItemChunks, Items, items", []),
         ("for k, v in d.items():", []),
-        ("SELECT * FROM items", [r"\b(?:from|join|into|update)\s+items\b"]),
-        ("JOIN items i ON i.id = c.item_id", [r"\b(?:from|join|into|update)\s+items\b"]),
+        ("SELECT * FROM items", [r"""\b(?:from|join|into|update)\s+(?:"?public"?\.)?["']?items\b"""]),
+        ("JOIN items i ON i.id = c.item_id", [r"""\b(?:from|join|into|update)\s+(?:"?public"?\.)?["']?items\b"""]),
+        ("SELECT content FROM public.items", [r"""\b(?:from|join|into|update)\s+(?:"?public"?\.)?["']?items\b"""]),
+        ('SELECT * FROM "public"."items"', [r"""\b(?:from|join|into|update)\s+(?:"?public"?\.)?["']?items\b"""]),
+        ("SELECT * FROM public.published_item_chunks", []),
         ('table("items", column("body"))', [r"""\btable\(\s*["']items["']"""]),
         ('table("published_item_chunks", column("embedding"))', []),
     ],

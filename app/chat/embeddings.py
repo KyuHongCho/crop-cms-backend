@@ -26,8 +26,8 @@ class Embedder(Protocol):
 
 class OpenAIEmbedder:
     """text-embedding-3-small via langchain-openai. Reads OPENAI_API_KEY from
-    the environment; constructing it without one raises, before anything is
-    sent."""
+    the environment; constructing it without one (unset or empty) raises,
+    before anything is sent."""
 
     model = OPENAI_EMBEDDING_MODEL
 
