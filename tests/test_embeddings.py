@@ -6,6 +6,7 @@ selected by name, and no test needs OPENAI_API_KEY.
 import math
 import sys
 
+import openai
 import pytest
 from sqlalchemy import select, text
 
@@ -71,6 +72,18 @@ def test_default_is_openai_and_an_unknown_name_is_refused(monkeypatch):
     assert embedder_class() is OpenAIEmbedder
     with pytest.raises(ValueError, match="unknown EMBEDDER"):
         embedder_class("opeani")
+
+
+@pytest.mark.parametrize("key", [None, ""])
+def test_openai_embedder_refuses_a_missing_key_before_any_request(monkeypatch, key):
+    """docker-compose.yaml always sets OPENAI_API_KEY, so a key-less container
+    has it as "": that case must fail at construction, like an unset key."""
+    if key is None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("OPENAI_API_KEY", key)
+    with pytest.raises(openai.OpenAIError):
+        OpenAIEmbedder()
 
 
 # --- reindex -----------------------------------------------------------------

@@ -85,7 +85,9 @@ docker compose exec cms alembic upgrade head
 docker compose exec cms python -m scripts.seed
 
 # 5. Embed every document (13 chunks); needs OPENAI_API_KEY -- without one, skip this
-#    step: step 6 does not read embeddings. --dry-run prints the count without calling OpenAI
+#    step: step 6 does not read embeddings. --dry-run prints the count without calling OpenAI.
+#    Added the key to .env after step 2? Run `docker compose up -d` first: `exec` uses the
+#    container's environment from when it was created, not the current .env.
 docker compose exec cms python -m scripts.reindex --dry-run
 docker compose exec cms python -m scripts.reindex
 
@@ -123,9 +125,10 @@ view exposes only published documents, and is what the chat layer (`app/chat/`) 
 
 That boundary is **a convention with a tripwire, not enforcement**:
 `tests/test_chat_layer_isolation.py` fails if a module under `app/chat/` names `Item`, `ItemChunk`
-or `item_chunks`, or reads `items` in SQL or as `table("items")`, but it only searches source text, and the database still lets the application
-role read every table: `cms_app` owns them all and can re-grant itself, so one role cannot enforce
-it. A second database role was considered and rejected on budget.
+or `item_chunks`, or reads `items` in SQL or as `table("items")`, but it only searches source
+text, and the database still lets the application role read every table: `cms_app` owns them all
+and can re-grant itself, so one role cannot enforce it. A second database role was considered and
+rejected on budget.
 
 `item_chunks` carries no HNSW or IVFFlat index yet: [why](docs/design-notes.md#no-vector-index-yet).
 
