@@ -9,8 +9,8 @@ Three rules govern topic selection:
     Rule 2 -- keep the top k topics (3 by default).
     Rule 3 -- fit the kept topics into the context budget.
 
-Rules 1 and 2 depend on embeddings, which this repository does not yet have;
-Rule 3 does not, and is built and tested below.
+Rules 1 and 2 need topic selection over the published_item_chunks embeddings,
+which is not built yet; Rule 3 does not, and is built and tested below.
 """
 import os
 from dataclasses import dataclass

@@ -26,14 +26,15 @@ source that disagrees reaches the answer.
 
 | Works today | Not built yet |
 |---|---|
-| Document store — 4 tables, sources recorded per document | Embeddings and vector search |
-| Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | `POST /chat` |
+| Document store — 4 tables, sources recorded per document | Vector search |
+| Embeddings for every document, offline-testable (`scripts/reindex.py`) | `POST /chat` |
+| Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them | Authentication |
 | Database migrations (Alembic), exercised for real in CI | Editing (`PATCH`) and deleting documents |
 | Test suite on an isolated database, run in CI | Frontend and deployment |
 | AI code review on pull requests (advisory) | |
 
-Remaining work in the build plan: embeddings, vector search that selects topics, advisor tools
+Remaining work in the build plan: vector search that selects topics, advisor tools
 over MCP, `POST /chat`, then conversation context and caching.
 
 ## Engineering highlights
@@ -68,23 +69,29 @@ Trade-offs, known limits and the full rationale: [`docs/design-notes.md`](docs/d
 Requires Docker.
 
 ```bash
-# 1. Secrets (.env is git- and docker-ignored)
-cat > .env <<'EOF'
-POSTGRES_PASSWORD=<choose one>
-DB_USER=cms_app
-DB_PASSWORD=<choose another>
-EOF
+# 1. Secrets (.env is git- and docker-ignored): generates the two passwords;
+#    OPENAI_API_KEY is only needed for step 5
+[ -f .env ] || { cp .env.example .env && sed -i.bak \
+  -e "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" \
+  -e "s/^DB_PASSWORD=$/DB_PASSWORD=$(openssl rand -hex 16)/" .env && rm .env.bak; }
 
 # 2. Start the API and the database
 docker compose up -d --build
 
-# 3. Create the tables, the index and the refile trigger
+# 3. Create the schema: tables, index, refile trigger, item_chunks and its published view
 docker compose exec cms alembic upgrade head
 
 # 4. Load the basil demo corpus (13 documents across 5 topics)
 docker compose exec cms python -m scripts.seed
 
-# 5. Ask for one topic — returns 3 documents, one per disagreeing source
+# 5. Embed every document (13 chunks); needs OPENAI_API_KEY -- without one, skip this
+#    step: step 6 does not read embeddings. --dry-run prints the count without calling OpenAI.
+#    Added the key to .env after step 2? Run `docker compose up -d` first: `exec` uses the
+#    container's environment from when it was created, not the current .env.
+docker compose exec cms python -m scripts.reindex --dry-run
+docker compose exec cms python -m scripts.reindex
+
+# 6. Ask for one topic — returns 3 documents, one per disagreeing source
 curl localhost:8000/retrieval/basil/optimal-temperature
 ```
 
@@ -102,6 +109,29 @@ The seed tests need [crop-climate-advisor](https://github.com/KyuHongCho/crop-cl
 checked out next to this repo; without it they skip. CI checks the sibling out and fails the build
 if those tests would skip.
 
+The suite needs no API key: it embeds with `FakeEmbedder`, a deterministic offline stand-in.
+
+## Embeddings
+
+`scripts/reindex.py` embeds every document — drafts included — into `item_chunks`, one chunk per
+document today. It skips a chunk whose stored hash and model already match, so a second run embeds
+nothing; the hash covers title and body, so a title-only edit re-embeds too. When a document
+shrinks to fewer chunks, the extra ones are deleted in the same transaction.
+
+`EMBEDDER` selects the provider: `openai` (default, `text-embedding-3-small`, needs
+`OPENAI_API_KEY`) or `fake` (offline). It is not read from `.env`; pass it per command, e.g.
+`docker compose exec -e EMBEDDER=fake cms python -m scripts.reindex`. The `published_item_chunks`
+view exposes only published documents, and is what the chat layer (`app/chat/`) reads.
+
+That boundary is **a convention with a tripwire, not enforcement**:
+`tests/test_chat_layer_isolation.py` fails if a module under `app/chat/` names `Item`, `ItemChunk`
+or `item_chunks`, or reads `items` in SQL or as `table("items")`, but it only searches source
+text, and the database still lets the application role read every table: `cms_app` owns them all
+and can re-grant itself, so one role cannot enforce it. A second database role was considered and
+rejected on budget.
+
+`item_chunks` carries no HNSW or IVFFlat index yet: [why](docs/design-notes.md#no-vector-index-yet).
+
 ## Migrations
 
 Schema changes go through Alembic (`alembic/`), run **inside the `cms` container, never from the
@@ -115,11 +145,16 @@ docker compose exec cms alembic downgrade base  # undo them all -- DROPS every t
 
 The exception is a `pg-data` volume that predates Alembic: it already has the tables (built by the
 retired `python -m app.db.migrate_db`), so applying the baseline migration to it fails with
-`DuplicateTable`. Run `docker compose exec cms alembic stamp head` against it once, which records
-the migration as applied and runs none of its SQL. Then run `docker compose exec cms alembic check`:
+`DuplicateTable`. Run `docker compose exec cms alembic stamp 4b698ac48d60` against it once, which
+records the baseline migration as applied and runs none of its SQL, then
+`docker compose exec cms alembic upgrade head`, which runs every later migration. Stamp the
+baseline revision, not `head`: `stamp head` would also mark the later migrations as applied without
+running them, leaving `item_chunks` and the `published_item_chunks` view missing. Then run
+`docker compose exec cms alembic check`:
 a volume built before `ix_items_crop_id_topic` existed reports that index as missing, and
 `docker compose exec db sh -c 'psql -U "$DB_USER" -d cms -c "CREATE INDEX ix_items_crop_id_topic ON items (crop_id, topic)"'`
-adds it. `alembic check` cannot see the bucket row or the refile trigger. A database created after
+adds it. `alembic check` cannot see the bucket row, the refile trigger or the
+`published_item_chunks` view. A database created after
 this point always uses `alembic upgrade head`, which needs no stamp.
 
 [`app/db/migrate_db.py`](app/db/migrate_db.py) stays in the tree because `tests/conftest.py`, three

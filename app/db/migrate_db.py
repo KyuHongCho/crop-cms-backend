@@ -5,8 +5,8 @@ from sqlalchemy import create_engine, text
 from app.db.db import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME, Base
 
 # app.model.model is imported twice below: this bare import for its
-# registration side effect (it puts Crop/MainCategory/SubCategory/Item on
-# Base.metadata), the `from ... import` further down for the id constants.
+# registration side effect (it puts Crop/MainCategory/SubCategory/Item/ItemChunk
+# on Base.metadata), the `from ... import` further down for the id constants.
 # Either import alone would trigger the registration -- Python fully executes
 # a module on its first import regardless of import form -- so this line
 # documents the dependency explicitly rather than being the only thing
@@ -89,8 +89,7 @@ def reset_database():
         raise RuntimeError(
             "refusing to run: this database has an 'alembic_version' table, "
             "so Alembic manages its schema now. Use `alembic upgrade head` "
-            "(fresh database) or `alembic stamp head` (already has these "
-            "tables) instead of migrate_db.py."
+            "instead of migrate_db.py (see the README's Migrations section)."
         )
 
     # drop_all() destroys every mapped table and its rows. Fine while the schema
