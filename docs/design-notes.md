@@ -160,9 +160,8 @@ the model forbids for sources that disagree.
 
 - **Rule 0 — the floor.** A topic whose score is below `TOPIC_SCORE_FLOOR` is dropped; if none
   clears it, `NoRelevantTopics` is raised and the system abstains. The floor works on whole
-  topics only: a design-time measurement (embedder and date not recorded here) scored the three
-  sources of `optimal-temperature` for one query at 0.0976 / 0.0729 / 0.0538, so any per-document
-  floor in that range would keep some and drop others.
+  topics only: the sources inside one topic can disagree, and they score differently for the same
+  question, so a per-document floor would keep some of them and drop others.
   It ships at **`-1.0`**, not `0.0`: cosine similarity is in `[-1, 1]`, so `-1.0` is the only
   true no-op, whereas `0.0` already drops a topic whose best chunk is slightly anti-correlated
   with the question. The course's `0.4` does not port: it sits on LangChain's normalised `[0, 1]`

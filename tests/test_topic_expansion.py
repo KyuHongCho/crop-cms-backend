@@ -242,9 +242,9 @@ def _seeded_corpus_with_temperature_near_the_query():
     seed.main()
     reindex(sync_engine, FakeEmbedder(), out=lambda *_: None)
     with sync_engine.begin() as c:
-        # Put the three temperature chunks near the query, at the 0.0976 / 0.0729 /
-        # 0.0538 spread recorded in docs/design-notes.md (Vector topic selection), i.e. a
-        # per-document floor would split them.
+        # Put the three temperature chunks near the query at three distinct similarities
+        # (illustrative values, not a measurement), so a per-document floor between them
+        # would keep some documents and drop others.
         ids = [r[0] for r in c.execute(text(
             "SELECT c.id FROM item_chunks c JOIN items i ON i.id = c.item_id "
             "WHERE i.topic = 'optimal-temperature' ORDER BY c.id"))]
