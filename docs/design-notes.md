@@ -141,8 +141,8 @@ corpus does not need yet (next section).
 
 ### No vector index yet
 
-`item_chunks` has no HNSW or IVFFlat index. The seed corpus is 13 chunks, 12 of them published.
-With an HNSW index built over those 13 rows, the planner still chose a sequential scan for a
+`item_chunks` has no HNSW or IVFFlat index. The seed corpus is one chunk per document, so the table stays small.
+With an HNSW index built over 13 rows (the basil-only corpus, when this was measured), the planner still chose a sequential scan for a
 nearest-neighbour `ORDER BY embedding <=> ... LIMIT 3` (checked with `EXPLAIN`), and a sequential
 scan is exact where HNSW is approximate. Because the column is `vector(1536)` — under the cap — an
 index can be added later as a new migration with no column change.
@@ -270,7 +270,7 @@ app/
   router/            HTTP surface
   chat/              embedder seam, chunking, topic selection; scores from the published_item_chunks view
 alembic/             schema migrations, run inside the cms container (`alembic upgrade head`)
-scripts/seed.py      the basil demo corpus — idempotent, keyed on (crop, title, source)
+scripts/seed.py      the basil, lettuce, strawberry, tomato, cucumber, sweet pepper and kale demo corpus — idempotent, keyed on (crop, title, source)
 scripts/reindex.py   embeds every document into item_chunks; skips unchanged chunks
 scripts/ask.py       asks a question, prints the selected topics in full with provenance
 scripts/calibrate_floor.py  on-topic vs off-topic score distributions, for TOPIC_SCORE_FLOOR

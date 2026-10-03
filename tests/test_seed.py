@@ -23,7 +23,7 @@ import sys
 import pytest
 from sqlalchemy import select
 
-from app.model.model import Item
+from app.model.model import Crop, Item
 from scripts import seed
 
 _ADVISOR_PATH = os.environ.get("ADVISOR_PATH")
@@ -46,20 +46,60 @@ claims = pytest.importorskip(
 ecocrop = pytest.importorskip("crop_advisor.ecocrop")
 
 
-def _items_by_topic(db_session, topic: str) -> list[Item]:
+def _items_by_topic(db_session, topic: str, crop_slug: str = "basil") -> list[Item]:
     return list(
         db_session.execute(
-            select(Item).where(Item.topic == topic).order_by(Item.id)
+            select(Item)
+            .join(Crop, Crop.id == Item.crop_id)
+            .where(Item.topic == topic, Crop.slug == crop_slug)
+            .order_by(Item.id)
         ).scalars()
     )
 
 
-def test_seed_produces_12_to_15_documents_across_4_to_5_topics(sync_db_session):
+def _items_for_crop(db_session, crop_slug: str) -> list[Item]:
+    return list(
+        db_session.execute(
+            select(Item).join(Crop, Crop.id == Item.crop_id).where(Crop.slug == crop_slug)
+        ).scalars()
+    )
+
+
+def test_basil_corpus_counts_per_topic(sync_db_session):
+    """basil's corpus, counted exactly (the other crops are counted by their own test below).
+    Published and unpublished are split so the DRAFT fixture cannot hide a missing document:
+    the five RHS claims with no CC BY basil source were dropped, not stood in for."""
     seed.main()
-    items = list(sync_db_session.execute(select(Item)).scalars())
-    topics = {item.topic for item in items}
-    assert 12 <= len(items) <= 15, f"got {len(items)} documents: {[i.title for i in items]}"
-    assert 4 <= len(topics) <= 5, f"got topics: {sorted(topics)}"
+    items = _items_for_crop(sync_db_session, "basil")
+    published = {}
+    for i in items:
+        if i.published:
+            published[i.topic] = published.get(i.topic, 0) + 1
+    assert published == {"optimal-temperature": 3, "watering-needs": 3, "soil-ph": 1,
+                         "pest-and-disease": 3, "propagation": 1}, sorted(i.title for i in items)
+    unpublished = [i for i in items if not i.published]
+    assert [(i.topic, i.source) for i in unpublished] == [("propagation", "Internal review notes")]
+    assert len(items) == 12
+    journal_sources = sorted(i.source for i in items if i.published and i.read_directly
+                             and i.topic != "optimal-temperature" and i.source != seed.OFF_REGISTRY_SOURCE)
+    assert journal_sources == sorted([
+        "Driesen et al. (2021)", "Sayarer et al. (2023)", "Rahimi et al. (2023)",
+        "Adamczyk-Szabela & Wolf (2022)", "Omer et al. (2021)", "Ben Naim et al. (2025)",
+        "Walters & Lopez (2022)",
+    ])
+    assert not [i for i in items if "RHS" in i.source or "rhs.org" in i.url], (
+        "basil documents must not cite the RHS web pages (not openly licensed)"
+    )
+
+
+def test_basil_propagation_document_says_it_is_not_about_cuttings(sync_db_session):
+    """The one published propagation document covers light while raising seedlings from
+    seed; it must say so, so it is not read as backing the dropped stem-cutting claim."""
+    seed.main()
+    (doc,) = [i for i in _items_by_topic(sync_db_session, "propagation") if i.published]
+    assert doc.source == "Walters & Lopez (2022)"
+    assert "not stem cuttings" in doc.title
+    assert "NOT stem cuttings" in doc.condition and "from seed" in doc.condition
 
 
 def test_seed_is_idempotent(sync_db_session):
@@ -113,6 +153,77 @@ def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_sessi
     live_sources = sorted(c.source for c in claims.temperature_claims(ecocrop.load_crop("basil")))
 
     assert seeded_sources == live_sources
+
+
+@pytest.mark.parametrize(
+    "slug, ecocrop_id, per_topic",
+    [
+        ("lettuce", 1313, {"optimal-temperature": 1, "watering-needs": 5,
+                           "pest-and-disease": 3, "propagation": 3}),
+        ("strawberry", 1112, {"optimal-temperature": 1, "watering-needs": 2,
+                              "pest-and-disease": 2, "propagation": 2}),
+        ("tomato", 1379, {"optimal-temperature": 1, "watering-needs": 3,
+                          "pest-and-disease": 3, "propagation": 1}),
+        ("cucumber", 817, {"optimal-temperature": 1, "watering-needs": 3,
+                           "pest-and-disease": 2, "propagation": 1}),
+        ("sweet-pepper", 618, {"optimal-temperature": 1, "watering-needs": 3,
+                               "pest-and-disease": 3, "propagation": 1}),
+        ("kale", 3867, {"optimal-temperature": 1, "watering-needs": 2,
+                        "pest-and-disease": 3, "propagation": 2}),
+    ],
+)
+def test_new_crop_pin_matches_the_live_registry(sync_db_session, slug, ecocrop_id, per_topic):
+    """Per-crop drift test: the seeded Crop.ecocrop_id and the ECOCROP
+    document's pinned source must equal what the advisor's registry returns."""
+    seed.main()
+    live_claims = claims.temperature_claims(ecocrop.load_crop(slug))
+    live_ecocrop_sources = [c.source for c in live_claims if c.source.startswith("FAO ECOCROP")]
+
+    crop = sync_db_session.execute(select(Crop).where(Crop.slug == slug)).scalar_one()
+    assert crop.ecocrop_id == ecocrop_id
+    assert f"FAO ECOCROP (id {crop.ecocrop_id})" in live_ecocrop_sources
+
+    seeded_sources = sorted(d.source for d in _items_by_topic(sync_db_session, "optimal-temperature", slug))
+    assert seeded_sources == sorted(c.source for c in live_claims)
+
+    items = _items_for_crop(sync_db_session, slug)
+    counts = {t: sum(1 for i in items if i.topic == t) for t in {i.topic for i in items}}
+    assert counts == per_topic
+    assert all(i.published and i.read_directly and i.via is None for i in items)
+
+
+def test_licence_notes_use_the_shared_wording(sync_db_session):
+    """Every ECOCROP document carries the shared FAO note and every journal document
+    carries the shared CC BY note. The constants are also pinned by literal substrings
+    (the FAO terms URL, "non-commercially", "CC BY 4.0", "changes were made"), so the
+    wording cannot be edited away without this test noticing. It does not check that the
+    wording is legally sufficient, only that these terms are still present."""
+    assert "https://www.fao.org/contact-us/terms/en/" in seed._FAO_LICENCE_NOTE
+    assert "non-commercially" in seed._FAO_LICENCE_NOTE
+    assert "CC BY 4.0" in seed._CC_BY["licence_note"]
+    assert "changes were made" in seed._CC_BY["licence_note"]
+
+    seed.main()
+    items = list(sync_db_session.execute(select(Item)).scalars())
+    ecocrop_docs = [i for i in items if i.source.startswith("FAO ECOCROP")]
+    assert len(ecocrop_docs) == len(seed._CROP_SPECS)
+    assert all(i.licence_note == seed._FAO_LICENCE_NOTE for i in ecocrop_docs)
+
+    # Journal documents: every non-basil crop's non-ECOCROP documents, plus basil's published
+    # journal documents (basil's temperature papers are read via a secondary source, the folk
+    # remedy and the DRAFT fixture are not journal documents).
+    cc_by_slugs = [c["slug"] for c, _, _ in seed._CROP_SPECS if c["slug"] != "basil"]
+    journal_docs = [
+        i for slug in cc_by_slugs for i in _items_for_crop(sync_db_session, slug)
+        if not i.source.startswith("FAO ECOCROP")
+    ]
+    basil_journal_docs = [
+        i for i in _items_for_crop(sync_db_session, "basil")
+        if i.topic != "optimal-temperature" and i.published and i.source != seed.OFF_REGISTRY_SOURCE
+    ]
+    assert len(basil_journal_docs) == 7
+    journal_docs += basil_journal_docs
+    assert all(i.licence_note == seed._CC_BY["licence_note"] for i in journal_docs)
 
 
 def test_unpublished_draft_fixture_present(sync_db_session):

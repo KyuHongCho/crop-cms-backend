@@ -247,7 +247,8 @@ def _seeded_corpus_with_temperature_near_the_query():
         # would keep some documents and drop others.
         ids = [r[0] for r in c.execute(text(
             "SELECT c.id FROM item_chunks c JOIN items i ON i.id = c.item_id "
-            "WHERE i.topic = 'optimal-temperature' ORDER BY c.id"))]
+            "JOIN crops cr ON cr.id = i.crop_id "
+            "WHERE i.topic = 'optimal-temperature' AND cr.slug = 'basil' ORDER BY c.id"))]
         assert len(ids) == 3
         for chunk_id, score in zip(ids, (0.0976, 0.0729, 0.0538)):
             c.execute(ItemChunk.__table__.update().where(ItemChunk.id == chunk_id)
@@ -256,9 +257,11 @@ def _seeded_corpus_with_temperature_near_the_query():
 
 def test_basil_temperature_question_returns_all_three_sources(session):
     _seeded_corpus_with_temperature_near_the_query()
+    with sync_engine.begin() as c:
+        basil_id = c.execute(text("SELECT id FROM crops WHERE slug = 'basil'")).scalar_one()
     out = io.StringIO()
     code = ask("how hot should basil be?", embedder=FixedEmbedder(), session=session,
-               out=lambda s: print(s, file=out))
+               out=lambda s: print(s, file=out), crop_id=basil_id)
     text_out = out.getvalue()
     assert code == 0
     for source in ("FAO ECOCROP (id 1547)", "Chang, Alderson & Wright (2005)", "Walters & Currey (2019)"):
