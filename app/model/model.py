@@ -40,8 +40,10 @@ class Crop(Base):
 
 class MainCategory(Base):
     """Kind of knowledge: crop profile, research literature, cultivation
-    practice, pests and disorders. Crop is not a category -- it is an entity,
-    so adding a crop does not duplicate this tree."""
+    practice, pests and disorders. Retrieval does not use this tree: its unit
+    is crop + topic (`Item.topic`). The seed files each crop under its own main
+    category with a single "documents" sub-category, so the tree repeats once
+    per seeded crop."""
 
     __tablename__ = "main_categories"
 

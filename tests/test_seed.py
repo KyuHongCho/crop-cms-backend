@@ -2,12 +2,14 @@
 
 Runs against db-test/cms_test like every other test here (conftest.py's
 autouse _clean_database fixture TRUNCATEs first). scripts/seed.py never
-imports crop_advisor: its three `optimal-temperature` documents are pinned
-to literal source strings copied from crop_advisor/claims.py. The drift
-test below notices when the two diverge, but needs a *live* import of the
-sibling repo -- not always available to a developer who has not checked
-out crop-climate-advisor (CI always has it; both checkouts run before
-every other step).
+imports crop_advisor: its seven FAO ECOCROP `optimal-temperature` documents
+(one per crop) and the seven `ecocrop_id` values are pinned, along with basil's
+two second-hand journal documents (Chang et al. 2005, Walters & Currey 2019),
+to literal strings copied from crop_advisor/claims.py. The drift tests below
+(one for basil, one per other crop) notice when the two diverge, but need a
+*live* import of the sibling repo -- not always available to a developer who
+has not checked out crop-climate-advisor (CI always has it; both checkouts run
+before every other step).
 
 That import is guarded with pytest.importorskip rather than a bare
 `import`, because a failed bare import is a collection error: pytest exits
@@ -158,15 +160,17 @@ def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_sessi
 @pytest.mark.parametrize(
     "slug, ecocrop_id, per_topic",
     [
-        ("lettuce", 1313, {"optimal-temperature": 1, "watering-needs": 5,
+        ("lettuce", 1313, {"optimal-temperature": 1, "watering-needs": 2, "nutrient-solution": 3,
                            "pest-and-disease": 3, "propagation": 3}),
-        ("strawberry", 1112, {"optimal-temperature": 1, "watering-needs": 2,
+        ("strawberry", 1112, {"optimal-temperature": 1, "watering-needs": 1, "nutrient-solution": 1,
                               "pest-and-disease": 2, "propagation": 2}),
-        ("tomato", 1379, {"optimal-temperature": 1, "watering-needs": 3,
+        # tomato and sweet pepper have no watering-needs document: all of theirs are about
+        # solution composition (gaps stay absent).
+        ("tomato", 1379, {"optimal-temperature": 1, "nutrient-solution": 3,
                           "pest-and-disease": 3, "propagation": 1}),
-        ("cucumber", 817, {"optimal-temperature": 1, "watering-needs": 3,
+        ("cucumber", 817, {"optimal-temperature": 1, "watering-needs": 1, "nutrient-solution": 2,
                            "pest-and-disease": 2, "propagation": 1}),
-        ("sweet-pepper", 618, {"optimal-temperature": 1, "watering-needs": 3,
+        ("sweet-pepper", 618, {"optimal-temperature": 1, "nutrient-solution": 3,
                                "pest-and-disease": 3, "propagation": 1}),
         ("kale", 3867, {"optimal-temperature": 1, "watering-needs": 2,
                         "pest-and-disease": 3, "propagation": 2}),

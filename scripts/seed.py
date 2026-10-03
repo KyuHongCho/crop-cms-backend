@@ -336,7 +336,9 @@ _TOPIC_GROUPS = [
 
 # --- the other crops ----------------------------------------------------------
 # Gaps stay absent: a topic with no verified source is not seeded for the crop
-# (neither crop has a soil-ph topic). Every journal document below was read in
+# (neither crop has a soil-ph topic). `watering-needs` holds documents about how much, how
+# often or when water is supplied, or plant water use; documents about solution composition
+# or strength, salinity, ions, additives or hydroponic system type are `nutrient-solution`. Every journal document below was read in
 # full (read_directly=True, via=None); the ECOCROP document keeps its own FAO
 # licence_note.
 
@@ -371,6 +373,38 @@ _LETTUCE_TEMPERATURE_DOCS = [
 ]
 
 _LETTUCE_WATERING_DOCS = [
+    dict(
+        title="Irrigation systems for greenhouse lettuce (Chen et al., 2019)",
+        body=("In a Beijing greenhouse (soil culture, cv. 'sheshou 101') furrow irrigation was compared with "
+              "micro-sprinkler irrigation, plastic-film mulch, and mulch combined with micro-sprinklers, for a "
+              "spring and an autumn crop in 2015. In the spring crop, whole-plant fresh weight was 7.22%, 36.77% "
+              "and 43.20% higher than under furrow irrigation, and biological water-use efficiency was 20.93 "
+              "(furrow), 25.24, 36.81 and 38.54 kg per cubic metre."),
+        source="Chen et al. (2019)",
+        reference=("Chen Z, Han Y, Ning K, Luo C, Sheng W, Wang S, Fan S, Wang Y, Wang Q (2019). Assessing the "
+                   "performance of different irrigation systems on lettuce (Lactuca sativa L.) in the greenhouse. "
+                   "PLOS ONE 14(2):e0209329. doi:10.1371/journal.pone.0209329"),
+        url="https://doi.org/10.1371/journal.pone.0209329",
+        condition="Greenhouse soil culture (not hydroponic), cv. sheshou 101, spring crop, Beijing",
+        **_CC_BY,
+    ),
+    dict(
+        title="Deficit irrigation in two leaf-lettuce cultivars (Malejane et al., 2017)",
+        body=("In field trials in Pretoria, South Africa, two leaf lettuces ('Lollo Bionda' and 'Vera') were "
+              "irrigated at management allowable depletion (MAD) of 25, 50 and 75%. Compared with MAD 25%, "
+              "'Vera' lost about 8.9% of yield at MAD 50%; at MAD 75% the losses were 34% ('Vera') and 58% "
+              "('Lollo Bionda'). The response depended on the cultivar."),
+        source="Malejane et al. (2017)",
+        reference=("Malejane, Tinyani, Soundy, Sultanbawa & Sivakumar (2017). Deficit irrigation improves phenolic "
+                   "content and antioxidant activity in leafy lettuce varieties. Food Science & Nutrition 6(2):334-341 "
+                   "(online 2017; print issue 2018). doi:10.1002/fsn3.559"),
+        url="https://doi.org/10.1002/fsn3.559",
+        condition="Open-field trial, leaf cultivars (not var. capitata), Pretoria, South Africa",
+        **_CC_BY,
+    ),
+]
+
+_LETTUCE_NUTRIENT_SOLUTION_DOCS = [
     dict(
         title="Biostimulants and yield of hydroponic lettuce under salinity (Ikiz et al., 2024)",
         body=("In a 45-day greenhouse floating-culture trial, Batavia lettuce 'Caipira' grew in "
@@ -416,35 +450,6 @@ _LETTUCE_WATERING_DOCS = [
                    "doi:10.1007/s10499-018-0293-8"),
         url="https://doi.org/10.1007/s10499-018-0293-8",
         condition="NFT in a plastic-tunnel greenhouse, Bleiswijk, The Netherlands, August-October",
-        **_CC_BY,
-    ),
-    dict(
-        title="Irrigation systems for greenhouse lettuce (Chen et al., 2019)",
-        body=("In a Beijing greenhouse (soil culture, cv. 'sheshou 101') furrow irrigation was compared with "
-              "micro-sprinkler irrigation, plastic-film mulch, and mulch combined with micro-sprinklers, for a "
-              "spring and an autumn crop in 2015. In the spring crop, whole-plant fresh weight was 7.22%, 36.77% "
-              "and 43.20% higher than under furrow irrigation, and biological water-use efficiency was 20.93 "
-              "(furrow), 25.24, 36.81 and 38.54 kg per cubic metre."),
-        source="Chen et al. (2019)",
-        reference=("Chen Z, Han Y, Ning K, Luo C, Sheng W, Wang S, Fan S, Wang Y, Wang Q (2019). Assessing the "
-                   "performance of different irrigation systems on lettuce (Lactuca sativa L.) in the greenhouse. "
-                   "PLOS ONE 14(2):e0209329. doi:10.1371/journal.pone.0209329"),
-        url="https://doi.org/10.1371/journal.pone.0209329",
-        condition="Greenhouse soil culture (not hydroponic), cv. sheshou 101, spring crop, Beijing",
-        **_CC_BY,
-    ),
-    dict(
-        title="Deficit irrigation in two leaf-lettuce cultivars (Malejane et al., 2017)",
-        body=("In field trials in Pretoria, South Africa, two leaf lettuces ('Lollo Bionda' and 'Vera') were "
-              "irrigated at management allowable depletion (MAD) of 25, 50 and 75%. Compared with MAD 25%, "
-              "'Vera' lost about 8.9% of yield at MAD 50%; at MAD 75% the losses were 34% ('Vera') and 58% "
-              "('Lollo Bionda'). The response depended on the cultivar."),
-        source="Malejane et al. (2017)",
-        reference=("Malejane, Tinyani, Soundy, Sultanbawa & Sivakumar (2017). Deficit irrigation improves phenolic "
-                   "content and antioxidant activity in leafy lettuce varieties. Food Science & Nutrition 6(2):334-341 "
-                   "(online 2017; print issue 2018). doi:10.1002/fsn3.559"),
-        url="https://doi.org/10.1002/fsn3.559",
-        condition="Open-field trial, leaf cultivars (not var. capitata), Pretoria, South Africa",
         **_CC_BY,
     ),
 ]
@@ -563,6 +568,24 @@ _STRAWBERRY_TEMPERATURE_DOCS = [
 
 _STRAWBERRY_WATERING_DOCS = [
     dict(
+        title="Drip density for hydroponic strawberry (Jeong et al., 2026)",
+        body=("In recycling hydroponics, 'Kuemsil' strawberries on coir received drip irrigation at three "
+              "densities: three, six or nine drippers per slab. Daily volumes were 40-90 mL per plant (three "
+              "drippers), 80-160 mL (six) and 160-240 mL (nine), given for one minute every 30 minutes between "
+              "09:00 and 14:00. Six drippers gave the best balance of marketable yield and fruit quality; nine "
+              "gave the highest total fruit but more unmarketable fruit (under 10 g)."),
+        source="Jeong et al. (2026)",
+        reference=("Jeong Y, Zebro M, Kim M, Rabbani MG, Choi KY (2026). Optimizing drip irrigation density enhances "
+                   "growth, yield, physiology, and antioxidant capacity of Korean strawberry 'Kuemsil' in "
+                   "recycling hydroponics. PeerJ 14:e21637. doi:10.7717/peerj.21637"),
+        url="https://doi.org/10.7717/peerj.21637",
+        condition="Recycling hydroponics, coir, October 2024 to May 2025, cv. Kuemsil",
+        **_CC_BY,
+    ),
+]
+
+_STRAWBERRY_NUTRIENT_SOLUTION_DOCS = [
+    dict(
         title="Nutrient-solution strength for hydroponic strawberry (Zebro et al., 2025)",
         body=("'Kuemsil' strawberries were grown for 175 days (September 2024 to May 2025) in a recycling "
               "hydroponic system on coconut coir, with the nutrient solution at one-third, one-half, "
@@ -576,21 +599,6 @@ _STRAWBERRY_WATERING_DOCS = [
                    "doi:10.3389/fpls.2025.1685755"),
         url="https://doi.org/10.3389/fpls.2025.1685755",
         condition="Recycling hydroponics, coconut coir, greenhouse, 175 days, cv. Kuemsil",
-        **_CC_BY,
-    ),
-    dict(
-        title="Drip density for hydroponic strawberry (Jeong et al., 2026)",
-        body=("In recycling hydroponics, 'Kuemsil' strawberries on coir received drip irrigation at three "
-              "densities: three, six or nine drippers per slab. Daily volumes were 40-90 mL per plant (three "
-              "drippers), 80-160 mL (six) and 160-240 mL (nine), given for one minute every 30 minutes between "
-              "09:00 and 14:00. Six drippers gave the best balance of marketable yield and fruit quality; nine "
-              "gave the highest total fruit but more unmarketable fruit (under 10 g)."),
-        source="Jeong et al. (2026)",
-        reference=("Jeong Y, Zebro M, Kim M, Rabbani MG, Choi KY (2026). Optimizing drip irrigation density enhances "
-                   "growth, yield, physiology, and antioxidant capacity of Korean strawberry 'Kuemsil' in "
-                   "recycling hydroponics. PeerJ 14:e21637. doi:10.7717/peerj.21637"),
-        url="https://doi.org/10.7717/peerj.21637",
-        condition="Recycling hydroponics, coir, October 2024 to May 2025, cv. Kuemsil",
         **_CC_BY,
     ),
 ]
@@ -667,6 +675,7 @@ _STRAWBERRY_PROPAGATION_DOCS = [
 _LETTUCE_TOPIC_GROUPS = [
     (TOPIC_OPTIMAL_TEMPERATURE, _LETTUCE_TEMPERATURE_DOCS),
     ("watering-needs", _LETTUCE_WATERING_DOCS),
+    ("nutrient-solution", _LETTUCE_NUTRIENT_SOLUTION_DOCS),
     ("pest-and-disease", _LETTUCE_PEST_DOCS),
     ("propagation", _LETTUCE_PROPAGATION_DOCS),
 ]
@@ -674,6 +683,7 @@ _LETTUCE_TOPIC_GROUPS = [
 _STRAWBERRY_TOPIC_GROUPS = [
     (TOPIC_OPTIMAL_TEMPERATURE, _STRAWBERRY_TEMPERATURE_DOCS),
     ("watering-needs", _STRAWBERRY_WATERING_DOCS),
+    ("nutrient-solution", _STRAWBERRY_NUTRIENT_SOLUTION_DOCS),
     ("pest-and-disease", _STRAWBERRY_PEST_DOCS),
     ("propagation", _STRAWBERRY_PROPAGATION_DOCS),
 ]
@@ -731,7 +741,7 @@ _TOMATO_TEMPERATURE_DOCS = [
     ),
 ]
 
-_TOMATO_WATERING_DOCS = [
+_TOMATO_NUTRIENT_SOLUTION_DOCS = [
     dict(
         title="Soilless systems and saline water for greenhouse tomato (Rodriguez-Ortega et al., 2019)",
         body=("'Optima' tomatoes were grown for 108 days in deep flow, nutrient film (NFT) and perlite "
@@ -885,6 +895,9 @@ _CUCUMBER_WATERING_DOCS = [
                    "September 2021 to August 2023; cultivar not stated; observational data"),
         **_CC_BY,
     ),
+]
+
+_CUCUMBER_NUTRIENT_SOLUTION_DOCS = [
     dict(
         title="Nutrient-solution strength for coir-grown cucumber (He et al., 2024)",
         body=("Cucumber 'Deltastar' on coir slabs received nutrient solution at EC 2, 5 or 8 dS per metre. "
@@ -990,7 +1003,7 @@ _SWEET_PEPPER_TEMPERATURE_DOCS = [
     ),
 ]
 
-_SWEET_PEPPER_WATERING_DOCS = [
+_SWEET_PEPPER_NUTRIENT_SOLUTION_DOCS = [
     dict(
         title="Nutrient-to-water uptake ratios of hydroponic sweet pepper (Ropokis et al., 2018)",
         body=("Four sweet pepper cultivars (bell types 'Orangery' and 'Sondela', elongated 'Bellisa' and "
@@ -1291,7 +1304,7 @@ _KALE_PROPAGATION_DOCS = [
 
 _TOMATO_TOPIC_GROUPS = [
     (TOPIC_OPTIMAL_TEMPERATURE, _TOMATO_TEMPERATURE_DOCS),
-    ("watering-needs", _TOMATO_WATERING_DOCS),
+    ("nutrient-solution", _TOMATO_NUTRIENT_SOLUTION_DOCS),
     ("pest-and-disease", _TOMATO_PEST_DOCS),
     ("propagation", _TOMATO_PROPAGATION_DOCS),
 ]
@@ -1299,13 +1312,14 @@ _TOMATO_TOPIC_GROUPS = [
 _CUCUMBER_TOPIC_GROUPS = [
     (TOPIC_OPTIMAL_TEMPERATURE, _CUCUMBER_TEMPERATURE_DOCS),
     ("watering-needs", _CUCUMBER_WATERING_DOCS),
+    ("nutrient-solution", _CUCUMBER_NUTRIENT_SOLUTION_DOCS),
     ("pest-and-disease", _CUCUMBER_PEST_DOCS),
     ("propagation", _CUCUMBER_PROPAGATION_DOCS),
 ]
 
 _SWEET_PEPPER_TOPIC_GROUPS = [
     (TOPIC_OPTIMAL_TEMPERATURE, _SWEET_PEPPER_TEMPERATURE_DOCS),
-    ("watering-needs", _SWEET_PEPPER_WATERING_DOCS),
+    ("nutrient-solution", _SWEET_PEPPER_NUTRIENT_SOLUTION_DOCS),
     ("pest-and-disease", _SWEET_PEPPER_PEST_DOCS),
     ("propagation", _SWEET_PEPPER_PROPAGATION_DOCS),
 ]
