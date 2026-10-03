@@ -157,6 +157,22 @@ def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_sessi
     assert seeded_sources == live_sources
 
 
+def test_second_hand_basil_via_and_url_match_the_live_advisor_claims_drift(sync_db_session):
+    """Drift check on the provenance of the two second-hand basil documents: the seeded
+    `via` and `url` equal the live advisor claim's, keyed by `source`.
+
+    NOTE: passes only with the advisor's corrected claims (via/url = Walters, Tarr & Lopez
+    2023, PMC10688745 for both). Until that advisor change is merged to the advisor's main,
+    CI checking out the advisor fails here."""
+    seed.main()
+    seeded = {d.source: d for d in _items_by_topic(sync_db_session, "optimal-temperature")}
+    live = {c.source: c for c in claims.JOURNAL_TEMPERATURE_CLAIMS}
+    assert sorted(live) == ["Chang, Alderson & Wright (2005)", "Walters & Currey (2019)"]
+    for source, claim in live.items():
+        assert seeded[source].via == claim.via, source
+        assert seeded[source].url == claim.url, source
+
+
 @pytest.mark.parametrize(
     "slug, ecocrop_id, per_topic",
     [
@@ -228,6 +244,26 @@ def test_licence_notes_use_the_shared_wording(sync_db_session):
     assert len(basil_journal_docs) == 7
     journal_docs += basil_journal_docs
     assert all(i.licence_note == seed._CC_BY["licence_note"] for i in journal_docs)
+
+    # The two second-hand basil documents were read through a CC BY paper (Walters, Tarr &
+    # Lopez 2023): they carry the shared "via" note, which is not the direct-read CC BY note.
+    via_note = seed._CC_BY_VIA_NOTE
+    assert "https://creativecommons.org/licenses/by/4.0/" in via_note
+    assert "changes were made" in via_note
+    assert "Walters, Tarr & Lopez (2023)" in via_note
+    assert ("The original papers (Chang et al. 2005; Walters & Currey 2019) were not read "
+            "and their own licences were not checked.") in via_note
+    via_docs = [
+        i for i in _items_for_crop(sync_db_session, "basil")
+        if i.topic == "optimal-temperature" and not i.read_directly
+    ]
+    assert sorted(i.source for i in via_docs) == ["Chang, Alderson & Wright (2005)",
+                                                  "Walters & Currey (2019)"]
+    for i in via_docs:
+        assert i.licence_note == via_note
+        assert "https://creativecommons.org/licenses/by/4.0/" in i.licence_note
+        assert "changes were made" in i.licence_note
+        assert "Walters, Tarr & Lopez (2023)" in i.licence_note
 
 
 def test_unpublished_draft_fixture_present(sync_db_session):

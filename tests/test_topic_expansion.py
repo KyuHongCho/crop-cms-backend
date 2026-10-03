@@ -70,7 +70,8 @@ def _crop(slug: str = "basil") -> int:
         ).inserted_primary_key[0]
 
 
-def _doc(crop_id: int, topic: str, n: int, vectors: list[list[float]], *, published=True) -> list[int]:
+def _doc(crop_id: int, topic: str, n: int, vectors: list[list[float]], *, published=True,
+         licence_note=None) -> list[int]:
     """One document per vector, one chunk each, all under `topic`."""
     ids = []
     with sync_engine.begin() as c:
@@ -79,7 +80,7 @@ def _doc(crop_id: int, topic: str, n: int, vectors: list[list[float]], *, publis
                 sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID, crop_id=crop_id, topic=topic,
                 title=f"{topic} {n}-{i}", body="body", published=published,
                 source=f"Source {topic} {n}-{i}", reference="ref", url="https://example.invalid",
-                read_directly=True,
+                read_directly=True, licence_note=licence_note,
             )).inserted_primary_key[0]
             c.execute(ItemChunk.__table__.insert().values(
                 item_id=item_id, chunk_index=0, content="c", content_hash=f"h{item_id}",
@@ -234,6 +235,26 @@ def test_ask_prints_only_the_requested_crop(session):
     assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append, crop_id=basil) == 0
     headers = [l.strip() for l in lines if l.strip().startswith("==")]
     assert headers == ["== optimal-temperature  (score 0.3000, 1 documents)"]
+
+
+def test_ask_prints_a_documents_licence_note_verbatim(session):
+    basil = _crop("basil")
+    note = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/); changes were made."
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)], licence_note=note)
+    lines: list[str] = []
+    assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append, crop_id=basil) == 0
+    assert f"      licence_note: {note}" in lines
+    # directly under the url line, same indentation as source/reference/url
+    url_at = next(i for i, l in enumerate(lines) if l.startswith("      url:"))
+    assert lines[url_at + 1] == f"      licence_note: {note}"
+
+
+def test_ask_prints_no_licence_line_for_a_document_without_a_note(session):
+    basil = _crop("basil")
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)])
+    lines: list[str] = []
+    assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append, crop_id=basil) == 0
+    assert not [l for l in lines if "licence" in l.lower()]
 
 
 # --- Done 1: the basil corpus ------------------------------------------------

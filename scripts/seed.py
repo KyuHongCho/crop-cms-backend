@@ -89,6 +89,17 @@ _CC_BY = dict(
     ),
 )
 
+# The two basil temperature papers (Chang et al. 2005, Walters & Currey 2019) are not read
+# directly: their figures were read in Walters, Tarr & Lopez (2023), which is CC BY 4.0
+# (c) 2023 Walters et al. One shared note for both; their via/url/read_directly stay as is.
+_CC_BY_VIA_NOTE = (
+    "Read through Walters, Tarr & Lopez (2023), CC BY 4.0 "
+    "(https://creativecommons.org/licenses/by/4.0/). Figure summarised from that "
+    "article; changes were made. Not endorsed by the authors. The original papers "
+    "(Chang et al. 2005; Walters & Currey 2019) were not read and their own licences "
+    "were not checked."
+)
+
 _TEMPERATURE_DOCS = [
     dict(
         title="FAO ECOCROP on basil's optimal temperature",
@@ -118,7 +129,7 @@ _TEMPERATURE_DOCS = [
         read_directly=False,
         via="Walters, Tarr & Lopez (2023), PLoS One 18(11):e0294905",
         condition="DLI 20-22 mol m-2 d-1",
-        licence_note=None,
+        licence_note=_CC_BY_VIA_NOTE,
     ),
     dict(
         title="Walters & Currey (2019) on basil's optimal temperature",
@@ -134,7 +145,7 @@ _TEMPERATURE_DOCS = [
         read_directly=False,
         via="Walters, Tarr & Lopez (2023), PLoS One 18(11):e0294905",
         condition="DLI 19.5 mol m-2 d-1",
-        licence_note=None,
+        licence_note=_CC_BY_VIA_NOTE,
     ),
 ]
 

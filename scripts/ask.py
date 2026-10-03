@@ -53,6 +53,8 @@ def ask(question: str, embedder=None, session: Session | None = None, out=print,
             out(f"      source: {document.source}")
             out(f"      reference: {document.reference}")
             out(f"      url: {document.url}")
+            if document.licence_note:
+                out(f"      licence_note: {document.licence_note}")
             out(f"      {document.body}")
     for candidate in dropped:
         out(f"\ndropped for the context budget: {candidate.topic} (score {candidate.score:.4f})")

@@ -223,6 +223,6 @@ Built while working through two Inflearn courses:
 
 Source code: MIT — see [LICENSE](LICENSE). Crop data is not covered: FAO ECOCROP content is © FAO,
 under the [FAO Terms and Conditions](https://www.fao.org/contact-us/terms/en/); `items.licence_note`
-carries those terms per document. The demo corpus is for non-commercial use only.
+carries those terms, or the CC BY 4.0 credit and change notice, per document. The demo corpus is for non-commercial use only.
 
 Personal portfolio repository — issues are welcome; external pull requests are not accepted.
