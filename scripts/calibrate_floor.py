@@ -41,7 +41,10 @@ QUESTIONS = [
     ("how often should I water basil?", "watering-needs", "basil"),
     ("what soil pH does basil want?", "soil-ph", "basil"),
     ("what pests attack basil?", "pest-and-disease", "basil"),
-    ("how do I propagate basil from cuttings?", "propagation", "basil"),
+    # The only published basil propagation document covers seed-raising and says it is NOT
+    # about stem cuttings, so a cuttings question would take its on-topic score from a document
+    # that does not answer it (a known gap; keep the question on seed-raising).
+    ("how do I raise basil seedlings from seed?", "propagation", "basil"),
 ]
 
 

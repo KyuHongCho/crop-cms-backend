@@ -23,7 +23,7 @@ from scripts import reindex as reindex_script
 from scripts import seed
 from scripts.reindex import reindex
 
-SEED_DOCUMENTS = sum(len(docs) for _, docs in seed._TOPIC_GROUPS)
+SEED_DOCUMENTS = sum(len(docs) for _, _, groups in seed._CROP_SPECS for _, docs in groups)
 
 
 def _quiet(*_):
