@@ -6,18 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.model.model as model
 
-# Starting daily budget stamped on new members at signup. The per-member
-# column is the authority afterwards; the model's server_default (20000) is
-# only a fallback for inserts that bypass the ORM.
 def _read_budget(raw: str) -> int:
-    # Fail loudly at import: a negative value would trip the table's CHECK at
-    # signup, which the router reports as a (false) duplicate email.
+    # A negative value would trip the table's CHECK at signup, which the router
+    # reports as a (false) duplicate email -- so refuse it here instead.
     value = int(raw)
     if value < 0:
         raise ValueError(f"TOKENS_BUDGET_DAILY must be >= 0, got {value}")
     return value
 
 
+# Starting daily budget stamped on new members at signup; read once at import,
+# so a change needs the container recreated. The per-member column is the
+# authority afterwards; the model's server_default (20000) is only a fallback
+# for inserts that bypass the ORM.
 TOKENS_BUDGET_DAILY = _read_budget(os.environ.get("TOKENS_BUDGET_DAILY", "20000"))
 
 

@@ -1,7 +1,8 @@
-"""Per-member daily token budget, enforced here and nowhere else.
+"""Per-member daily token budget. Not yet wired to a route: POST /chat will be
+its first caller, and until then nothing enforces it at runtime.
 
 Anthropic workspace spend limits are an Enterprise feature, so there is no
-provider-side backstop: this is the only enforcement.
+provider-side backstop: once wired, this is the only enforcement.
 
 A model-calling handler (POST /chat, not built yet) does:
 
@@ -73,6 +74,11 @@ async def require_budget(
     db: AsyncSession = Depends(get_db),
 ) -> model.Member:
     """Dependency: the authenticated member, with budget checked. Depend on
-    this instead of get_current_member for any route that calls a model."""
+    this instead of get_current_member for any route that calls a model.
+
+    The member's budget columns are re-read after the check, so the handler
+    sees post-reset values. Known limit: after record_usage the in-memory
+    object is stale again."""
     await check_budget(db, member.id)
+    await db.refresh(member, ["tokens_used_today", "budget_window_start"])
     return member

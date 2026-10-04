@@ -210,7 +210,8 @@ manages. A test asserts that refusal.
 
 Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`); signing a token without it fails loudly. Tokens
 last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is implemented** -- log in
-again. The CMS read endpoints stay unauthenticated; auth guards the chat path.
+again. Every CMS endpoint, read and write alike, is still unauthenticated; the member identity and the
+budget exist for the model-calling route, which is not built yet.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), enforced in
 [`app/auth/budget.py`](app/auth/budget.py), because provider-side spend limits are not available on

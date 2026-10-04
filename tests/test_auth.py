@@ -49,7 +49,7 @@ def sql(statement, **params):
         return connection.execute(text(statement), params)
 
 
-# --- Done 1: /members/me ----------------------------------------------------
+# --- /members/me -------------------------------------------------------------
 
 def test_me_without_token_is_401(client):
     assert client.get("/members/me").status_code == 401
@@ -89,14 +89,29 @@ def test_token_for_a_deleted_member_is_401(client):
     assert client.get("/members/me", headers=auth(token)).status_code == 401
 
 
-# --- Done 2: the CMS stays open --------------------------------------------
+# --- who needs a token -------------------------------------------------------
 
 @pytest.mark.parametrize("path", ["/", "/main-categories", "/sub-categories", "/crops", "/items"])
 def test_existing_endpoints_work_without_a_token(client, path):
     assert client.get(path).status_code == 200
 
 
-# --- Done 3: duplicate signup, indistinguishable login failures -------------
+def test_only_members_me_requires_a_token():
+    # Every route that declares the bearer scheme shows up in the OpenAPI schema
+    # with a `security` entry, so this pins which routes are guarded -- the CMS
+    # writes included -- and fails when one is added or removed.
+    from app.main import app
+
+    guarded = sorted(
+        f"{method.upper()} {path}"
+        for path, operations in app.openapi()["paths"].items()
+        for method, operation in operations.items()
+        if operation.get("security")
+    )
+    assert guarded == ["GET /members/me"]
+
+
+# --- duplicate signup, indistinguishable login failures ----------------------
 
 def test_duplicate_signup_is_400(client):
     assert signup(client).status_code == 201
@@ -113,7 +128,7 @@ def test_wrong_password_and_unknown_email_get_identical_401(client):
     assert wrong.json() == unknown.json()
 
 
-# --- Done 4: argon2 at rest -------------------------------------------------
+# --- argon2 at rest ----------------------------------------------------------
 
 def test_stored_password_is_an_argon2_hash(client):
     signup(client)
@@ -126,7 +141,7 @@ def test_signup_response_never_contains_the_hash(client):
     assert "password" not in signup(client).text
 
 
-# --- Done 5 / 6: the budget -------------------------------------------------
+# --- the budget --------------------------------------------------------------
 
 class StubModel:
     """Stands in for the Anthropic client; counts calls, reports usage."""
@@ -230,6 +245,23 @@ def test_member_whose_window_is_yesterday_is_reset_and_served(budget_app, member
     assert row.tokens_used_today == 100  # reset to 0, then this call's usage
 
 
+def test_require_budget_returns_the_member_after_the_reset(client):
+    member_id = signup(client).json()["id"]
+    headers = auth(login_token(client))
+    sql(
+        "UPDATE members SET tokens_used_today = 20000, "
+        "budget_window_start = CURRENT_DATE - 1 WHERE id = :id", id=member_id,
+    )
+    app = FastAPI()
+
+    @app.get("/probe")
+    async def probe(member=Depends(require_budget)):
+        return {"used": member.tokens_used_today}
+
+    response = TestClient(app).get("/probe", headers=headers)
+    assert response.json() == {"used": 0}
+
+
 def test_record_usage_is_an_atomic_increment(budget_app, member):
     # Two requests' worth of usage added back to back must both land: the
     # UPDATE adds to the stored value, it does not write a Python-side sum.
@@ -257,7 +289,7 @@ def test_negative_usage_is_refused_by_the_database_and_the_function(member):
         asyncio.run(go())
 
 
-# --- Done 7: no SECRET_KEY needed to import, loud when signing ---------------
+# --- no SECRET_KEY needed to import, loud when signing -----------------------
 
 def test_missing_secret_key_fails_loudly_when_signing(monkeypatch):
     monkeypatch.delenv("SECRET_KEY")
