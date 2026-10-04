@@ -1,6 +1,6 @@
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String,
+    Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, String,
     Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.orm import relationship, validates
@@ -197,3 +197,26 @@ class ItemChunk(Base):
     # When the current vector was produced: set on insert, reset by
     # scripts/reindex.py on every re-embed.
     embedded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Member(Base):
+    """A registered member. Everything in this app is per-member: chambers,
+    grows and chat history all hang off this row."""
+
+    __tablename__ = "members"
+    __table_args__ = (
+        CheckConstraint("tokens_used_today >= 0", name="tokens_used_today_non_negative"),
+        CheckConstraint("tokens_budget_daily >= 0", name="tokens_budget_daily_non_negative"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), nullable=False, unique=True)
+    # "password_hash", never "password": the column name is the only
+    # documentation a reader of the schema gets that no plaintext is stored.
+    password_hash = Column(Text, nullable=False)
+    display_name = Column(String(64))
+
+    # Per-member daily model budget, enforced in-process -- see app/auth/budget.py.
+    tokens_used_today = Column(Integer, nullable=False, server_default=text("0"))
+    tokens_budget_daily = Column(Integer, nullable=False, server_default=text("20000"))
+    budget_window_start = Column(Date, nullable=False, server_default=text("CURRENT_DATE"))
