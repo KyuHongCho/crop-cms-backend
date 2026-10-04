@@ -50,6 +50,7 @@ def test_threshold_never_fires_on_the_seed_corpus():
     """The comment beside CHUNK_SPLIT_THRESHOLD_CHARS says the split never
     fires today; this keeps that true of the seed corpus, or makes it fail
     loudly when the corpus outgrows it."""
-    for _, docs in seed._TOPIC_GROUPS:
-        for doc in docs:
-            assert len(chunk_document(doc["title"], doc["body"])) == 1, doc["title"]
+    for _, _, groups in seed._CROP_SPECS:
+        for _, docs in groups:
+            for doc in docs:
+                assert len(chunk_document(doc["title"], doc["body"])) == 1, doc["title"]

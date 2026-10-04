@@ -1,12 +1,14 @@
 """Turns a document into the text that gets embedded.
 
-One chunk per document today: the threshold below is far above the longest
-body, so the paragraph split exists for the corpus growing, not for now.
+One chunk per document today: the threshold below is above the longest embedded
+text in the seed corpus (874 characters), so the paragraph split exists for the
+corpus growing, not for now.
 """
 import hashlib
 
-CHUNK_SPLIT_THRESHOLD_CHARS = 1_000   # measured 2026-09-25: longest body is 251 chars,
-                                      # zero documents exceed 500 -- this never fires today
+CHUNK_SPLIT_THRESHOLD_CHARS = 1_000   # measured 2026-10-03: longest embedded_text(title, body) is 874
+                                      # chars over 62 documents, 40 exceed 500, none exceed 1,000 --
+                                      # this never fires today, with 126 chars of headroom
 
 
 def embedded_text(title: str, body: str) -> str:

@@ -82,10 +82,14 @@ docker compose up -d --build
 # 3. Create the schema: tables, index, refile trigger, item_chunks and its published view
 docker compose exec cms alembic upgrade head
 
-# 4. Load the basil demo corpus (13 documents across 5 topics)
+# 4. Load the demo corpus: basil, lettuce, strawberry, tomato, cucumber, sweet pepper and kale
+#    (non-commercial demo data: FAO ECOCROP terms apply, see Licence)
 docker compose exec cms python -m scripts.seed
+#    The seed has no delete path: a database seeded by an older version keeps the rows it
+#    replaced (basil's former RHS documents, the old folklore row). Reseed a fresh database,
+#    or remove those rows by hand.
 
-# 5. Embed every document (13 chunks); needs OPENAI_API_KEY -- without one, skip this
+# 5. Embed every document; needs OPENAI_API_KEY -- without one, skip this
 #    step: step 6 does not read embeddings. --dry-run prints the count without calling OpenAI.
 #    Added the key to .env after step 2? Run `docker compose up -d` first: `exec` uses the
 #    container's environment from when it was created, not the current .env.
@@ -97,7 +101,7 @@ curl localhost:8000/retrieval/basil/optimal-temperature
 
 # 7. Ask a question — selects the best-matching topics by vector similarity and prints each in
 #    full with its sources. Needs step 5 (embeddings) and OPENAI_API_KEY.
-docker compose exec -T cms python -m scripts.ask "how hot should basil be?"
+docker compose exec -T cms python -m scripts.ask --crop basil "how hot should basil be?"
 ```
 
 API on `localhost:8000` (interactive docs at `/docs`); PostgreSQL on `127.0.0.1:5432`, loopback only.
@@ -219,6 +223,6 @@ Built while working through two Inflearn courses:
 
 Source code: MIT — see [LICENSE](LICENSE). Crop data is not covered: FAO ECOCROP content is © FAO,
 under the [FAO Terms and Conditions](https://www.fao.org/contact-us/terms/en/); `items.licence_note`
-carries those terms per document.
+carries those terms, or the CC BY 4.0 credit and change notice, per document. The demo corpus is for non-commercial use only.
 
 Personal portfolio repository — issues are welcome; external pull requests are not accepted.

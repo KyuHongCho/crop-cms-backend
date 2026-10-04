@@ -1,8 +1,8 @@
 """Request/response shapes for one narrative document and its provenance.
 
 The provenance block is modelled on crop_advisor.claims.Claim in the advisor
-repo, but is not a field-for-field mirror: `licence_note` has no counterpart
-there.
+repo, but is not a field-for-field mirror (the advisor's Claim carries an optional
+`licence_note` too, but has no `topic`, `title` or `body`).
 
 Deliberately absent: opt_min / opt_max. Agronomic bands are the advisor's data,
 never CMS prose -- see Item's docstring in model.py. If a figure's only home is

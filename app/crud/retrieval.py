@@ -69,8 +69,10 @@ def document_context_chars(documents: list[Item]) -> int:
 
     Provenance (source, reference, URL, ...) is not counted, on the assumption
     it will be attached as citation metadata rather than put into the prompt.
-    If provenance does go into the prompt instead, this undercounts by
-    roughly 1.4x-2x on the seed corpus and must be revisited.
+    If provenance (including each document's licence_note) does go into the
+    prompt instead, this undercounts by roughly 2x on the seed corpus (about 3x
+    for the one-document ECOCROP topics) and must be revisited. Worst case for
+    k=3 topics that is about 40% of the budget, so the budget still holds.
     """
     return sum(len(document.title) + len(document.body) for document in documents)
 

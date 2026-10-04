@@ -70,7 +70,8 @@ def _crop(slug: str = "basil") -> int:
         ).inserted_primary_key[0]
 
 
-def _doc(crop_id: int, topic: str, n: int, vectors: list[list[float]], *, published=True) -> list[int]:
+def _doc(crop_id: int, topic: str, n: int, vectors: list[list[float]], *, published=True,
+         licence_note=None) -> list[int]:
     """One document per vector, one chunk each, all under `topic`."""
     ids = []
     with sync_engine.begin() as c:
@@ -79,7 +80,7 @@ def _doc(crop_id: int, topic: str, n: int, vectors: list[list[float]], *, publis
                 sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID, crop_id=crop_id, topic=topic,
                 title=f"{topic} {n}-{i}", body="body", published=published,
                 source=f"Source {topic} {n}-{i}", reference="ref", url="https://example.invalid",
-                read_directly=True,
+                read_directly=True, licence_note=licence_note,
             )).inserted_primary_key[0]
             c.execute(ItemChunk.__table__.insert().values(
                 item_id=item_id, chunk_index=0, content="c", content_hash=f"h{item_id}",
@@ -236,6 +237,26 @@ def test_ask_prints_only_the_requested_crop(session):
     assert headers == ["== optimal-temperature  (score 0.3000, 1 documents)"]
 
 
+def test_ask_prints_a_documents_licence_note_verbatim(session):
+    basil = _crop("basil")
+    note = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/); changes were made."
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)], licence_note=note)
+    lines: list[str] = []
+    assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append, crop_id=basil) == 0
+    assert f"      licence_note: {note}" in lines
+    # directly under the url line, same indentation as source/reference/url
+    url_at = next(i for i, l in enumerate(lines) if l.startswith("      url:"))
+    assert lines[url_at + 1] == f"      licence_note: {note}"
+
+
+def test_ask_prints_no_licence_line_for_a_document_without_a_note(session):
+    basil = _crop("basil")
+    _doc(basil, "optimal-temperature", 0, [mix(0.30)])
+    lines: list[str] = []
+    assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append, crop_id=basil) == 0
+    assert not [l for l in lines if "licence" in l.lower()]
+
+
 # --- Done 1: the basil corpus ------------------------------------------------
 
 def _seeded_corpus_with_temperature_near_the_query():
@@ -247,7 +268,8 @@ def _seeded_corpus_with_temperature_near_the_query():
         # would keep some documents and drop others.
         ids = [r[0] for r in c.execute(text(
             "SELECT c.id FROM item_chunks c JOIN items i ON i.id = c.item_id "
-            "WHERE i.topic = 'optimal-temperature' ORDER BY c.id"))]
+            "JOIN crops cr ON cr.id = i.crop_id "
+            "WHERE i.topic = 'optimal-temperature' AND cr.slug = 'basil' ORDER BY c.id"))]
         assert len(ids) == 3
         for chunk_id, score in zip(ids, (0.0976, 0.0729, 0.0538)):
             c.execute(ItemChunk.__table__.update().where(ItemChunk.id == chunk_id)
@@ -256,9 +278,11 @@ def _seeded_corpus_with_temperature_near_the_query():
 
 def test_basil_temperature_question_returns_all_three_sources(session):
     _seeded_corpus_with_temperature_near_the_query()
+    with sync_engine.begin() as c:
+        basil_id = c.execute(text("SELECT id FROM crops WHERE slug = 'basil'")).scalar_one()
     out = io.StringIO()
     code = ask("how hot should basil be?", embedder=FixedEmbedder(), session=session,
-               out=lambda s: print(s, file=out))
+               out=lambda s: print(s, file=out), crop_id=basil_id)
     text_out = out.getvalue()
     assert code == 0
     for source in ("FAO ECOCROP (id 1547)", "Chang, Alderson & Wright (2005)", "Walters & Currey (2019)"):

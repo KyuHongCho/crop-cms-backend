@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class MainCategoryCreate(BaseModel):
     """Kind of knowledge: crop profile, research literature, cultivation
     practice, pests and disorders. A crop is not a category -- crops have
-    their own table, so adding one does not copy this tree."""
+    their own table, so adding one does not require copying this tree (the seed
+    still files each crop under its own main category)."""
 
     model_config = ConfigDict(
         json_schema_extra={
