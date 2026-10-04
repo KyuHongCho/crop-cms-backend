@@ -161,9 +161,9 @@ def test_second_hand_basil_via_and_url_match_the_live_advisor_claims_drift(sync_
     """Drift check on the provenance of the two second-hand basil documents: the seeded
     `via` and `url` equal the live advisor claim's, keyed by `source`.
 
-    NOTE: passes only with the advisor's corrected claims (via/url = Walters, Tarr & Lopez
-    2023, PMC10688745 for both). Until that advisor change is merged to the advisor's main,
-    CI checking out the advisor fails here."""
+    NOTE: reads the advisor's `claims.JOURNAL_TEMPERATURE_CLAIMS`, and CI checks the advisor
+    out unpinned (.github/workflows/ci.yml), so this follows the advisor's default branch,
+    whose claims credit Walters, Tarr & Lopez 2023 (PMC10688745) for both."""
     seed.main()
     seeded = {d.source: d for d in _items_by_topic(sync_db_session, "optimal-temperature")}
     live = {c.source: c for c in claims.JOURNAL_TEMPERATURE_CLAIMS}
