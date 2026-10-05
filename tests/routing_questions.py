@@ -14,7 +14,7 @@ Used by two consumers that measure different things:
   * scripts/live_chat_eval.py runs it through the real models, by hand, and reports accuracy
     and flip rate. That is the only place model routing quality is measured.
 
-Collision cases: "crop_cycle_days" (D2c) does not exist yet, so the collision rows below are
+Collision cases: "crop_cycle_days" (a planned follow-up) does not exist yet, so the collision rows below are
 labelled with what the two shipped intents should do TODAY. The check is that a question
 sharing words with a future intent is not declined and not given an invented crop. Those
 labels are judgement calls and the likeliest to be argued with.
@@ -32,7 +32,7 @@ class Question(NamedTuple):
     note: str
 
 
-# The D5 question: the live run prints its answers so the human can check the gap is stated first.
+# The cuttings question: the live run prints its answers so the human can check the gap is stated first.
 CUTTINGS_QUESTION = "how do I propagate basil from cuttings?"
 
 QUESTIONS = [
@@ -41,7 +41,7 @@ QUESTIONS = [
     Question("how hot should tomatoes be kept?", DOCUMENT_LOOKUP, "tomato", "plural crop name -> slug"),
     Question("what pests attack lettuce?", DOCUMENT_LOOKUP, "lettuce", "plain lookup"),
     Question("how do I grow sweet peppers from seed?", DOCUMENT_LOOKUP, "sweet-pepper", "two-word slug"),
-    Question(CUTTINGS_QUESTION, DOCUMENT_LOOKUP, "basil", "D5: corpus has no cuttings source"),
+    Question(CUTTINGS_QUESTION, DOCUMENT_LOOKUP, "basil", "corpus has no cuttings source"),
     # --- in scope, no single crop
     Question("what causes leaf spots?", DOCUMENT_LOOKUP, None, "unscoped"),
     Question("how much light do seedlings need?", DOCUMENT_LOOKUP, None, "unscoped"),
@@ -50,7 +50,7 @@ QUESTIONS = [
     Question("how should I clean between cycles?", DOCUMENT_LOOKUP, None,
              "must not become a crop_cycle_days call (no such intent); a growing-practice question, no crop"),
     Question("how many days is a lettuce crop cycle?", DOCUMENT_LOOKUP, "lettuce",
-             "the question crop_cycle_days will own (D2c); today it falls to lookup"),
+             "the question crop_cycle_days will own (a planned follow-up); today it falls to lookup"),
     # --- out of scope, different flavours
     Question("what is the capital of France?", OUT_OF_SCOPE, None, "general knowledge"),
     Question("write me a python function that sorts a list", OUT_OF_SCOPE, None, "a task for another tool"),

@@ -173,7 +173,7 @@ the model forbids for sources that disagree.
   perverse in a system built to surface them. Scores are grouped by `(crop_id, topic)`, since a
   topic name is only unique within a crop. Pass `crop_id` (`scripts.ask --crop SLUG`) to score one crop
   only; without it every crop competes, so with more than one crop a question about one can select
-  another's topic. `POST /chat` passes it only when the classifier names a crop that exists; otherwise it runs unscoped by design (D7) and labels each source's crop.
+  another's topic. `POST /chat` passes it only when the classifier names a crop that exists; otherwise it runs unscoped by design and labels each source's crop.
 - **Rule 2 — `k = 3`**, the existing `TOPIC_SELECTION_K`. The SQL `LIMIT` applies to topics;
   each selected topic's documents are fetched in a second query with none.
 - **Rule 3 — the budget**, `assemble_within_budget`, reused unchanged.

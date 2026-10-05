@@ -31,6 +31,7 @@ NO_TOPIC_MESSAGE = (
     "The published crop documents have nothing relevant to this question, so I have not "
     "tried to answer it."
 )
+TRUNCATION_NOTICE = "[Answer cut off at the length limit; it may be incomplete.]"
 
 
 def build_prompt(
@@ -46,7 +47,7 @@ def build_prompt(
         kept = sorted(kept, key=lambda c: crop_order.index(c.crop_id))  # stable
     for candidate in kept:
         slug = crop_slugs.get(candidate.crop_id) if crop_slugs is not None else None
-        label = f"({slug}) " if slug and len(set(c.crop_id for c in kept)) > 1 else ""
+        label = f"({slug}) " if slug else ""
         for item in candidate.documents:
             key = f"S{len(sources) + 1}"
             sources[key] = CitedDocument(key=key, crop_slug=slug, **RetrievedDocument.model_validate(item).model_dump())
@@ -69,7 +70,7 @@ async def answer(
     crop_id = None
     if classification.crop_slug:
         # An unknown slug leaves retrieval unscoped; the response then names each
-        # topic's crop (D7), exactly as when no crop was given.
+        # topic's crop, exactly as when no crop was given.
         crop_id = await retrieval_crud.get_crop_id_by_slug(db, classification.crop_slug)
 
     # Rules 0-3 of app/chat/retrieval.py's retrieve_topics, with the embedding
@@ -99,9 +100,10 @@ async def answer(
     await record_usage(db, member_id, result.tokens)
 
     return ChatResponse(
-        answer=result.text,
+        answer=f"{result.text}\n\n{TRUNCATION_NOTICE}" if result.truncated else result.text,
         documents=list(sources.values()),
         topics_used=[candidate.topic for candidate in kept],
+        truncated=result.truncated,
         topics_used_crops=[crop_slugs.get(c.crop_id, "") for c in kept] if crop_slugs is not None else [],
         dropped=[
             DroppedChatTopic(

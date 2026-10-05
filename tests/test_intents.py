@@ -79,7 +79,7 @@ def test_dispatch_honours_the_routing_decision(client, corpus, token, monkeypatc
     finally:
         app.dependency_overrides.clear()
     assert response.status_code == 200, response.text
-    assert seed.DRAFT_BODY_MARKER not in response.text  # Done 5, across the whole set
+    assert seed.DRAFT_BODY_MARKER not in response.text  # across the whole set
     body = response.json()
     assert classifier.questions == [question.text]
 

@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.chat.embeddings import FakeEmbedder
 from app.chat.llm import CLASSIFIER_SYSTEM_PROMPT, TOOLS, ChatLLM, ClassifierResult, GeneratorResult, ToolCall
+from app.chat.dispatch import TRUNCATION_NOTICE
 from app.db.migrate_db import engine as sync_engine
 from app.main import app
 from app.router.chat import get_chat_embedder
@@ -146,7 +147,7 @@ def test_the_crop_slug_from_the_classifier_scopes_retrieval(client, llm, corpus,
     assert "sorrel-only-topic" in ask(client, token).json()["topics_used"]
 
 
-# --- D5: the condition and the "does not cover" rule are in the prompt -----------
+# --- the condition and the "does not cover" rule are in the prompt -----------
 
 def test_the_generator_prompt_carries_each_conditions_and_the_not_covered_rule(client, llm, corpus, token):
     body = ask(client, token, "how do I propagate basil from cuttings?").json()
@@ -173,7 +174,7 @@ def test_provenance_is_rendered_by_the_server_not_put_in_the_prompt(client, llm,
             assert document["licence_note"] not in user
 
 
-# --- D6: reference, url and licence_note verbatim --------------------------------
+# --- reference, url and licence_note verbatim --------------------------------
 
 @pytest.mark.parametrize("source", ["Chang, Alderson & Wright (2005)", "FAO ECOCROP (id 1547)"])
 def test_a_documents_reference_url_and_licence_note_come_back_verbatim(client, llm, corpus, token, source):
@@ -237,7 +238,7 @@ def test_an_unknown_crop_slug_runs_unscoped_and_names_the_crops(client, llm, cor
     assert all(d["crop_slug"] for d in body["documents"])
 
 
-# --- D-3: crop labels when the crop was not fixed -------------------------------------
+# --- crop labels when the crop was not fixed -------------------------------------
 
 def test_an_unscoped_question_distinguishes_a_topic_name_shared_by_two_crops(client, llm, corpus, token):
     endive, sorrel = _crop("endive"), _crop("sorrel")
@@ -270,14 +271,14 @@ def test_unscoped_prompt_groups_each_crops_sources_and_orders_crops_by_best_topi
     assert positions == sorted(positions)
 
 
-def test_unscoped_single_crop_result_is_not_labelled_in_the_prompt_but_names_the_crop(client, llm, token):
+def test_unscoped_single_crop_result_is_labelled_in_the_prompt_and_names_the_crop(client, llm, token):
     endive = _crop("endive")
     _doc(endive, "t1", 0, [mix(0.9)])
     llm.classifier.tool_call = ToolCall("document_lookup", {})
     body = ask(client, token).json()
     assert [d["crop_slug"] for d in body["documents"]] == ["endive"]
     assert body["topics_used_crops"] == ["endive"]
-    assert "(endive)" not in llm.generator.calls[-1][1]
+    assert "(endive)" in llm.generator.calls[-1][1]
 
 
 def test_unscoped_dropped_topics_name_their_crop(client, llm, corpus, token, monkeypatch):
@@ -296,7 +297,7 @@ def test_a_crop_scoped_response_names_no_crops_and_labels_nothing(client, llm, c
     assert "(basil)" not in llm.generator.calls[-1][1]
 
 
-# --- D-2: refusal paths ------------------------------------------------------------
+# --- refusal paths ------------------------------------------------------------
 
 class Boom:
     """Fails the test if retrieval is reached."""
@@ -370,7 +371,7 @@ def test_the_draft_marker_appears_in_no_response_across_the_question_set(client,
     assert marker not in ask(client, token).text
 
 
-# --- D-2: provider errors, real clients through a mock transport ---------------------
+# --- provider errors, real clients through a mock transport ---------------------
 
 def _provider_error_response(status, error_type, message, headers=None):
     import httpx2
@@ -484,7 +485,7 @@ def test_an_embedder_that_raises_is_503_and_the_classifier_call_stays_charged(cl
     assert response.status_code == 503, response.text
     assert "sk-secret" not in response.text
     # The classifier runs before embed, so its tokens are charged with no answer
-    # (review finding 7, a follow-up: charging is deliberately unchanged here).
+    # (charging the classifier call with no answer is deliberate).
     assert sql("SELECT tokens_used_today FROM members").scalar_one() == CLASSIFIER_TOKENS
 
 
@@ -522,10 +523,10 @@ def _mock_client(handler):
     )
 
 
-def _message(content, input_tokens, output_tokens):
+def _message(content, input_tokens, output_tokens, stop_reason="end_turn"):
     return {
         "id": "msg_1", "type": "message", "role": "assistant", "model": "m",
-        "content": content, "stop_reason": "end_turn", "stop_sequence": None,
+        "content": content, "stop_reason": stop_reason, "stop_sequence": None,
         "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
     }
 
@@ -573,3 +574,67 @@ def test_the_real_generator_sends_the_system_prompt_and_sums_reported_usage():
     assert body["messages"] == [{"role": "user", "content": "USER"}]
     assert "temperature" not in body and "tools" not in body and body["max_tokens"] > 0
     assert (result.text, result.tokens) == ("Warm [S1].", 35)
+
+
+# --- truncated: the answer was cut at the generator's max_tokens -------------------
+
+def _real_generator_llm(stop_reason):
+    import httpx2
+
+    from app.chat.llm import AnthropicGenerator
+
+    def handler(request):
+        return httpx2.Response(200, json=_message(
+            [{"type": "text", "text": "Warm, and then the answer is cut"}], 120, 1024, stop_reason))
+
+    app.dependency_overrides[get_chat_llm] = lambda: ChatLLM(
+        StubClassifier(ToolCall("document_lookup", {"crop_slug": "basil"})),
+        AnthropicGenerator(_mock_client(handler)))
+    app.dependency_overrides[get_chat_embedder] = lambda: FixedEmbedder()
+
+
+def test_a_max_tokens_stop_sets_truncated_appends_the_notice_and_leaves_usage_alone(client, corpus, token):
+    _real_generator_llm("max_tokens")
+    try:
+        response = ask(client, token)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["truncated"] is True
+    assert body["answer"] == "Warm, and then the answer is cut" + "\n\n" + TRUNCATION_NOTICE
+    assert sql("SELECT tokens_used_today FROM members").scalar_one() == CLASSIFIER_TOKENS + 1144
+
+
+def test_an_end_turn_stop_is_not_truncated(client, corpus, token):
+    _real_generator_llm("end_turn")
+    try:
+        response = ask(client, token)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["truncated"] is False
+    assert TRUNCATION_NOTICE not in body["answer"]
+
+
+def test_decline_and_abstain_responses_are_not_truncated(client, llm, token):
+    llm.classifier.tool_call = ToolCall("out_of_scope", {"reason": "x"})
+    body = ask(client, token).json()
+    assert body["truncated"] is False and TRUNCATION_NOTICE not in body["answer"]
+    _crop("sorrel")
+    llm.classifier.tool_call = ToolCall("document_lookup", {"crop_slug": "sorrel"})
+    body = ask(client, token).json()
+    assert body["abstained"] == {"reason": "no_relevant_topics"} and body["truncated"] is False
+    assert TRUNCATION_NOTICE not in body["answer"]
+
+
+def test_model_names_come_from_the_env_and_an_empty_value_falls_back(monkeypatch):
+    from app.chat.llm import DEFAULT_MODEL, _model_from_env
+
+    monkeypatch.delenv("CHAT_MODEL_X", raising=False)
+    assert _model_from_env("CHAT_MODEL_X") == DEFAULT_MODEL
+    monkeypatch.setenv("CHAT_MODEL_X", "")
+    assert _model_from_env("CHAT_MODEL_X") == DEFAULT_MODEL
+    monkeypatch.setenv("CHAT_MODEL_X", "some-model")
+    assert _model_from_env("CHAT_MODEL_X") == "some-model"

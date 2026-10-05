@@ -1,7 +1,7 @@
 """The live eval script's summary maths, loop and refusals, with no model and no database.
 
 The script itself is manual (it spends money); these pin the arithmetic its report rests on
-(Done 11's headline number) and the paths that must refuse or stop cleanly.
+(the headline number) and the paths that must refuse or stop cleanly.
 """
 import asyncio
 

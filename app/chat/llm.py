@@ -8,8 +8,8 @@ constructor, so importing this module (and the stubbed tests) does not need
 `anthropic` installed; the two real-client transport tests do.
 
 No sampling parameters are set on either client: the pinned SDK's
-`Messages.create` has no `temperature`, and newer models fix sampling anyway
-(Brief D2, amended). Stability comes from the forced tool choice, the short
+`Messages.create` has no `temperature`, and newer models fix sampling anyway.
+Stability comes from the forced tool choice, the short
 classifier prompt and the small `max_tokens`; answers are not word-for-word
 repeatable.
 """
@@ -19,8 +19,15 @@ from typing import Protocol
 
 # Same default for both: the split is for configurability, not cost.
 DEFAULT_MODEL = "claude-haiku-4-5"
-CHAT_MODEL_CLASSIFY = os.environ.get("CHAT_MODEL_CLASSIFY", DEFAULT_MODEL)
-CHAT_MODEL_GENERATE = os.environ.get("CHAT_MODEL_GENERATE", DEFAULT_MODEL)
+
+
+def _model_from_env(name: str) -> str:
+    """The one place the default lives; an empty value (compose passes '') falls back too."""
+    return os.environ.get(name) or DEFAULT_MODEL
+
+
+CHAT_MODEL_CLASSIFY = _model_from_env("CHAT_MODEL_CLASSIFY")
+CHAT_MODEL_GENERATE = _model_from_env("CHAT_MODEL_GENERATE")
 
 CLASSIFIER_MAX_TOKENS = 256
 GENERATOR_MAX_TOKENS = 1024
@@ -102,6 +109,7 @@ class ClassifierResult:
 class GeneratorResult:
     text: str
     tokens: int
+    truncated: bool = False  # the provider stopped at max_tokens: the text may be incomplete
 
 
 class Classifier(Protocol):
@@ -140,7 +148,8 @@ def _create(client, **request):
 
 class AnthropicClassifier:
     def __init__(self, client=None) -> None:
-        # `client` is for the offline transport test; None reads ANTHROPIC_API_KEY on first use.
+        # `client` is for the offline transport test; None means a client is built,
+        # reading ANTHROPIC_API_KEY, on every call.
         self._client = client
 
     def classify(self, question: str) -> ClassifierResult:
@@ -174,13 +183,17 @@ class AnthropicGenerator:
             messages=[{"role": "user", "content": user}],
         )
         text = "".join(block.text for block in message.content if block.type == "text")
-        return GeneratorResult(text, message.usage.input_tokens + message.usage.output_tokens)
+        return GeneratorResult(
+            text,
+            message.usage.input_tokens + message.usage.output_tokens,
+            truncated=message.stop_reason == "max_tokens",
+        )
 
 
 def get_chat_llm() -> ChatLLM:
     """FastAPI dependency; tests override it with stubs.
 
-    Cheap and cannot fail: the SDK client is built on first call, after the budget
+    Cheap and cannot fail: the SDK client is built inside each model call, after the budget
     check, so a missing ANTHROPIC_API_KEY (or SDK) is LLMUnavailable (503), and an
     over-budget member still gets the budget 429 first."""
     return ChatLLM(AnthropicClassifier(), AnthropicGenerator())

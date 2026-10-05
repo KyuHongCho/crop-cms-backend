@@ -161,7 +161,7 @@ def report(rows, stop, repeats: int, budget: int, show_answers: bool, emit) -> N
             if q.text == CUTTINGS_QUESTION or show_answers:
                 emit(f"\nQ: {q.text}")
                 if q.text == CUTTINGS_QUESTION:
-                    emit("(D5 check: the answer must say first and plainly that the corpus has no cuttings source)")
+                    emit("(check: the answer must say first and plainly that the corpus has no cuttings source)")
                 for n, c in enumerate(cs, 1):
                     emit(f"--- repeat {n}\n{c.answer}")
     if stop:

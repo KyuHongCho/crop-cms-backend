@@ -48,3 +48,4 @@ class ChatResponse(BaseModel):
     topics_used_crops: list[str] = []
     dropped: list[DroppedChatTopic] = []
     abstained: Abstention | None = None  # None on a normal answer
+    truncated: bool = False  # the answer was cut at the generator's max_tokens, so it may be incomplete
