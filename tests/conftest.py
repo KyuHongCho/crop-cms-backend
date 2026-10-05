@@ -46,7 +46,7 @@ def truncate_and_reseed() -> None:
     with sync_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE items, sub_categories, main_categories, crops "
+                "TRUNCATE items, sub_categories, main_categories, crops, members "
                 "RESTART IDENTITY CASCADE"
             )
         )

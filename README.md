@@ -26,10 +26,11 @@ source that disagrees reaches the answer.
 
 | Works today | Not built yet |
 |---|---|
-| Document store — 4 tables, sources recorded per document | `POST /chat` |
-| Embeddings for every document, offline-testable (`scripts/reindex.py`) | Authentication |
-| Vector topic selection — `python -m scripts.ask "<question>"` | Editing (`PATCH`) and deleting documents |
-| Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | Frontend and deployment |
+| Document store — 5 content tables (6 with `members`), sources recorded per document | `POST /chat` |
+| Members: signup, login (JWT), `/members/me`; daily token budget, enforced once `/chat` calls it | Editing (`PATCH`) and deleting documents |
+| Embeddings for every document, offline-testable (`scripts/reindex.py`) | Frontend and deployment |
+| Vector topic selection — `python -m scripts.ask "<question>"` | |
+| Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them | |
 | Database migrations (Alembic), exercised for real in CI | |
 | Test suite on an isolated database, run in CI | |
@@ -70,11 +71,15 @@ Trade-offs, known limits and the full rationale: [`docs/design-notes.md`](docs/d
 Requires Docker.
 
 ```bash
-# 1. Secrets (.env is git- and docker-ignored): generates the two passwords;
+# 1. Secrets (.env is git- and docker-ignored): generates the two passwords and SECRET_KEY;
 #    OPENAI_API_KEY is only needed for step 5
 [ -f .env ] || { cp .env.example .env && sed -i.bak \
   -e "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" \
-  -e "s/^DB_PASSWORD=$/DB_PASSWORD=$(openssl rand -hex 16)/" .env && rm .env.bak; }
+  -e "s/^DB_PASSWORD=$/DB_PASSWORD=$(openssl rand -hex 16)/" \
+  -e "s/^SECRET_KEY=$/SECRET_KEY=$(openssl rand -hex 32)/" .env && rm .env.bak; }
+
+#    An .env that already exists is left untouched: if it predates SECRET_KEY, add
+#    SECRET_KEY=$(openssl rand -hex 32) to it by hand, or logins return 500.
 
 # 2. Start the API and the database
 docker compose up -d --build
@@ -196,7 +201,28 @@ manages. A test asserts that refusal.
 | `DELETE` | `/main-categories/{id}` | `409` while it still has sub-categories |
 | `DELETE` | `/sub-categories/{id}` | Refiles its documents to "Uncategorised" and returns the count |
 | `GET` `POST` | `/items` | A document and its sources |
+| `POST` | `/members/signup` | `201`; `400` on a duplicate email. Argon2id hash, run in the threadpool |
+| `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email and a wrong password |
+| `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
+
+## Members and the token budget
+
+Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`); signing a token without it fails loudly. Tokens
+last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is implemented** -- log in
+again. Every CMS endpoint, read and write alike, is still unauthenticated; the member identity and the
+budget exist for the model-calling route, which is not built yet.
+
+Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
+[`app/auth/budget.py`](app/auth/budget.py). No route uses it yet (see Status); the intended use is a
+model-calling route that depends on `require_budget` (resets a stale day, answers `429` with
+`Retry-After` before any model call) and calls `record_usage` with the tokens the provider reported.
+Check and record are separate steps with no lock, so concurrent requests from one member can overshoot
+the cap. The overall spend bound is the monthly spend limit set in each provider's console (Billing
+page); this budget is the per-member control on top of it.
+
+`TOKENS_BUDGET_DAILY` (default 20000) sets the starting budget for members who sign up after the
+container is recreated (`docker compose up -d`; a plain `restart` does not re-read the environment); existing members keep theirs, so raise one with an `UPDATE members SET tokens_budget_daily = ...`.
 
 ## Related repositories
 

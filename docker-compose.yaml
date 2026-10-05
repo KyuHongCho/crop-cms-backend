@@ -29,6 +29,14 @@ services:
       # without it, and the suite runs offline (a fake embedder; no model
       # call), so CI never sets it.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # JWT signing key for /members/login. Bare ${VAR} for the same reason:
+      # the CMS endpoints must start without it; only signing a token needs
+      # it, and that fails loudly (KeyError) when it is unset.
+      SECRET_KEY: ${SECRET_KEY}
+      # Starting daily token budget for members who sign up after a restart.
+      TOKENS_BUDGET_DAILY: ${TOKENS_BUDGET_DAILY:-20000}
+      # Token lifetime in minutes; read at import, so a change needs `up -d`.
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
     depends_on:
       db:
         condition: service_healthy

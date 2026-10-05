@@ -16,3 +16,5 @@ psycopg[binary]==3.3.4
 alembic==1.19.1
 pgvector==0.5.0
 langchain-openai==1.6.7
+pyjwt==2.15.1
+pwdlib[argon2]==0.3.1
