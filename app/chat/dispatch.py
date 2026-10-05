@@ -5,10 +5,13 @@ condition + body", the server holds {"S1": document} and renders provenance
 into the response from the retrieved set. That server-rendered `documents` list
 is the authoritative provenance. The model's prose is returned as written and
 its keys are not validated, so an invented "[S#]" in the answer text is NOT
-prevented.
+prevented; a warning is logged when the answer cites a key that was not sent.
 
 Token usage is recorded right after each model call (reported counts).
 """
+import logging
+import re
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
@@ -21,6 +24,15 @@ from app.chat.retrieval import NoRelevantTopics, fetch_candidates, score_topics,
 from app.crud.retrieval import TOPIC_SELECTION_K, TopicCandidate, assemble_within_budget
 from app.schema.chat import Abstention, ChatResponse, CitedDocument, DroppedChatTopic
 from app.schema.retrieval import RetrievedDocument
+
+
+logger = logging.getLogger(__name__)
+
+
+def _unknown_keys(text: str, sources: dict) -> list[str]:
+    """Source keys the answer cites that were never sent, e.g. [S4] with three sources or [S1, S4]."""
+    cited = {key for group in re.findall(r"\[([^\]]*)\]", text) for key in re.findall(r"S\d+", group)}
+    return sorted(cited - sources.keys())
 
 
 DECLINE_MESSAGE = (
@@ -64,7 +76,7 @@ async def answer(
 ) -> ChatResponse:
     classification = await run_in_threadpool(classify, question, llm.classifier)
     await record_usage(db, member_id, classification.tokens)
-    if classification.intent == OUT_OF_SCOPE:  # gate 1: before retrieval, nothing else runs
+    if classification.intent == OUT_OF_SCOPE:  # scope check: before retrieval, nothing else runs
         return ChatResponse(answer=DECLINE_MESSAGE, abstained=Abstention(reason=OUT_OF_SCOPE))
 
     crop_id = None
@@ -86,7 +98,7 @@ async def answer(
     )
     try:
         selected = select_topics(candidates)
-    except NoRelevantTopics:  # gate 3: no generation call
+    except NoRelevantTopics:  # relevance check: no generation call
         return ChatResponse(answer=NO_TOPIC_MESSAGE, abstained=Abstention(reason="no_relevant_topics"))
     kept, dropped = assemble_within_budget(selected)
 
@@ -98,6 +110,8 @@ async def answer(
     prompt, sources = build_prompt(question, kept, crop_slugs)
     result = await run_in_threadpool(llm.generator.generate, GENERATOR_SYSTEM_PROMPT, prompt)
     await record_usage(db, member_id, result.tokens)
+    if unknown := _unknown_keys(result.text, sources):  # logged, not refused: the prose is returned as written
+        logger.warning("answer cites keys that were not sent: %s (sent: %s)", unknown, list(sources))
 
     return ChatResponse(
         answer=f"{result.text}\n\n{TRUNCATION_NOTICE}" if result.truncated else result.text,

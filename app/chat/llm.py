@@ -3,9 +3,9 @@
 Two objects, never one shared client: the classifier has a small `max_tokens`
 and the tool list bound; the generator has the citation system prompt and no
 tools. Each is a small class with one method, so the test suite can replace
-either with a stub and never needs a key. The SDK is imported inside the
-constructor, so importing this module (and the stubbed tests) does not need
-`anthropic` installed; the two real-client transport tests do.
+either with a stub and never needs a key. The SDK is imported inside each model
+call (`_create`), not at construction, so importing this module (and the stubbed
+tests) does not need `anthropic` installed; the tests that use the real client do.
 
 No sampling parameters are set on either client: the pinned SDK's
 `Messages.create` has no `temperature`, and newer models fix sampling anyway.

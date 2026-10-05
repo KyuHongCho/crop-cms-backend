@@ -6,6 +6,7 @@ corpus (scripts/seed.py) is re-embedded with hand-set vectors so retrieval is
 deterministic. A stub can prove what the prompt carries; it cannot prove the
 model obeys the prompt.
 """
+import logging
 import secrets
 
 import pytest
@@ -13,7 +14,7 @@ from sqlalchemy import text
 
 from app.chat.embeddings import FakeEmbedder
 from app.chat.llm import CLASSIFIER_SYSTEM_PROMPT, TOOLS, ChatLLM, ClassifierResult, GeneratorResult, ToolCall
-from app.chat.dispatch import TRUNCATION_NOTICE
+from app.chat.dispatch import TRUNCATION_NOTICE, _unknown_keys
 from app.db.migrate_db import engine as sync_engine
 from app.main import app
 from app.router.chat import get_chat_embedder
@@ -638,3 +639,97 @@ def test_model_names_come_from_the_env_and_an_empty_value_falls_back(monkeypatch
     assert _model_from_env("CHAT_MODEL_X") == DEFAULT_MODEL
     monkeypatch.setenv("CHAT_MODEL_X", "some-model")
     assert _model_from_env("CHAT_MODEL_X") == "some-model"
+
+
+# --- crop_slug normalisation: the tool asks for lower case but cannot force it -------
+
+@pytest.mark.parametrize("slug", ["Basil", " basil", "BASIL", "basil "])
+def test_a_crop_slug_with_case_or_padding_still_scopes_retrieval(client, llm, token, slug):
+    _doc(_crop("basil"), "t1", 0, [mix(0.90)])
+    _doc(_crop("tomato"), "t2", 0, [mix(0.95)])  # unscoped, tomato would come first
+    llm.classifier.tool_call = ToolCall("document_lookup", {"crop_slug": slug})
+    body = ask(client, token, "what temperature does basil want?").json()
+    assert body["topics_used_crops"] == []  # empty: the crop was fixed
+    assert [d["title"] for d in body["documents"]] == ["t1 0-0"]
+
+
+def test_a_cased_slug_keeps_other_crops_out_of_the_prompt(client, llm, token):
+    _doc(_crop("basil"), "t1", 0, [mix(0.90)])
+    tomato = _crop("tomato")
+    for n, score in enumerate([0.97, 0.96, 0.95]):
+        _doc(tomato, f"tomato-{n}", 0, [mix(score)])
+    llm.classifier.tool_call = ToolCall("document_lookup", {"crop_slug": "Basil"})
+    body = ask(client, token, "what temperature does basil want?").json()
+    prompt = llm.generator.calls[-1][1]
+    assert "(tomato)" not in prompt and "tomato" not in prompt
+    assert [d["title"] for d in body["documents"]] == ["t1 0-0"]
+
+
+@pytest.mark.parametrize("slug", [123, "", "   ", None])
+def test_a_non_string_or_blank_slug_leaves_retrieval_unscoped(client, llm, token, slug):
+    _doc(_crop("basil"), "t1", 0, [mix(0.90)])
+    _doc(_crop("tomato"), "t2", 0, [mix(0.95)])
+    llm.classifier.tool_call = ToolCall("document_lookup", {"crop_slug": slug})
+    response = ask(client, token, "what temperature does basil want?")
+    assert response.status_code == 200, response.text
+    assert response.json()["topics_used_crops"] != []  # unscoped: crops are named
+
+
+# --- answers that cite keys that were not sent are logged, not refused -----------------
+
+class TextGenerator:
+    def __init__(self, text):
+        self.text = text
+
+    def generate(self, system, user):
+        return GeneratorResult(self.text, GENERATOR_TOKENS)
+
+
+def _three_crops():
+    for crop, score in [("basil", 0.9), ("tomato", 0.8), ("lettuce", 0.7)]:
+        _doc(_crop(crop), f"{crop}-t", 0, [mix(score)])
+
+
+def _ask_with_text(client, token, text):
+    app.dependency_overrides[get_chat_llm] = lambda: ChatLLM(
+        StubClassifier(ToolCall("document_lookup", {})), TextGenerator(text))
+    app.dependency_overrides[get_chat_embedder] = lambda: FixedEmbedder()
+    try:
+        return ask(client, token)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_an_answer_citing_a_key_that_was_not_sent_is_returned_and_logged(client, token, caplog):
+    _three_crops()
+    text = "Basil fruits best at 25 C [S1, S4]."
+    with caplog.at_level(logging.WARNING, logger="app.chat.dispatch"):
+        response = _ask_with_text(client, token, text)
+    assert response.status_code == 200, response.text
+    assert response.json()["answer"] == text
+    records = [r for r in caplog.records if r.name == "app.chat.dispatch"]
+    assert len(records) == 1 and "S4" in records[0].getMessage()
+
+
+def test_an_answer_citing_only_sent_keys_logs_nothing(client, token, caplog):
+    _three_crops()
+    with caplog.at_level(logging.WARNING, logger="app.chat.dispatch"):
+        response = _ask_with_text(client, token, "Basil [S1], tomato [S2], lettuce [S3].")
+    assert response.status_code == 200, response.text
+    assert [r for r in caplog.records if r.name == "app.chat.dispatch"] == []
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("claim [S4].", ["S4"]),
+    ("claim [S1, S4].", ["S4"]),
+    ("claim [S1][S4].", ["S4"]),
+    ("claim [S10].", ["S10"]),
+    ("claim [S1] and [S2].", []),
+    ("[S1, S2, S3]", []),
+    ("no citations", []),
+    ("claim (S4).", []),  # documented limitation: only square brackets are read
+    ("claim [s4].", []),
+    ("claim [S4", []),
+])
+def test_unknown_keys(text, expected):
+    assert _unknown_keys(text, {"S1": 1, "S2": 2, "S3": 3}) == expected

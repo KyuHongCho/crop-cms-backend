@@ -12,8 +12,8 @@ without them. Nothing is written to the database: usage is not recorded against 
 Each question is asked `--repeats` times (default 3). It reports, per question, routing
 accuracy (the share of repeats routed as labelled: intent, plus crop_slug for a lookup), and
 the overall accuracy and flip rate (the share of questions whose repeats did not all route
-the same way). Accuracy is a rate, not an assertion: temperature cannot be set on current
-models, so identical input can route and word differently between runs. A repeat refused for
+the same way). Accuracy is a rate, not an assertion: temperature cannot be set here (the pinned SDK has no such
+argument), so identical input can route and word differently between runs. A repeat refused for
 the context budget still has its routing recorded and is counted separately.
 
 Tokens are the provider-reported input + output per call (classifier, generator); a declined
