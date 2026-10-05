@@ -68,7 +68,7 @@ Trade-offs, known limits and the full rationale: [`docs/design-notes.md`](docs/d
 
 ## Quickstart
 
-Requires Docker.
+Requires Docker (28 or newer recommended; see [Local ports](docs/design-notes.md#local-ports)).
 
 ```bash
 # 1. Secrets (.env is git- and docker-ignored): generates the two passwords and SECRET_KEY;
@@ -109,7 +109,8 @@ curl localhost:8000/retrieval/basil/optimal-temperature
 docker compose exec -T cms python -m scripts.ask --crop basil "how hot should basil be?"
 ```
 
-API on `localhost:8000` (interactive docs at `/docs`); PostgreSQL on `127.0.0.1:5432`, loopback only.
+API on `localhost:8000` (interactive docs at `/docs`) and PostgreSQL on `5432`; both ports are bound to
+`127.0.0.1` only, so other machines on your network can't reach them (Docker 28 or newer).
 
 ## Testing
 

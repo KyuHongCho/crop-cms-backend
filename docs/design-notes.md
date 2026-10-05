@@ -191,13 +191,14 @@ then `TOPIC_SCORE_FLOOR` stays at its no-op default.
 
 ## Local ports
 
-The API is published on **8000**, and PostgreSQL on **5432** — the default port, so a GUI
-client connects without being told a custom one — but bound to **loopback only**
-(`127.0.0.1:5432:5432`). Without that host-IP prefix Docker publishes on every interface, which
-would put the dev database on the port a scanner tries first. If you already run PostgreSQL on
-the host, change the published port in `docker-compose.yaml`; only host tools are affected,
-since the app reaches the database over the Docker network (`DB_HOST: db`), never the published
-port.
+The API (**8000**) and PostgreSQL (**5432** — the default port, so a GUI client connects
+without being told a custom one) are both bound to **loopback only** (`127.0.0.1:8000:8000`,
+`127.0.0.1:5432:5432`), which keeps other machines on the network out on Docker 28 or newer
+(older Engines let hosts on the same network segment reach ports published to localhost).
+Without that host-IP prefix Docker publishes on every interface, which would put the dev
+database on the port a scanner tries first. If you already run PostgreSQL on the host, change
+the published port in `docker-compose.yaml`; only host tools are affected, since the app reaches
+the database over the Docker network (`DB_HOST: db`), never the published port.
 
 ## Testing details
 
