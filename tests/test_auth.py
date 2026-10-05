@@ -2,7 +2,7 @@
 
 No network and no real SECRET_KEY: the `secret_key` fixture generates one.
 The budget is exercised through a throwaway app whose route calls a stub
-"model", because POST /chat does not exist yet; the stub records its calls so
+"model"; the stub records its calls so
 "429 and no model call" is asserted on the stub, not just the status code.
 """
 import secrets
@@ -108,7 +108,7 @@ def test_only_members_me_requires_a_token():
         for method, operation in operations.items()
         if operation.get("security")
     )
-    assert guarded == ["GET /members/me"]
+    assert guarded == ["GET /members/me", "POST /chat"]
 
 
 # --- duplicate signup, indistinguishable login failures ----------------------

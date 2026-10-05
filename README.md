@@ -26,18 +26,20 @@ source that disagrees reaches the answer.
 
 | Works today | Not built yet |
 |---|---|
-| Document store — 5 content tables (6 with `members`), sources recorded per document | `POST /chat` |
-| Members: signup, login (JWT), `/members/me`; daily token budget, enforced once `/chat` calls it | Editing (`PATCH`) and deleting documents |
+| Document store — 5 content tables (6 with `members`), sources recorded per document | The recorded live routing/token run (the eval is built; the run is pending, see "Live eval") |
+| Members: signup, login (JWT), `/members/me`; daily token budget, enforced by `/chat` | Editing (`PATCH`) and deleting documents |
 | Embeddings for every document, offline-testable (`scripts/reindex.py`) | Frontend and deployment |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
+| `POST /chat`: classify, select topics, generate a cited answer. Off-topic questions are declined and questions with no relevant topic abstain, both `200` with `abstained` set and no generation call. Needs both `ANTHROPIC_API_KEY` (classifier, generator) and `OPENAI_API_KEY` (query embedding); a missing key or a provider error (usage limit, rate limit, outage) from either is a plain `503`, after the budget `429` check (the cause is logged, not returned). Models are `CHAT_MODEL_CLASSIFY` and `CHAT_MODEL_GENERATE` (both default `claude-haiku-4-5`). The SDK's default retries stay on, so a `429` or `5xx` is called up to 3 times, with backoff, before the `503`. Answers are not word-for-word repeatable: no sampling parameters are set (Brief D2). `anthropic` is in `requirements.txt`: run `docker compose build` so the image has it (`tests/test_chat.py`'s two real-client tests fail with ImportError otherwise) | |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them | |
 | Database migrations (Alembic), exercised for real in CI | |
+| `POST /chat` crop labels when no crop is fixed (D-3); the routing question set and manual live-eval script (D-4, never run live yet) | |
 | Test suite on an isolated database, run in CI | |
 | AI code review on pull requests (advisory) | |
 
 Remaining work in the build plan: advisor tools
-over MCP, `POST /chat`, then conversation context and caching.
+over MCP, then conversation context and caching.
 
 ## Engineering highlights
 
@@ -212,18 +214,49 @@ manages. A test asserts that refusal.
 Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`); signing a token without it fails loudly. Tokens
 last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is implemented** -- log in
 again. Every CMS endpoint, read and write alike, is still unauthenticated; the member identity and the
-budget exist for the model-calling route, which is not built yet.
+budget exist for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
-[`app/auth/budget.py`](app/auth/budget.py). No route uses it yet (see Status); the intended use is a
-model-calling route that depends on `require_budget` (resets a stale day, answers `429` with
-`Retry-After` before any model call) and calls `record_usage` with the tokens the provider reported.
+[`app/auth/budget.py`](app/auth/budget.py). `POST /chat` calls `check_budget` (resets a stale day, answers `429` with
+`Retry-After` before any model call) and `record_usage` with the tokens the provider reported.
 Check and record are separate steps with no lock, so concurrent requests from one member can overshoot
 the cap. The overall spend bound is the monthly spend limit set in each provider's console (Billing
 page); this budget is the per-member control on top of it.
 
 `TOKENS_BUDGET_DAILY` (default 20000) sets the starting budget for members who sign up after the
 container is recreated (`docker compose up -d`; a plain `restart` does not re-read the environment); existing members keep theirs, so raise one with an `UPDATE members SET tokens_budget_daily = ...`.
+
+## Live eval (manual)
+
+`scripts/live_chat_eval.py` runs the labelled questions in `tests/routing_questions.py` through the real
+classifier, embedder and generator, against a database you name. It is never run by pytest or CI: the suite
+proves the plumbing with stubs and says nothing about model quality, so this is where routing accuracy,
+flip rate and token use are measured.
+
+```bash
+# ANTHROPIC_API_KEY and OPENAI_API_KEY must already be in the container's environment (from .env;
+# `docker compose up -d` after editing it) -- do not type keys on the command line.
+docker compose exec -T cms python -m scripts.live_chat_eval --db-host db --db-name cms --repeats 3
+```
+
+`--db-host` and `--db-name` are required (there is no default, since the container's default is dev); the
+database must be seeded and reindexed. Nothing is written to it. It prints routing accuracy per question and
+overall, the flip rate across repeats (refusals for the context budget are counted apart from misroutes),
+tokens per call (classifier, generator) with the per-question range and median, the total and mean, and the
+questions a member can ask per day at the 20000-token budget. **Base the budget decision on the lookup-only
+figure**: declined questions cost one cheap call, so the all-questions median (the figure Brief D asks for)
+is optimistic. It also prints the answers to the basil cuttings question, which should state the gap first.
+If a call fails the run stops, names the cause and still prints what completed. Output goes to stdout, or
+also to `--out PATH` (never overwritten); do not commit it as a fixture.
+
+Rough cost, **estimate, unmeasured**: Brief D puts a 20-question run at about $0.05 (Haiku 4.5) to $0.20
+(Opus 5.5); this run asks 17 questions 3 times, so roughly 2.5 times that. The run reports the real token counts.
+
+Answers are not word-for-word repeatable: current models do not let you set the sampling temperature, so the
+same question can be routed or worded differently between runs, which is why the eval reports a rate. The
+question set's two collision labels (for the not-yet-built `crop_cycle_days`) are checked only by this live
+run; offline the stub just returns the label. Relabel "how many days is a lettuce crop cycle?" when that
+intent ships.
 
 ## Related repositories
 
