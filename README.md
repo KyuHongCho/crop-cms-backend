@@ -109,7 +109,7 @@ curl localhost:8000/retrieval/basil/optimal-temperature
 docker compose exec -T cms python -m scripts.ask --crop basil "how hot should basil be?"
 ```
 
-API on `localhost:8000` (interactive docs at `/docs`); PostgreSQL on `127.0.0.1:5432`, loopback only.
+API on `localhost:8000` (interactive docs at `/docs`); both ports are bound to `127.0.0.1` only, so other machines on your network can't reach them (Docker 28 or newer).
 
 ## Testing
 
