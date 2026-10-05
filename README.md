@@ -213,11 +213,13 @@ last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is i
 again. Every CMS endpoint, read and write alike, is still unauthenticated; the member identity and the
 budget exist for the model-calling route, which is not built yet.
 
-Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), enforced in
-[`app/auth/budget.py`](app/auth/budget.py), because provider-side spend limits are not available on
-this plan. A model-calling route depends on `require_budget` (resets a stale day, answers `429` with
-`Retry-After` before any model call) and calls `record_usage` with the tokens the provider reported. Check and record are separate steps with
-no lock, so concurrent requests from one member can overshoot the cap.
+Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
+[`app/auth/budget.py`](app/auth/budget.py). No route uses it yet (see Status); the intended use is a
+model-calling route that depends on `require_budget` (resets a stale day, answers `429` with
+`Retry-After` before any model call) and calls `record_usage` with the tokens the provider reported.
+Check and record are separate steps with no lock, so concurrent requests from one member can overshoot
+the cap. The overall spend bound is the monthly spend limit set in each provider's console (Billing
+page); this budget is the per-member control on top of it.
 
 `TOKENS_BUDGET_DAILY` (default 20000) sets the starting budget for members who sign up after the
 container is recreated (`docker compose up -d`; a plain `restart` does not re-read the environment); existing members keep theirs, so raise one with an `UPDATE members SET tokens_budget_daily = ...`.
