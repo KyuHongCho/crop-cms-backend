@@ -9,7 +9,7 @@ full further down this file; the last two are documented next to the code they c
 
 - **Token budgets are estimated, not measured.** Context size is counted in characters and
   converted at 4 characters per token (a common rule of thumb) rather than with a real tokeniser,
-  because the model provider is not chosen yet. Only titles and bodies are counted: if the chat
+  because a real tokeniser would tie the budget to one model provider (Claude, for `/chat`). Only titles and bodies are counted: if the chat
   feature later puts provenance text into the prompt, the real context is roughly 1.4–2x larger
   and the budget must be revisited. [More below](#topic-set-retrieval-the-no-truncation-guarantee)
 - **The refile rule is hard to spot in the model.** Refiling lives in a database trigger, so the
@@ -173,7 +173,7 @@ the model forbids for sources that disagree.
   perverse in a system built to surface them. Scores are grouped by `(crop_id, topic)`, since a
   topic name is only unique within a crop. Pass `crop_id` (`scripts.ask --crop SLUG`) to score one crop
   only; without it every crop competes, so with more than one crop a question about one can select
-  another's topic. `POST /chat` must pass it.
+  another's topic. `POST /chat` passes it only when the classifier names a crop that exists; otherwise it runs unscoped by design and labels each source's crop.
 - **Rule 2 — `k = 3`**, the existing `TOPIC_SELECTION_K`. The SQL `LIMIT` applies to topics;
   each selected topic's documents are fetched in a second query with none.
 - **Rule 3 — the budget**, `assemble_within_budget`, reused unchanged.

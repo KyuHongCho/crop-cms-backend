@@ -237,6 +237,21 @@ def test_ask_prints_only_the_requested_crop(session):
     assert headers == ["== optimal-temperature  (score 0.3000, 1 documents)"]
 
 
+def test_ask_labels_headers_and_dropped_lines_with_the_crop_only_when_unscoped(session, monkeypatch):
+    import app.chat.retrieval as chat_retrieval
+    real = chat_retrieval.assemble_within_budget
+    monkeypatch.setattr(chat_retrieval, "assemble_within_budget",
+                        lambda c: real(c, budget=max(x.context_chars for x in c)))
+    basil, crop_b = _crop("basil"), _crop("crop-b")
+    _doc(basil, "optimal-temperature", 0, [mix(0.90)])
+    _doc(crop_b, "optimal-temperature", 0, [mix(0.80)])
+    lines: list[str] = []
+    assert ask("q", embedder=FixedEmbedder(), session=session, out=lines.append) == 0
+    headers = [l.strip() for l in lines if l.strip().startswith("==")]
+    assert headers == ["== optimal-temperature [basil]  (score 0.9000, 1 documents)"]
+    assert "dropped for the context budget: optimal-temperature [crop-b] (score 0.8000)" in [l.strip() for l in lines]
+
+
 def test_ask_prints_a_documents_licence_note_verbatim(session):
     basil = _crop("basil")
     note = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/); changes were made."

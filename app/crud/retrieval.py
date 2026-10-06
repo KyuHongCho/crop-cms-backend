@@ -64,6 +64,11 @@ async def get_crop_id_by_slug(db: AsyncSession, crop_slug: str) -> int | None:
     return await db.scalar(select(Crop.id).where(Crop.slug == crop_slug))
 
 
+async def get_crop_slugs(db: AsyncSession, crop_ids: set[int]) -> dict[int, str]:
+    rows = await db.execute(select(Crop.id, Crop.slug).where(Crop.id.in_(crop_ids)))
+    return {crop_id: slug for crop_id, slug in rows}
+
+
 def document_context_chars(documents: list[Item]) -> int:
     """Character count of one topic's context: titles and bodies only.
 
@@ -88,6 +93,7 @@ class TopicCandidate:
     topic: str
     score: float
     documents: list[Item]
+    crop_id: int | None = None
 
     @property
     def document_count(self) -> int:

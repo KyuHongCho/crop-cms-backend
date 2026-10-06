@@ -101,6 +101,7 @@ def fetch_candidates(
             topic=topic,
             score=score,
             documents=list(session.execute(topic_set_statement(crop_id, topic)).scalars().all()),
+            crop_id=crop_id,
         )
         for crop_id, topic, score in scored
     ]

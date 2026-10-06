@@ -4,7 +4,8 @@
     docker compose exec -T cms python -m scripts.ask --crop basil "how hot should it be?"
 
 `--crop SLUG` limits scoring to that crop; without it every crop competes, so with more than
-one crop a question can select another crop's topic.
+one crop a question can select another crop's topic. Without it, each header and each
+"dropped for the context budget" line is labelled `[<slug>]` with its crop; with it, they are not.
 
 `EMBEDDER` selects the provider (app/chat/embeddings.py): `openai` by default,
 which needs OPENAI_API_KEY. With `EMBEDDER=fake` it runs offline, but the fake
@@ -35,6 +36,9 @@ def ask(question: str, embedder=None, session: Session | None = None, out=print,
     try:
         options = {} if floor is None else {"floor": floor}
         kept, dropped = retrieve_topics(session, question, embedder, crop_id=crop_id, **options)
+        slugs = {}  # labels only when no crop was fixed
+        if crop_id is None:
+            slugs = dict(session.execute(select(Crop.id, Crop.slug)).all())
     except NoRelevantTopics as exc:
         out(f"abstain: {exc}")
         return 1
@@ -45,8 +49,11 @@ def ask(question: str, embedder=None, session: Session | None = None, out=print,
         if own:
             session.close()
 
+    def label(candidate) -> str:
+        return f" [{slugs[candidate.crop_id]}]" if crop_id is None else ""
+
     for candidate in kept:
-        out(f"\n== {candidate.topic}  (score {candidate.score:.4f}, "
+        out(f"\n== {candidate.topic}{label(candidate)}  (score {candidate.score:.4f}, "
             f"{candidate.document_count} documents)")
         for document in candidate.documents:
             out(f"  - {document.title}")
@@ -57,7 +64,7 @@ def ask(question: str, embedder=None, session: Session | None = None, out=print,
                 out(f"      licence_note: {document.licence_note}")
             out(f"      {document.body}")
     for candidate in dropped:
-        out(f"\ndropped for the context budget: {candidate.topic} (score {candidate.score:.4f})")
+        out(f"\ndropped for the context budget: {candidate.topic}{label(candidate)} (score {candidate.score:.4f})")
     return 0
 
 

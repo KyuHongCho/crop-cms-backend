@@ -216,7 +216,7 @@ class Member(Base):
     password_hash = Column(Text, nullable=False)
     display_name = Column(String(64))
 
-    # Per-member daily model budget; see app/auth/budget.py (no route enforces it yet).
+    # Per-member daily model budget; see app/auth/budget.py (enforced by POST /chat).
     tokens_used_today = Column(Integer, nullable=False, server_default=text("0"))
     tokens_budget_daily = Column(Integer, nullable=False, server_default=text("20000"))
     budget_window_start = Column(Date, nullable=False, server_default=text("CURRENT_DATE"))

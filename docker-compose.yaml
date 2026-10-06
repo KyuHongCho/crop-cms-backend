@@ -29,6 +29,12 @@ services:
       # without it, and the suite runs offline (a fake embedder; no model
       # call), so CI never sets it.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Claude key for POST /chat. Bare ${VAR} for the same reason; the model
+      # is chosen by CHAT_MODEL_CLASSIFY / CHAT_MODEL_GENERATE, passed through
+      # from the host or .env; the default lives only in app/chat/llm.py.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CHAT_MODEL_CLASSIFY:
+      CHAT_MODEL_GENERATE:
       # JWT signing key for /members/login. Bare ${VAR} for the same reason:
       # the CMS endpoints must start without it; only signing a token needs
       # it, and that fails loudly (KeyError) when it is unset.

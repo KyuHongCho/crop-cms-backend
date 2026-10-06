@@ -1,18 +1,20 @@
-"""Per-member daily token budget. Not yet wired to a route: POST /chat will be
-its first caller, and until then nothing enforces it at runtime.
+"""Per-member daily token budget, enforced by POST /chat (app/router/chat.py).
 
 This is the per-member control. The overall spend bound is the monthly spend
 limit set in each provider's console (Billing page); it applies whatever this
 module does, and a provider that has reached its limit answers with an error
 the chat handler must turn into a clean failure for the member.
 
-A model-calling handler (POST /chat, not built yet) does:
+A model-calling handler does:
 
-    member = Depends(require_budget)      # 429 before any model call
+    member = Depends(get_current_member)
+    await check_budget(db, member.id)     # 429 before any model call
     ...call the model...
     await record_usage(db, member.id, usage.input_tokens + usage.output_tokens)
 
-`require_budget` resets a stale window and refuses an exhausted member.
+(`require_budget` below is the same check as a dependency; POST /chat calls
+`check_budget` directly.) `check_budget` resets a stale window and refuses an
+exhausted member.
 `record_usage` adds what the provider *reported*, not an estimate. Both do
 their arithmetic in SQL: a read-modify-write in Python races between two
 concurrent requests from the same member.
