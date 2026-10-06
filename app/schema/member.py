@@ -65,6 +65,8 @@ class MemberAdminUpdate(BaseModel):
     role: Literal[model.MEMBER_ROLES] = None
     # strict: a JSON integer only (true, "5", 5.0 and 1e3 are 422, not coerced).
     tokens_budget_daily: int = Field(default=None, strict=True, ge=0, le=MAX_TOKENS_BUDGET_DAILY)
+    # strict: a JSON boolean only ("true", 1 and null are 422).
+    is_active: bool = Field(default=None, strict=True)
 
     @model_validator(mode="after")
     def _something_to_change(self):

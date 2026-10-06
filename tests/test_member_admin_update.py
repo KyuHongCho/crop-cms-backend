@@ -1,4 +1,4 @@
-"""Member management for admins: PATCH /members/{id} (role, daily budget).
+"""Member management for admins: PATCH /members/{id} (role, daily budget, is_active).
 
 Covers who may call it, the 422 and 404 cases, the self and last-admin 409
 rules, one audit row per real change in the same transaction as the change, and
@@ -24,6 +24,7 @@ from app.db import db as app_db
 from app.db.db import get_db
 from app.db.migrate_db import engine as sync_engine
 from app.model.model import Member, MemberAuditEvent
+import app.router.member as member_router
 from app.router.member import update_member
 from app.schema.member import MemberAdminUpdate, MemberAdminView
 from tests.conftest import DEFAULT_PASSWORD, signup_member
@@ -49,7 +50,7 @@ def member_row(member_id):
     return sql(
         "SELECT role, is_active, tokens_budget_daily, tokens_used_today, email, password_hash "
         "FROM members WHERE id = :id", id=member_id,
-    ).one()
+    ).one_or_none()
 
 
 def audit_rows():
@@ -102,7 +103,12 @@ def test_a_refused_caller_gets_403_not_404_for_a_missing_id(client_with_role):
 @pytest.mark.parametrize(
     "body",
     [
-        {"is_active": False},  # arrives with the deactivate slice
+        {"is_active": "true"},
+        {"is_active": "false"},
+        {"is_active": 1},
+        {"is_active": 0},
+        {"is_active": None},
+        {"is_active": [True]},
         {"tokens_used_today": 0},
         {"password_hash": "x"},
         {"email": "new@example.com"},
@@ -247,20 +253,153 @@ def test_an_admin_may_change_their_own_budget_and_re_send_their_own_role(client_
     assert [r.detail for r in audit_rows()] == [{"tokens_budget_daily": {"from": 20000, "to": 1234}}]
 
 
-def test_the_last_active_admin_cannot_lose_the_admin_role(client_with_role):
-    # get_current_member does not check is_active yet (the deactivate slice does),
-    # so an inactive admin can still act: that is how an admin who is not the target
-    # can face a target who is the only ACTIVE admin.
+def test_over_http_two_admins_demote_one_at_a_time_and_the_survivor_is_protected_by_the_self_rule(client_with_role):
+    # Over HTTP the actor is itself an active admin (an inactive one is refused at
+    # the door), so the target is never the ONLY active admin: the rule is
+    # unreachable here and the two admins demote each other fine, one at a time.
     actor = client_with_role("admin")
+    other = add_member("admin")
+    assert actor.patch(f"/members/{other}", json={"role": "editor"}).status_code == 200
+    # Now the actor is the sole active admin: it cannot demote itself (self rule).
+    assert actor.patch(f"/members/{actor.member_id}", json={"role": "editor"}).status_code == 409
+
+
+def _call_handler(actor_id, target_id, **payload):
+    """update_member called directly with an actor loaded from the database now, to
+    model a request whose actor was deactivated or demoted after the guard passed
+    (the guard is not run here). Returns (status, the target's row, the audit rows)."""
+    engine = create_async_engine(app_db.ASYNC_DB_URL)
+
+    async def scenario():
+        async with AsyncSession(engine, expire_on_commit=False, autoflush=False) as session:
+            actor = await session.get(Member, actor_id)
+            try:
+                await update_member(target_id, MemberAdminUpdate(**payload), actor, session)
+                return 200
+            except HTTPException as error:
+                return error.status_code
+
+    try:
+        status = asyncio.run(asyncio.wait_for(scenario(), 30))
+    finally:
+        asyncio.run(engine.dispose())
+    return status, member_row(target_id), audit_rows()
+
+
+def test_a_healthy_active_admin_still_works_through_the_handler():
+    actor = add_member("admin")
+    editor = add_member("editor")
+    assert _call_handler(actor, editor, role="member")[0] == 200
+    assert _call_handler(actor, actor, tokens_budget_daily=7)[0] == 200  # own budget
+    status, row, audit = _call_handler(actor, actor, role="admin", is_active=True)  # re-send
+    assert (status, row.is_active) == (200, True)
+    assert len(audit) == 2
+
+
+def test_an_actor_deactivated_after_authenticating_is_refused_403_and_nothing_changes():
+    actor = add_member("admin")
+    editor = add_member("editor")
+    sql("UPDATE members SET is_active = false WHERE id = :id", id=actor)  # after the guard
+    for payload in ({"is_active": False}, {"role": "member"}, {"tokens_budget_daily": 5}):
+        status, row, audit = _call_handler(actor, editor, **payload)
+        assert status == 403, payload
+        assert (row.role, row.is_active, row.tokens_budget_daily) == ("editor", True, 20000)
+        assert audit == []
+
+
+def test_an_actor_demoted_after_authenticating_cannot_promote_anyone():
+    actor = add_member("admin")
+    plain = add_member("member")
+    sql("UPDATE members SET role = 'editor' WHERE id = :id", id=actor)  # after the guard
+    status, row, audit = _call_handler(actor, plain, role="admin")
+    assert (status, row.role, audit) == (403, "member", [])
+
+
+def test_a_stale_actor_gets_403_before_404_so_it_learns_nothing_about_ids():
+    actor = add_member("admin", is_active=False)
+    assert _call_handler(actor, 99999, role="editor")[0] == 403
+
+
+def test_a_stale_actor_who_is_also_the_target_is_refused_403():
+    actor = add_member("admin", is_active=False)
+    status, row, audit = _call_handler(actor, actor, is_active=True)  # would re-activate itself
+    assert (status, row.is_active, audit) == (403, False, [])
+
+
+def test_the_target_being_returned_does_not_make_the_actor_an_active_admin():
+    # The lock statement returns the target whatever it is; only admin_ids says
+    # who is an active admin. A stale actor aimed at an active admin is refused.
+    actor = add_member("admin", is_active=False)
+    other_admin = add_member("admin")
+    status, row, audit = _call_handler(actor, other_admin, role="member")
+    assert (status, row.role, audit) == (403, "admin", [])
+
+
+def test_the_last_admin_decision_refuses_removing_or_deactivating_the_only_active_admin():
+    # The decision on the locked rows. Over HTTP the actor is in the locked set, so
+    # the target is the only active admin only when actor == target (the self rule
+    # answers first); this pins the rule itself, built from the real lock result.
     sole = add_member("admin")
-    sql("UPDATE members SET is_active = false WHERE id = :id", id=actor.member_id)
-    response = actor.patch(f"/members/{sole}", json={"role": "editor"})
-    assert response.status_code == 409
-    assert "last active admin" in response.json()["detail"]
-    assert member_row(sole).role == "admin"
-    assert audit_rows() == []
-    # Changing the sole admin's budget does not remove the role: allowed.
-    assert actor.patch(f"/members/{sole}", json={"tokens_budget_daily": 5}).status_code == 200
+    other = add_member("member")
+    engine = create_async_engine(app_db.ASYNC_DB_URL)
+
+    async def locked(member_id):
+        async with AsyncSession(engine, expire_on_commit=False, autoflush=False) as session:
+            _, admin_ids = await member_crud.lock_member_and_active_admins(session, member_id)
+            await session.rollback()
+            return admin_ids
+
+    try:
+        ids = asyncio.run(locked(sole))
+        other_ids = asyncio.run(locked(other))
+    finally:
+        asyncio.run(engine.dispose())
+    assert ids == [sole] == other_ids
+    refusal = member_router.last_admin_refusal
+    assert "admin role" in refusal(sole, ids, {"role": {"from": "admin", "to": "editor"}})
+    assert "deactivated" in refusal(sole, ids, {"is_active": {"from": True, "to": False}})
+    assert "admin role" in refusal(sole, ids, {"role": {"from": "admin", "to": "member"}, "is_active": {"from": True, "to": False}})
+    # Not removals: budget, reactivation, a target who is not the sole active admin.
+    assert refusal(sole, ids, {"tokens_budget_daily": {"from": 1, "to": 2}}) is None
+    assert refusal(sole, ids, {"is_active": {"from": False, "to": True}}) is None
+    assert refusal(other, ids, {"role": {"from": "member", "to": "editor"}}) is None
+    assert refusal(sole, [sole, 99], {"role": {"from": "admin", "to": "editor"}}) is None
+    assert refusal(sole, [], {"role": {"from": "admin", "to": "editor"}}) is None
+
+
+def test_the_lock_returns_only_the_active_admins_and_the_target():
+    inactive_admin = add_member("admin", is_active=False)
+    active_admin = add_member("admin")
+    editor = add_member("editor")
+    engine = create_async_engine(app_db.ASYNC_DB_URL)
+
+    async def locked(member_id):
+        async with AsyncSession(engine, expire_on_commit=False, autoflush=False) as session:
+            target, admin_ids = await member_crud.lock_member_and_active_admins(session, member_id)
+            found = target.id, admin_ids
+            await session.rollback()  # release the locks
+            return found
+
+    try:
+        assert asyncio.run(locked(inactive_admin)) == (inactive_admin, [active_admin])
+        assert asyncio.run(locked(editor)) == (editor, [active_admin])
+        sql("UPDATE members SET is_active = false WHERE id = :id", id=active_admin)
+        # No active admin at all: an inactive admin target is NOT counted as one.
+        assert asyncio.run(locked(inactive_admin)) == (inactive_admin, [])
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_an_inactive_admin_is_not_counted_as_the_last_active_admin():
+    """An inactive admin target is not "the only active admin" (the decision gets []),
+    and an inactive actor is refused 403. The `row.is_active` mutant is killed by
+    test_the_lock_returns_only_the_active_admins_and_the_target and by
+    test_a_stale_actor_who_is_also_the_target_is_refused_403."""
+    actor = add_member("admin", is_active=False)
+    target = add_member("admin", is_active=False)
+    status, row, audit = _call_handler(actor, target, role="member")
+    assert (status, row.role, audit) == (403, "admin", [])
+    assert member_router.last_admin_refusal(target, [], {"role": {"from": "admin", "to": "member"}}) is None
 
 
 def test_one_of_two_active_admins_can_be_demoted_by_the_other(client_with_role):
@@ -439,7 +578,8 @@ def test_for_update_makes_the_second_demotion_wait_and_then_refuse():
 def test_two_admins_demoting_each_other_through_the_handler_leave_one_admin(monkeypatch):
     """The same overlap through the real update_member: the first request is
     held after its audit helper runs (change flushed, lock held, not committed);
-    the second must block on the lock, then see one admin and answer 409."""
+    the second must block on the lock, then find its actor no longer an active
+    admin and answer 403 (the actor check comes before the last-admin rule)."""
     a, b = _two_admins()
     engine = create_async_engine(app_db.ASYNC_DB_URL)
     real_record = audit_crud.record_member_update
@@ -476,7 +616,7 @@ def test_two_admins_demoting_each_other_through_the_handler_leave_one_admin(monk
         results = asyncio.run(scenario())
     finally:
         asyncio.run(engine.dispose())
-    assert results == (200, 409)
+    assert results == (200, 403)
     assert _active_admins() == 1
     assert len(audit_rows()) == 1
 

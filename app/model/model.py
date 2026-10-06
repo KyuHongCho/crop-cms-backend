@@ -234,8 +234,8 @@ class Member(Base):
     # "member"; an operator grants the first admin with SQL.
     role = Column(Text, nullable=False, server_default=text("'member'"))
 
-    # An inactive member is meant to be refused everywhere (not yet enforced:
-    # nothing reads this column until the deactivate slice).
+    # An inactive member is refused everywhere: get_current_member (every guarded
+    # route) and login (same 401 as a wrong password) read this column per request.
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
 
     # Per-member daily model budget; see app/auth/budget.py (enforced by POST /chat).

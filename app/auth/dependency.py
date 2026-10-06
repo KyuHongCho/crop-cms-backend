@@ -29,7 +29,10 @@ async def get_current_member(
     if member_id is None:
         raise unauthorised
     member = await member_crud.get_member(db, member_id)
-    if member is None:
+    # is_active is read per request, like the role: a deactivated member's
+    # existing token is refused on the next call and works again on reactivation.
+    # Every guard and route below sits on this dependency, so none can forget it.
+    if member is None or not member.is_active:
         raise unauthorised
     return member
 

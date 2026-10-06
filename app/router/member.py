@@ -63,12 +63,33 @@ async def login(payload: member_schema.MemberLogin, db: AsyncSession = Depends(g
         raise HTTPException(status_code=401, detail=_BAD_LOGIN)
     if not await verify_password(payload.password, member.password_hash):
         raise HTTPException(status_code=401, detail=_BAD_LOGIN)
+    if not member.is_active:
+        # Checked only after the password verified, so an inactive member costs
+        # the same argon2 work and gets the very same 401 (body and headers) as
+        # a wrong password: nothing tells a caller the account is deactivated.
+        raise HTTPException(status_code=401, detail=_BAD_LOGIN)
     return member_schema.TokenResponse(access_token=create_access_token(member.id))
 
 
 @router.get("/me", response_model=member_schema.MemberResponse)
 async def me(current_member: model.Member = Depends(get_current_member)):
     return current_member
+
+
+def last_admin_refusal(target_id: int, admin_ids: list[int], changes: dict) -> str | None:
+    """The last-admin rule as a decision on the locked rows: the refusal message if
+    `changes` would remove the role of, or deactivate, the only active admin (the
+    target), else None. `admin_ids` are the active admins the lock statement returned.
+    With the actor check above, a request reaches this with the target as the only
+    active admin only if the actor IS the target (the self rule answers first), so it
+    is defence in depth for the invariant, and tested on its own."""
+    if admin_ids != [target_id]:
+        return None
+    if "role" in changes:
+        return "The last active admin cannot lose the admin role"
+    if "is_active" in changes and changes["is_active"]["to"] is False:
+        return "The last active admin cannot be deactivated"
+    return None
 
 
 # Declared last: a path parameter would otherwise shadow the static routes above.
@@ -79,10 +100,24 @@ async def update_member(
     actor: model.Member = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    # Order of checks: auth (the dependencies) -> 422 (the body) -> lock -> actor
+    # still an active admin -> 404 -> self rules (role change or deactivation of
+    # oneself) -> last-admin rule (role removal or deactivation of the sole active
+    # admin) -> no-op 200 -> flush -> audit -> one commit. A refusal writes no audit row.
     # One locking statement for the target and every active admin (see the crud
     # docstring for why not two), so every check below reads state nobody else
-    # can change until we commit.
+    # can change until we commit. Any other writer that locks several member rows
+    # must do the same: lock in ascending id, or reuse that function.
     target, admin_ids = await member_crud.lock_member_and_active_admins(db, member_id)
+    # The guard checked the actor before the lock; a concurrent request may have
+    # deactivated or demoted them since. admin_ids is read under the lock, so an
+    # actor missing from it is no longer an active admin: refuse, whatever the
+    # field (a just-demoted admin must not promote anyone). 403, not 401: the
+    # token was valid when the request began, and the actor's NEXT request is the
+    # guard's 401 (deactivated) or 403 (demoted). Decided before the 404 so a
+    # stale actor learns nothing about which ids exist.
+    if actor.id not in admin_ids:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
     if target is None:
         raise HTTPException(status_code=404, detail="Member not found")
     changes = {
@@ -90,11 +125,15 @@ async def update_member(
         for field, value in payload.model_dump(exclude_unset=True).items()
         if getattr(target, field) != value
     }
-    if "role" in changes:
-        if target.id == actor.id:
+    deactivating = "is_active" in changes and changes["is_active"]["to"] is False
+    if target.id == actor.id:
+        if "role" in changes:
             raise HTTPException(status_code=409, detail="An admin cannot change their own role")
-        if target.role == "admin" and admin_ids == [target.id]:
-            raise HTTPException(status_code=409, detail="The last active admin cannot lose the admin role")
+        if deactivating:
+            raise HTTPException(status_code=409, detail="An admin cannot deactivate themselves")
+    refusal = last_admin_refusal(target.id, admin_ids, changes)
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
     if not changes:
         return target  # nothing changed, so nothing to audit
     for field, change in changes.items():
