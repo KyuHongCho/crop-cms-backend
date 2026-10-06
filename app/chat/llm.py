@@ -48,8 +48,9 @@ TOOLS = [
                 "crop_slug": {
                     "type": "string",
                     "description": (
-                        "The crop's slug (lower case, e.g. 'basil') when the question names "
-                        "exactly one crop. Omit it otherwise."
+                        "The crop's slug (lower case, hyphenated, e.g. 'basil' or 'sweet-pepper') "
+                        "when the question names exactly one crop. Omit it when the question names "
+                        "two or more crops (for example a comparison between basil and tomato) or no crop."
                     ),
                 },
             },
@@ -76,7 +77,8 @@ TOOLS = [
 
 CLASSIFIER_SYSTEM_PROMPT = (
     "You route questions for a crop-growing library. Call document_lookup for any question "
-    "about growing crops, setting crop_slug only when the question names exactly one crop. "
+    "about growing crops. Set crop_slug only when the question names exactly one crop; a "
+    "question that compares or mentions several crops must not set it. "
     "Call out_of_scope, with a short reason, for anything else."
 )
 

@@ -665,6 +665,27 @@ def test_a_cased_slug_keeps_other_crops_out_of_the_prompt(client, llm, token):
     assert [d["title"] for d in body["documents"]] == ["t1 0-0"]
 
 
+@pytest.mark.parametrize("slug", ["sweet pepper", "sweet_pepper", "Sweet Pepper", " sweet-pepper\n", "SWEET-PEPPER"])
+def test_a_multi_word_slug_with_spaces_or_underscores_still_scopes_retrieval(client, llm, token, slug):
+    _doc(_crop("sweet-pepper"), "p1", 0, [mix(0.50)])
+    _doc(_crop("tomato"), "t2", 0, [mix(0.95)])  # unscoped, tomato would come first
+    llm.classifier.tool_call = ToolCall("document_lookup", {"crop_slug": slug})
+    body = ask(client, token, "what temperature does sweet pepper want?").json()
+    assert body["topics_used_crops"] == []
+    assert [d["title"] for d in body["documents"]] == ["p1 0-0"]
+
+
+def test_a_doubled_hyphen_slug_stays_unscoped(client, llm, token):
+    """Limitation, deliberate: only whitespace and underscores are mapped to a hyphen,
+    so 'sweet--pepper' (like an en dash or a quoted slug) is not a known crop and
+    retrieval runs unscoped."""
+    _doc(_crop("sweet-pepper"), "p1", 0, [mix(0.50)])
+    _doc(_crop("tomato"), "t2", 0, [mix(0.95)])
+    llm.classifier.tool_call = ToolCall("document_lookup", {"crop_slug": "sweet--pepper"})
+    body = ask(client, token, "what temperature does sweet pepper want?").json()
+    assert body["topics_used_crops"] != []
+
+
 @pytest.mark.parametrize("slug", [123, "", "   ", None])
 def test_a_non_string_or_blank_slug_leaves_retrieval_unscoped(client, llm, token, slug):
     _doc(_crop("basil"), "t1", 0, [mix(0.90)])
@@ -733,3 +754,26 @@ def test_an_answer_citing_only_sent_keys_logs_nothing(client, token, caplog):
 ])
 def test_unknown_keys(text, expected):
     assert _unknown_keys(text, {"S1": 1, "S2": 2, "S3": 3}) == expected
+
+
+def test_the_real_classifier_sends_the_several_crops_wording():
+    """Proves the wording is what is sent to the model. It cannot prove the model obeys
+    it: that is measured only by the live eval."""
+    import json
+
+    import httpx2
+
+    from app.chat.llm import AnthropicClassifier
+
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, json=_message(
+            [{"type": "tool_use", "id": "t1", "name": "document_lookup", "input": {}}], 11, 4))
+
+    AnthropicClassifier(_mock_client(handler)).classify(QUESTION)
+    (body,) = sent
+    assert "compares or mentions several crops" in body["system"]
+    lookup = next(tool for tool in body["tools"] if tool["name"] == "document_lookup")
+    assert "two or more crops" in lookup["input_schema"]["properties"]["crop_slug"]["description"]

@@ -4,6 +4,7 @@ The scope check is the tool name `out_of_scope`; nothing else is declined. The c
 missing tool call, an unknown tool name or badly typed arguments fall back to
 `document_lookup`, never an error. There is no catch-all `else` for the decline.
 """
+import re
 from dataclasses import dataclass
 
 from app.chat.llm import Classifier, ToolCall
@@ -30,7 +31,8 @@ def classify(question: str, classifier: Classifier) -> Classification:
     if call.name == OUT_OF_SCOPE:
         return Classification(OUT_OF_SCOPE, None, tokens)
     crop_slug = call.arguments.get("crop_slug") if isinstance(call.arguments, dict) else None
-    # Normalise the input, as topic_set_statement does for topics: the tool asks for a
-    # lower-case slug but cannot force one, and an exact-match miss silently unscopes retrieval.
-    crop_slug = crop_slug.strip().lower() if isinstance(crop_slug, str) else None
+    # Normalise the input, as topic_set_statement does for topics: the tool asks for a lower-case,
+    # hyphenated slug but cannot force one, and the model is not given the slug list (a live run
+    # emitted "sweet pepper" for "sweet-pepper"). An exact-match miss silently unscopes retrieval.
+    crop_slug = re.sub(r"[\s_]+", "-", crop_slug.strip().lower()) if isinstance(crop_slug, str) else None
     return Classification(DOCUMENT_LOOKUP, crop_slug or None, tokens)
