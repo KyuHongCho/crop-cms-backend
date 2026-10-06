@@ -30,6 +30,9 @@ WRITE_ROUTES = [
     "DELETE /main-categories/{main_category_id}",
 ]
 EDITOR_ROLES = ("editor", "admin")
+# The routes only an admin may call (member management).
+ADMIN_ROUTES = ["GET /members"]
+ADMIN_ROLES = ("admin",)
 
 
 def sql(statement, **params):
@@ -71,9 +74,9 @@ def _all_route_guards() -> dict[str, set[tuple[str, ...]]]:
     return guarded
 
 
-def test_exactly_the_five_cms_write_routes_are_guarded_by_require_editor():
-    """Fails if a guard is removed from one of the five routes, or added to (or
-    missing on) any other route."""
+def test_exactly_the_five_cms_write_routes_are_guarded_by_require_editor_and_the_member_list_by_require_admin():
+    """Fails if a guard is removed from one of the five routes or from GET
+    /members, or added to (or missing on) any other route."""
     guarded = _all_route_guards()
 
     # Cross-check: this saw every route the app serves (bar the root "/").
@@ -85,8 +88,9 @@ def test_exactly_the_five_cms_write_routes_are_guarded_by_require_editor():
     assert set(guarded) == served - {"GET /"}
 
     assert {key for key, roles in guarded.items() if roles == {EDITOR_ROLES}} == set(WRITE_ROUTES)
-    # And nothing else carries any role guard at all (no admin routes yet).
-    assert {key for key, roles in guarded.items() if roles} == set(WRITE_ROUTES)
+    assert {key for key, roles in guarded.items() if roles == {ADMIN_ROLES}} == set(ADMIN_ROUTES)
+    # And nothing else carries any role guard at all.
+    assert {key for key, roles in guarded.items() if roles} == set(WRITE_ROUTES) | set(ADMIN_ROUTES)
 
 
 def test_require_editor_and_require_admin_admit_who_the_brief_says():

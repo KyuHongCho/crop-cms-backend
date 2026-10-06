@@ -31,6 +31,22 @@ async def get_member(db: AsyncSession, member_id: int) -> model.Member | None:
     return await db.get(model.Member, member_id)
 
 
+async def list_members(
+    db: AsyncSession,
+    limit: int,
+    offset: int,
+    role: str | None = None,
+    is_active: bool | None = None,
+) -> list[model.Member]:
+    query = select(model.Member).order_by(model.Member.id).limit(limit).offset(offset)
+    if role is not None:
+        query = query.where(model.Member.role == role)
+    if is_active is not None:
+        query = query.where(model.Member.is_active == is_active)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 async def create_member(
     db: AsyncSession, email: str, password_hash: str, display_name: str | None
 ) -> model.Member:

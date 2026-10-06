@@ -3,6 +3,7 @@ from sqlalchemy import (
     Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, String,
     Text, UniqueConstraint, func, text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
 from app.db.db import Base
@@ -233,7 +234,26 @@ class Member(Base):
     # "member"; an operator grants the first admin with SQL.
     role = Column(Text, nullable=False, server_default=text("'member'"))
 
+    # An inactive member is meant to be refused everywhere (not yet enforced:
+    # nothing reads this column until the deactivate slice).
+    is_active = Column(Boolean, nullable=False, server_default=text("true"))
+
     # Per-member daily model budget; see app/auth/budget.py (enforced by POST /chat).
     tokens_used_today = Column(Integer, nullable=False, server_default=text("0"))
     tokens_budget_daily = Column(Integer, nullable=False, server_default=text("20000"))
     budget_window_start = Column(Date, nullable=False, server_default=text("CURRENT_DATE"))
+
+
+class MemberAuditEvent(Base):
+    """One administrative action on a member. Deliberately no foreign keys and
+    no email: a record must outlive the member it is about, and keep no
+    personal data after that member is deleted."""
+
+    __tablename__ = "member_audit_events"
+
+    id = Column(Integer, primary_key=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    actor_id = Column(Integer, nullable=False)
+    action = Column(Text, nullable=False)
+    target_id = Column(Integer)
+    detail = Column(JSONB)

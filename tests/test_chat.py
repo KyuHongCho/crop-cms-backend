@@ -21,6 +21,7 @@ from app.router.chat import get_chat_embedder
 from app.chat.llm import get_chat_llm
 from scripts import seed
 from scripts.reindex import reindex
+from tests.conftest import signup_member
 from tests.test_topic_expansion import FixedEmbedder, _crop, _doc, mix
 
 PASSWORD = "correct horse battery"
@@ -64,7 +65,7 @@ def llm():
 
 @pytest.fixture
 def token(client):
-    client.post("/members/signup", json={"email": "grower@example.com", "password": PASSWORD})
+    signup_member(client, password=PASSWORD)
     response = client.post("/members/login", json={"email": "grower@example.com", "password": PASSWORD})
     return response.json()["access_token"]
 

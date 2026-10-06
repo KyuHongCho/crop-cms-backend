@@ -20,6 +20,8 @@ from app.db.migrate_db import SEED_BUCKET_SQL
 from app.db.migrate_db import engine as sync_engine
 from app.main import app
 
+DEFAULT_PASSWORD = "correct horse battery"
+
 _REQUIRED_ENV = {"DB_HOST": "db-test", "DB_NAME": "cms_test"}
 
 
@@ -48,8 +50,8 @@ def truncate_and_reseed() -> None:
     with sync_engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE items, sub_categories, main_categories, crops, members "
-                "RESTART IDENTITY CASCADE"
+                "TRUNCATE items, sub_categories, main_categories, crops, members, "
+                "member_audit_events RESTART IDENTITY CASCADE"
             )
         )
         connection.execute(text(SEED_BUCKET_SQL))
@@ -112,3 +114,16 @@ def client_with_role(monkeypatch):
 @pytest.fixture
 def editor_client(client_with_role):
     return client_with_role("editor")
+
+
+def signup_member(client, email="grower@example.com", password=DEFAULT_PASSWORD, **extra):
+    """Create a member through the signup route and return the Response.
+
+    The one place a test that needs a real login (a password hash argon2 can
+    verify) creates its member, so a change to how members come into being is
+    one edit here. `**extra` is merged into the JSON body. Tests whose subject
+    is signup itself may still post to /members/signup directly.
+    """
+    return client.post(
+        "/members/signup", json={"email": email, "password": password, **extra}
+    )

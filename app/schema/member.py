@@ -1,5 +1,5 @@
-"""Member request/response shapes. MemberResponse has no password_hash field,
-so the hash cannot leak through response_model."""
+"""Member request/response shapes. MemberResponse and MemberAdminView have no
+password_hash field, so the hash cannot leak through response_model."""
 from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,3 +31,18 @@ class MemberResponse(BaseModel):
     tokens_budget_daily: int
     budget_window_start: date
     role: str
+
+
+class MemberAdminView(BaseModel):
+    """What an admin sees of a member: everything but the password hash."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    display_name: str | None
+    role: str
+    is_active: bool
+    tokens_used_today: int
+    tokens_budget_daily: int
+    budget_window_start: date

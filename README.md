@@ -26,7 +26,7 @@ source that disagrees reaches the answer.
 
 | Works today | Not built yet |
 |---|---|
-| Document store — 5 content tables (6 with `members`), sources recorded per document | |
+| Document store — 5 content tables (7 with `members` and `member_audit_events`), sources recorded per document | |
 | Members: signup, login (JWT), `/members/me`; daily token budget, enforced by `/chat` | Editing (`PATCH`) and deleting documents |
 | Embeddings for every document, offline-testable (`scripts/reindex.py`) | Frontend and deployment |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
@@ -207,6 +207,7 @@ manages. A test asserts that refusal.
 | `POST` | `/members/signup` | `201`; `400` on a duplicate email. Argon2id hash, run in the threadpool |
 | `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email and a wrong password |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
+| `GET` | `/members` | Admin only (`401` without a token, `403` otherwise). `limit` 1-100 (default 50), `offset`, filters `role` and `is_active`; ordered by id; never the password hash |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
 
 ## Members and the token budget
@@ -219,6 +220,8 @@ again. Every CMS read is open. **Who may write:** the five CMS write routes (`PO
 creates a `member`; it cannot set a role. The role is read from the member's row on every request, not from the token, so a
 demotion takes effect at once. An operator grants the first role with SQL, for example
 `UPDATE members SET role = 'admin' WHERE email = '...'` (the column accepts `member`, `editor`, `admin`; a CHECK refuses anything else).
+An admin lists members with `GET /members`. `members.is_active` and the empty `member_audit_events` table exist for the
+member-management routes still to come; nothing reads or writes them yet.
 The budget exists for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in

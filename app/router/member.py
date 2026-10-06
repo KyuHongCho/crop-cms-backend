@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,7 +8,7 @@ import app.crud.member as member_crud
 import app.model.model as model
 import app.schema.member as member_schema
 from app.auth.auth import DUMMY_HASH, create_access_token, hash_password, verify_password
-from app.auth.dependency import get_current_member
+from app.auth.dependency import get_current_member, require_admin
 from app.db.db import get_db
 
 router = APIRouter(prefix="/members")
@@ -14,6 +16,22 @@ router = APIRouter(prefix="/members")
 # One message for an unknown email and a wrong password: distinct ones would
 # tell an attacker which emails are registered.
 _BAD_LOGIN = "Incorrect email or password"
+
+
+# Admin-only. Declare static routes before any future "/{member_id}" route.
+@router.get(
+    "",
+    response_model=list[member_schema.MemberAdminView],
+    dependencies=[Depends(require_admin)],
+)
+async def list_members(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    role: Literal[model.MEMBER_ROLES] | None = None,
+    is_active: bool | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await member_crud.list_members(db, limit, offset, role, is_active)
 
 
 @router.post("/signup", response_model=member_schema.MemberResponse, status_code=201)
