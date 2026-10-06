@@ -230,8 +230,8 @@ right password for a deactivated member returns the very same `401 "Incorrect em
 so the cost and the answer do not tell a caller the account is deactivated). An admin cannot deactivate themselves and the last active admin cannot be
 deactivated (`409`, no audit row).
 An admin deletes a member with `DELETE /members/{id}`: a hard delete, audited (the row keeps the deleted member's role and nothing else), and an admin cannot delete
-themselves. Nothing references `members` yet, so a delete removes only the member row and nothing cascades; Brief G (chambers, grows) decides `ON DELETE CASCADE`
-versus `RESTRICT` when it adds the first reference.
+themselves. No foreign key references `members` yet, so a delete removes only the member row and nothing cascades; whoever adds the first one decides `ON DELETE CASCADE`
+versus `RESTRICT` then.
 The budget exists for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in

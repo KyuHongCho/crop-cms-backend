@@ -20,6 +20,7 @@ _BAD_LOGIN = "Incorrect email or password"
 
 # members.id is a 32-bit integer: a larger id in the path would reach the database as an overflow (500).
 MAX_MEMBER_ID = 2**31 - 1
+MAX_OFFSET = 2**63 - 1  # OFFSET is a PostgreSQL bigint
 
 
 # Admin-only. Declared before the "/{member_id}" routes at the end of this module,
@@ -31,7 +32,7 @@ MAX_MEMBER_ID = 2**31 - 1
 )
 async def list_members(
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
     role: Literal[model.MEMBER_ROLES] | None = None,
     is_active: bool | None = None,
     db: AsyncSession = Depends(get_db),
@@ -177,9 +178,9 @@ async def delete_member(
     if refusal:
         raise HTTPException(status_code=409, detail=refusal)
     role = target.role  # read before the row goes; the audit keeps only this
-    # A hard delete of the members row and nothing else: no other table references
-    # members yet, so nothing cascades. Brief G (chambers, grows) decides ON DELETE
-    # CASCADE versus RESTRICT when it adds the first reference.
+    # A hard delete of the members row and nothing else: no foreign key references
+    # members yet, so nothing cascades. Whoever adds the first one decides
+    # ON DELETE CASCADE versus RESTRICT then.
     await db.delete(target)
     await db.flush()
     # Same transaction as the delete: if this raises, the member is not deleted.

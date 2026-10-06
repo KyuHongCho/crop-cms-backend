@@ -3,32 +3,16 @@
 The role matrix uses client_with_role (an authorised client, no argon2). The one
 test that signs in for real uses signup_member and /members/login.
 """
-import secrets
-
 import pytest
-from sqlalchemy import text
 
-from app.db.migrate_db import engine as sync_engine
 from app.model.model import MEMBER_ROLES
 from app.schema.member import MemberAdminView
-from tests.conftest import DEFAULT_PASSWORD, signup_member
-
-
-def sql(statement, **params):
-    with sync_engine.begin() as connection:
-        return connection.execute(text(statement), params)
+from tests.conftest import DEFAULT_PASSWORD, add_member, signup_member, sql
 
 
 def add_members(count, role="member"):
     """`count` members by SQL, ids ascending in call order; returns their ids."""
-    return [
-        sql(
-            "INSERT INTO members (email, password_hash, role) "
-            "VALUES (:email, 'not-a-real-hash', :role) RETURNING id",
-            email=f"{role}-{i}-{secrets.token_hex(3)}@example.com", role=role,
-        ).scalar_one()
-        for i in range(count)
-    ]
+    return [add_member(role) for _ in range(count)]
 
 
 # --- who may list ------------------------------------------------------------
@@ -103,7 +87,8 @@ def test_a_promoted_member_logs_in_and_lists_members(client, client_with_role):
 
 @pytest.mark.parametrize(
     "query",
-    ["limit=101", "limit=0", "limit=-1", "limit=abc", "offset=-1", "role=superuser", "role=Admin", "is_active=maybe"],
+    ["limit=101", "limit=0", "limit=-1", "limit=abc", "offset=-1", "role=superuser", "role=Admin", "is_active=maybe",
+     "offset=9223372036854775808", "offset=99999999999999999999"],  # past bigint: 422, not a Postgres 500
 )
 def test_out_of_range_parameters_are_422(client_with_role, query):
     assert client_with_role("admin").get(f"/members?{query}").status_code == 422
@@ -111,6 +96,11 @@ def test_out_of_range_parameters_are_422(client_with_role, query):
 
 def test_limit_100_is_accepted(client_with_role):
     assert client_with_role("admin").get("/members?limit=100").status_code == 200
+
+
+def test_the_largest_bigint_offset_is_accepted_and_returns_nothing(client_with_role):
+    response = client_with_role("admin").get("/members?offset=9223372036854775807")
+    assert (response.status_code, response.json()) == (200, [])
 
 
 def test_the_default_limit_is_50(client_with_role):
