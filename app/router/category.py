@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.crud.category as category_crud
 import app.model.model as model
 import app.schema.category as category_schema
+from app.auth.dependency import require_editor
 from app.db.db import get_db
 
 router = APIRouter()
@@ -58,6 +59,7 @@ async def get_main_categories(db: AsyncSession = Depends(get_db)):
 
 @router.post(
     "/main-categories",
+    dependencies=[Depends(require_editor)],
     response_model=category_schema.MainCategoryResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -81,6 +83,7 @@ async def get_sub_categories(db: AsyncSession = Depends(get_db)):
 
 @router.post(
     "/sub-categories",
+    dependencies=[Depends(require_editor)],
     response_model=category_schema.SubCategoryResponse,
     status_code=status.HTTP_201_CREATED,
 )
@@ -100,6 +103,7 @@ async def create_sub_category(
 
 @router.delete(
     "/main-categories/{main_category_id}",
+    dependencies=[Depends(require_editor)],
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_main_category(
@@ -135,6 +139,7 @@ async def delete_main_category(
 
 @router.delete(
     "/sub-categories/{sub_category_id}",
+    dependencies=[Depends(require_editor)],
     response_model=category_schema.SubCategoryDeleteResponse,
 )
 async def delete_sub_category(

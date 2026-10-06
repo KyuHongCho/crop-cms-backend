@@ -96,7 +96,7 @@ def test_existing_endpoints_work_without_a_token(client, path):
     assert client.get(path).status_code == 200
 
 
-def test_only_members_me_requires_a_token():
+def test_only_the_expected_routes_require_a_token():
     # Every route that declares the bearer scheme shows up in the OpenAPI schema
     # with a `security` entry, so this pins which routes are guarded -- the CMS
     # writes included -- and fails when one is added or removed.
@@ -108,7 +108,15 @@ def test_only_members_me_requires_a_token():
         for method, operation in operations.items()
         if operation.get("security")
     )
-    assert guarded == ["GET /members/me", "POST /chat"]
+    assert guarded == [
+        "DELETE /main-categories/{main_category_id}",
+        "DELETE /sub-categories/{sub_category_id}",
+        "GET /members/me",
+        "POST /chat",
+        "POST /items",
+        "POST /main-categories",
+        "POST /sub-categories",
+    ]
 
 
 # --- duplicate signup, indistinguishable login failures ----------------------

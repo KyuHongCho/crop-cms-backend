@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.crud.item as item_crud
 import app.model.model as model
 import app.schema.item as item_schema
+from app.auth.dependency import require_editor
 from app.db.db import get_db
 
 router = APIRouter()
@@ -18,6 +19,7 @@ async def get_items(db: AsyncSession = Depends(get_db)):
 
 @router.post(
     "/items",
+    dependencies=[Depends(require_editor)],
     response_model=item_schema.ItemResponse,
     status_code=status.HTTP_201_CREATED,
 )

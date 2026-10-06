@@ -199,11 +199,11 @@ manages. A test asserts that refusal.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/crops` | Read-only; seeded to match crop-climate-advisor |
-| `GET` `POST` | `/main-categories` | `409` on a duplicate `slug` |
-| `GET` `POST` | `/sub-categories` | Unique per parent, not globally; `409` on a duplicate `slug` under the same parent |
-| `DELETE` | `/main-categories/{id}` | `409` while it still has sub-categories |
-| `DELETE` | `/sub-categories/{id}` | Refiles its documents to "Uncategorised" and returns the count |
-| `GET` `POST` | `/items` | A document and its sources |
+| `GET` `POST` | `/main-categories` | `POST` needs editor or admin. `409` on a duplicate `slug` |
+| `GET` `POST` | `/sub-categories` | `POST` needs editor or admin. Unique per parent, not globally; `409` on a duplicate `slug` under the same parent |
+| `DELETE` | `/main-categories/{id}` | Editor or admin. `409` while it still has sub-categories |
+| `DELETE` | `/sub-categories/{id}` | Editor or admin. Refiles its documents to "Uncategorised" and returns the count |
+| `GET` `POST` | `/items` | A document and its sources. `POST` needs editor or admin |
 | `POST` | `/members/signup` | `201`; `400` on a duplicate email. Argon2id hash, run in the threadpool |
 | `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email and a wrong password |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
@@ -213,8 +213,13 @@ manages. A test asserts that refusal.
 
 Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`); signing a token without it fails loudly. Tokens
 last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is implemented** -- log in
-again. Every CMS endpoint, read and write alike, is still unauthenticated; the member identity and the
-budget exist for the model-calling route, `POST /chat`.
+again. Every CMS read is open. **Who may write:** the five CMS write routes (`POST /items`, `POST /main-categories`,
+`POST /sub-categories`, `DELETE /main-categories/{id}`, `DELETE /sub-categories/{id}`) need a token from a member whose
+`members.role` is `editor` or `admin` (`401` without a token, `403` for a plain `member`). Signup is open and always
+creates a `member`; it cannot set a role. The role is read from the member's row on every request, not from the token, so a
+demotion takes effect at once. An operator grants the first role with SQL, for example
+`UPDATE members SET role = 'admin' WHERE email = '...'` (the column accepts `member`, `editor`, `admin`; a CHECK refuses anything else).
+The budget exists for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
 [`app/auth/budget.py`](app/auth/budget.py). `POST /chat` calls `check_budget` (resets a stale day, answers `429` with

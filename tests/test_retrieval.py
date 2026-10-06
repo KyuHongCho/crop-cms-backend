@@ -441,14 +441,14 @@ def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
 # API and the seed script.
 
 
-def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(client):
+def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(editor_client):
     """Two documents posted via the real POST /items endpoint with a
     casing/whitespace-variant topic must come back together as one topic
     set, not two silently disjoint ones."""
     crop_id = _make_crop("basil")
 
     def _post(topic: str, title: str) -> None:
-        response = client.post(
+        response = editor_client.post(
             "/items",
             json=dict(
                 sub_category_id=UNCATEGORISED_SUB_CATEGORY_ID,
@@ -468,7 +468,7 @@ def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(client):
     _post("optimal-temperature", "lowercase")
     _post(" Optimal-Temperature ", "cased and padded")
 
-    response = client.get("/retrieval/basil/optimal-temperature")
+    response = editor_client.get("/retrieval/basil/optimal-temperature")
 
     assert response.status_code == 200, response.text
     assert response.json()["document_count"] == 2

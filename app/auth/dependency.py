@@ -1,4 +1,5 @@
-"""get_current_member: the dependency every members-only route takes."""
+"""get_current_member: the dependency every members-only route takes, and the
+role guards built on it (require_editor, require_admin)."""
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,3 +32,31 @@ async def get_current_member(
     if member is None:
         raise unauthorised
     return member
+
+
+def require_roles(*allowed: str):
+    """A dependency that lets only members holding one of `allowed` roles through.
+
+    401 when there is no valid token (from get_current_member), 403 when the
+    member is known but their role is not enough. The role is read from the
+    member row on every request, never from the token, so a demotion takes
+    effect on the next request instead of when the token expires.
+    """
+    unknown = set(allowed) - set(model.MEMBER_ROLES)
+    if unknown:
+        raise ValueError(f"unknown role(s): {sorted(unknown)}")
+
+    async def guard(member: model.Member = Depends(get_current_member)) -> model.Member:
+        if member.role not in allowed:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+        return member
+
+    # Read by the route-guard test to see which roles each route admits.
+    guard.allowed_roles = tuple(allowed)
+    return guard
+
+
+# Content (add and delete) is for editors and admins; member management is for
+# admins only.
+require_editor = require_roles("editor", "admin")
+require_admin = require_roles("admin")

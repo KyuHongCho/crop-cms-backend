@@ -14,6 +14,9 @@ env:
   POSTGRES_PASSWORD: ci-postgres-password
   DB_USER: cms_app
   DB_PASSWORD: ci-app-password
+  # Signs the member tokens the write-route steps below use. Throwaway, like the
+  # values above; compose passes it to the cms container as a bare ${SECRET_KEY}.
+  SECRET_KEY: ci-throwaway-signing-key-not-a-secret-0123456789abcdef
 
 jobs:
   stack:
@@ -151,6 +154,27 @@ jobs:
           test "$version_table" = "1"
           docker compose exec -T cms alembic check
 
+      - name: An editor exists, and later steps hold its token
+        # The CMS write routes need an editor or admin token (README, "Members and
+        # the token budget"). This is the one place CI creates that member, so a
+        # change to how members are created is a one-step edit. Signup works here
+        # because the CI stack's `cms` database is fresh (the downgrade/upgrade
+        # round trip above runs on `cms_test`, not `cms`). Signup always makes a
+        # plain member; the role is granted with SQL, the way an operator does.
+        run: |
+          api="http://localhost:8000"
+          email="ci-editor@example.com"
+          password="ci-throwaway-password"
+          curl -fsS -o /dev/null -X POST "$api/members/signup" -H 'content-type: application/json' \
+            -d "{\"email\":\"$email\",\"password\":\"$password\"}"
+          docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc \
+            "UPDATE members SET role = 'editor' WHERE email = '$email';"
+          token=$(curl -fsS -X POST "$api/members/login" -H 'content-type: application/json' \
+            -d "{\"email\":\"$email\",\"password\":\"$password\"}" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+          echo "::add-mask::$token"
+          echo "CMS_TOKEN=$token" >> "$GITHUB_ENV"
+
       - name: The Uncategorised bucket is seeded where the code expects it
         # See the constants' comment in app/model/model.py for why this id
         # is hard-coded in the baseline migration and must agree with it; this
@@ -175,15 +199,15 @@ jobs:
           done
           api="http://localhost:8000"
           id() { python3 -c "import json,sys; print(json.load(sys.stdin)['id'])"; }
-          mc=$(curl -fsS -X POST "$api/main-categories" -H 'content-type: application/json' \
+          mc=$(curl -fsS -X POST "$api/main-categories" -H "Authorization: Bearer $CMS_TOKEN" -H 'content-type: application/json' \
                  -d '{"slug":"sequence-probe","name":"Sequence probe"}' | id)
-          sc=$(curl -fsS -X POST "$api/sub-categories" -H 'content-type: application/json' \
+          sc=$(curl -fsS -X POST "$api/sub-categories" -H "Authorization: Bearer $CMS_TOKEN" -H 'content-type: application/json' \
                  -d "{\"main_category_id\":$mc,\"slug\":\"sequence-probe\",\"name\":\"Sequence probe\"}" | id)
           echo "first main category after the seed: id=$mc; first sub-category: id=$sc"
           test "$mc" = "2"
           test "$sc" = "2"
-          curl -fsS -o /dev/null -X DELETE "$api/sub-categories/$sc"
-          curl -fsS -o /dev/null -X DELETE "$api/main-categories/$mc"
+          curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $CMS_TOKEN" "$api/sub-categories/$sc"
+          curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $CMS_TOKEN" "$api/main-categories/$mc"
 
       - name: Deletion rules are in the schema, not in Python
         # Read back from pg_constraint, not from model.py. Mutating
@@ -328,19 +352,19 @@ jobs:
           json() { python3 -c "import json,sys; print(json.load(sys.stdin)$1)"; }
           api="http://localhost:8000"
 
-          mc=$(curl -fsS -X POST "$api/main-categories" -H 'content-type: application/json' \
+          mc=$(curl -fsS -X POST "$api/main-categories" -H "Authorization: Bearer $CMS_TOKEN" -H 'content-type: application/json' \
                  -d '{"slug":"basil-notes","name":"Basil notes"}' | json "['id']")
-          sc=$(curl -fsS -X POST "$api/sub-categories" -H 'content-type: application/json' \
+          sc=$(curl -fsS -X POST "$api/sub-categories" -H "Authorization: Bearer $CMS_TOKEN" -H 'content-type: application/json' \
                  -d "{\"main_category_id\":$mc,\"slug\":\"temperature\",\"name\":\"Temperature\"}" \
                  | json "['id']")
           crop=$(curl -fsS "$api/crops" | json "[0]['id']")
           for n in 1 2 3; do
-            curl -fsS -o /dev/null -X POST "$api/items" -H 'content-type: application/json' \
+            curl -fsS -o /dev/null -X POST "$api/items" -H "Authorization: Bearer $CMS_TOKEN" -H 'content-type: application/json' \
               -d "{\"sub_category_id\":$sc,\"crop_id\":$crop,\"title\":\"doc $n\",\"body\":\"b\",
                    \"source\":\"s\",\"reference\":\"r\",\"url\":\"u\",\"read_directly\":true}"
           done
 
-          body=$(curl -fsS -X DELETE "$api/sub-categories/$sc")
+          body=$(curl -fsS -X DELETE -H "Authorization: Bearer $CMS_TOKEN" "$api/sub-categories/$sc")
           echo "DELETE /sub-categories/$sc -> $body"
           test "$body" = '{"documents_refiled":3,"refiled_to":1}'
           filed=$(curl -fsS "$api/items" | python3 -c \
@@ -351,7 +375,7 @@ jobs:
           # One call per assertion: DELETE is not idempotent here, and calling
           # twice would turn the 204 into a 404 against the row it just removed.
           deleted() {
-            got=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$api/$1")
+            got=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $CMS_TOKEN" "$api/$1")
             echo "DELETE /$1 -> $got (expected $2)"
             test "$got" = "$2"
           }

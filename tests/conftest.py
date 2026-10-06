@@ -8,12 +8,14 @@ every test: if it were ever pointed at the dev database, it would not just
 fail loudly, it would wipe it.
 """
 import os
+import secrets
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth.auth import create_access_token
 from app.db.migrate_db import SEED_BUCKET_SQL
 from app.db.migrate_db import engine as sync_engine
 from app.main import app
@@ -75,3 +77,38 @@ def sync_db_session():
     same sync_engine migrate_db.py and _clean_database above already use."""
     with Session(sync_engine) as session:
         yield session
+
+
+@pytest.fixture
+def client_with_role(monkeypatch):
+    """A factory: `client_with_role("editor")` is a TestClient already carrying a
+    valid bearer token for a member who holds that role.
+
+    The member row is inserted through the sync engine and the token minted
+    directly, so no signup/argon2 round trip (and no role ever travels through
+    the API, which has no way to set one). It sets SECRET_KEY itself, so tests
+    that only want an authorised client need not.
+    """
+    monkeypatch.setenv("SECRET_KEY", secrets.token_hex(32))
+
+    def make(role: str, email: str | None = None) -> TestClient:
+        email = email or f"{role}-{secrets.token_hex(4)}@example.com"
+        with sync_engine.begin() as connection:
+            member_id = connection.execute(
+                text(
+                    "INSERT INTO members (email, password_hash, role) "
+                    "VALUES (:email, 'not-a-real-hash', :role) RETURNING id"
+                ),
+                {"email": email, "role": role},
+            ).scalar_one()
+        member = TestClient(app, raise_server_exceptions=False)
+        member.headers["Authorization"] = f"Bearer {create_access_token(member_id)}"
+        member.member_id = member_id
+        return member
+
+    return make
+
+
+@pytest.fixture
+def editor_client(client_with_role):
+    return client_with_role("editor")
