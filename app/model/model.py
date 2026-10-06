@@ -199,9 +199,9 @@ class ItemChunk(Base):
     embedded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-# The roles a member can hold, least to most privileged. Also written, as a
-# literal, in the CHECK on members.role and in the migration that adds it (a
-# migration is frozen and does not import this).
+# The roles a member can hold, least to most privileged. The CHECK on
+# members.role below is built from it; the migration that adds the column writes
+# it as a literal (a migration is frozen and does not import this).
 MEMBER_ROLES = ("member", "editor", "admin")
 
 
@@ -215,7 +215,10 @@ class Member(Base):
         CheckConstraint("tokens_budget_daily >= 0", name="tokens_budget_daily_non_negative"),
         # Text + CHECK, not a native enum: a CHECK can be widened, and the new
         # value used, in one transaction; an enum value cannot.
-        CheckConstraint("role IN ('member', 'editor', 'admin')", name="role_valid"),
+        CheckConstraint(
+            "role IN (" + ", ".join(f"'{role}'" for role in MEMBER_ROLES) + ")",
+            name="role_valid",
+        ),
     )
 
     id = Column(Integer, primary_key=True)

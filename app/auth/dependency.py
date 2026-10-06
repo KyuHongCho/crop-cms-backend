@@ -56,7 +56,7 @@ def require_roles(*allowed: str):
     return guard
 
 
-# Content (add and delete) is for editors and admins; member management is for
-# admins only.
+# Content (add and delete) is for editors and admins.
 require_editor = require_roles("editor", "admin")
+# Defined ahead of the first admin-only route (member management).
 require_admin = require_roles("admin")

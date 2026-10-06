@@ -30,3 +30,4 @@ class MemberResponse(BaseModel):
     tokens_used_today: int
     tokens_budget_daily: int
     budget_window_start: date
+    role: str

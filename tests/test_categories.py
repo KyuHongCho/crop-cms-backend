@@ -106,7 +106,7 @@ def test_same_slug_under_different_parents_both_return_201(editor_client):
     assert r2.status_code == 201
 
 
-def test_bucket_survives_truncate_and_reseed(editor_client):
+def test_bucket_survives_truncate_and_reseed(editor_client, client_with_role):
     """The per-test TRUNCATE fixture must reseed the "Uncategorised" bucket,
     or every test after the first one that touches it breaks.
 
@@ -121,13 +121,15 @@ def test_bucket_survives_truncate_and_reseed(editor_client):
     )
 
     truncate_and_reseed()
+    # The reseed deleted editor_client's member row, so its token is dead now.
+    reader = client_with_role("editor")
 
-    main_response = editor_client.get("/main-categories")
+    main_response = reader.get("/main-categories")
     assert main_response.status_code == 200
     main_slugs = {main_category["slug"] for main_category in main_response.json()}
     assert main_slugs == {"uncategorised"}
 
-    response = editor_client.get("/sub-categories")
+    response = reader.get("/sub-categories")
     assert response.status_code == 200
     slugs = {sub_category["slug"] for sub_category in response.json()}
     assert slugs == {"uncategorised"}
