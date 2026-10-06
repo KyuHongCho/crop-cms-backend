@@ -31,7 +31,7 @@ WRITE_ROUTES = [
 ]
 EDITOR_ROLES = ("editor", "admin")
 # The routes only an admin may call (member management).
-ADMIN_ROUTES = ["GET /members", "PATCH /members/{member_id}"]
+ADMIN_ROUTES = ["GET /members", "PATCH /members/{member_id}", "DELETE /members/{member_id}"]
 ADMIN_ROLES = ("admin",)
 
 
@@ -76,7 +76,7 @@ def _all_route_guards() -> dict[str, set[tuple[str, ...]]]:
 
 def test_exactly_the_five_cms_write_routes_are_guarded_by_require_editor_and_the_member_routes_by_require_admin():
     """Fails if a guard is removed from one of the five routes or from GET
-    /members or PATCH /members/{member_id}, or added to (or missing on) any other route."""
+    /members, PATCH /members/{member_id} or DELETE /members/{member_id}, or added to (or missing on) any other route."""
     guarded = _all_route_guards()
 
     # Cross-check: this saw every route the app serves (bar the root "/").

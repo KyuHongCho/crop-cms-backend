@@ -19,10 +19,7 @@ from app.db import db as app_db
 from app.model.model import Member
 from app.router.member import update_member
 from app.schema.member import MemberAdminUpdate
-from tests.conftest import DEFAULT_PASSWORD, signup_member
-from tests.test_member_admin_update import (
-    _call_handler, add_member, audit_rows, member_row, sql,
-)
+from tests.conftest import DEFAULT_PASSWORD, add_member, audit_rows, call_handler, member_row, signup_member, sql
 
 EMAIL = "grower@example.com"
 
@@ -309,9 +306,9 @@ def test_the_sole_admin_cannot_be_deactivated_by_anyone_the_decision_and_the_sel
     # admin only when actor == target: the self rule answers (409, nothing written).
     # The last-admin decision itself is pinned in test_member_admin_update.py.
     sole = add_member("admin")
-    status, row, audit = _call_handler(sole, sole, is_active=False)
+    status, row, audit = call_handler(sole, sole, is_active=False)
     assert (status, row.is_active, audit) == (409, True, [])
-    status, row, audit = _call_handler(sole, sole, is_active=False, role="member")
+    status, row, audit = call_handler(sole, sole, is_active=False, role="member")
     assert (status, row.role, row.is_active, audit) == (409, "admin", True, [])
     assert member_router.last_admin_refusal(
         sole, [sole], {"is_active": {"from": True, "to": False}}

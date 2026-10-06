@@ -16,3 +16,14 @@ async def record_member_update(
             actor_id=actor_id, action="update", target_id=target_id, detail=changes
         )
     )
+
+
+async def record_member_delete(db: AsyncSession, actor_id: int, target_id: int, role: str) -> None:
+    """Add one 'delete' row; the caller's commit writes it with the deletion, in one
+    transaction. The detail is the target's role and nothing else (no email, no
+    display name): the row outlives the member and has no foreign key to it."""
+    db.add(
+        model.MemberAuditEvent(
+            actor_id=actor_id, action="delete", target_id=target_id, detail={"role": role}
+        )
+    )

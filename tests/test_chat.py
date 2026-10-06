@@ -6,17 +6,25 @@ corpus (scripts/seed.py) is re-embedded with hand-set vectors so retrieval is
 deterministic. A stub can prove what the prompt carries; it cannot prove the
 model obeys the prompt.
 """
+import asyncio
 import logging
 import secrets
 
 import pytest
+from fastapi import Depends, HTTPException
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.auth.budget import check_budget
+from app.auth.dependency import get_current_member
 from app.chat.embeddings import FakeEmbedder
 from app.chat.llm import CLASSIFIER_SYSTEM_PROMPT, TOOLS, ChatLLM, ClassifierResult, GeneratorResult, ToolCall
 from app.chat.dispatch import TRUNCATION_NOTICE, _unknown_keys
+from app.db import db as app_db
+from app.db.db import get_db
 from app.db.migrate_db import engine as sync_engine
 from app.main import app
+from app.model.model import Member
 from app.router.chat import get_chat_embedder
 from app.chat.llm import get_chat_llm
 from scripts import seed
@@ -216,6 +224,43 @@ def test_an_exhausted_member_gets_429_before_any_model_call(client, llm, corpus,
     response = ask(client, token)
     assert response.status_code == 429 and "retry-after" in response.headers
     assert llm.classifier.questions == [] and llm.generator.calls == []
+
+
+def test_a_member_deleted_after_the_guard_passed_gets_401_not_500_and_no_model_call(client, llm, token):
+    # DELETE /members/{id} landing between get_current_member and check_budget: the
+    # guard has loaded the member, then the row goes, then the budget read finds none.
+    member_id = sql("SELECT id FROM members").scalar_one()
+
+    async def deleted_after_the_guard(db=Depends(get_db)):
+        member = await db.get(Member, member_id)
+        sql("DELETE FROM members WHERE id = :id", id=member_id)
+        return member
+
+    app.dependency_overrides[get_current_member] = deleted_after_the_guard
+    response = ask(client, token)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Not authenticated"}
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert llm.classifier.questions == [] and llm.generator.calls == []
+
+
+def test_check_budget_for_a_missing_member_is_the_guards_401():
+    engine = create_async_engine(app_db.ASYNC_DB_URL)
+
+    async def scenario():
+        async with AsyncSession(engine, expire_on_commit=False, autoflush=False) as session:
+            try:
+                await check_budget(session, 99999)
+            except HTTPException as error:
+                return error
+
+    try:
+        error = asyncio.run(asyncio.wait_for(scenario(), 30))
+    finally:
+        asyncio.run(engine.dispose())
+    assert (error.status_code, error.detail, error.headers) == (
+        401, "Not authenticated", {"WWW-Authenticate": "Bearer"},
+    )
 
 
 def test_a_topic_too_big_for_the_context_budget_is_413_before_generation(client, llm, token):

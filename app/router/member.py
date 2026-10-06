@@ -22,7 +22,8 @@ _BAD_LOGIN = "Incorrect email or password"
 MAX_MEMBER_ID = 2**31 - 1
 
 
-# Admin-only. Declare static routes before any future "/{member_id}" route.
+# Admin-only. Declared before the "/{member_id}" routes at the end of this module,
+# whose path parameter would otherwise shadow the static routes.
 @router.get(
     "",
     response_model=list[member_schema.MemberAdminView],
@@ -76,15 +77,20 @@ async def me(current_member: model.Member = Depends(get_current_member)):
     return current_member
 
 
-def last_admin_refusal(target_id: int, admin_ids: list[int], changes: dict) -> str | None:
+def last_admin_refusal(
+    target_id: int, admin_ids: list[int], changes: dict, deleting: bool = False
+) -> str | None:
     """The last-admin rule as a decision on the locked rows: the refusal message if
     `changes` would remove the role of, or deactivate, the only active admin (the
-    target), else None. `admin_ids` are the active admins the lock statement returned.
-    With the actor check above, a request reaches this with the target as the only
-    active admin only if the actor IS the target (the self rule answers first), so it
-    is defence in depth for the invariant, and tested on its own."""
+    target), or if `deleting` would delete them, else None. `admin_ids` are the
+    active admins the lock statement returned. With the actor check in the handlers, a request
+    reaches this with the target as the only active admin only if the actor IS the
+    target (the self rule answers first), so it is defence in depth for the
+    invariant, and tested on its own. PATCH and DELETE share this one decision."""
     if admin_ids != [target_id]:
         return None
+    if deleting:
+        return "The last active admin cannot be deleted"
     if "role" in changes:
         return "The last active admin cannot lose the admin role"
     if "is_active" in changes and changes["is_active"]["to"] is False:
@@ -143,3 +149,39 @@ async def update_member(
     await audit_crud.record_member_update(db, actor.id, target.id, changes)
     await db.commit()
     return target
+
+
+@router.delete("/{member_id}", status_code=204)
+async def delete_member(
+    member_id: int = Path(ge=1, le=MAX_MEMBER_ID),
+    actor: model.Member = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    # Order of checks, as for PATCH: auth (the dependencies) -> 422 (the path) ->
+    # lock -> actor still an active admin -> 404 -> self rule (an admin cannot
+    # delete themselves) -> last-admin rule -> delete -> audit -> one commit. A
+    # refusal deletes nothing and writes no audit row.
+    # The SAME ordered locking statement as PATCH, not a second locking path: any
+    # writer that locks several member rows must lock in ascending id or reuse
+    # that function, or two requests can deadlock (see the crud docstring).
+    target, admin_ids = await member_crud.lock_member_and_active_admins(db, member_id)
+    # Stale actor (deactivated or demoted since the guard): 403 before the 404, so
+    # it learns nothing about which ids exist. See update_member.
+    if actor.id not in admin_ids:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    if target is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.id == actor.id:
+        raise HTTPException(status_code=409, detail="An admin cannot delete themselves")
+    refusal = last_admin_refusal(target.id, admin_ids, {}, deleting=True)
+    if refusal:
+        raise HTTPException(status_code=409, detail=refusal)
+    role = target.role  # read before the row goes; the audit keeps only this
+    # A hard delete of the members row and nothing else: no other table references
+    # members yet, so nothing cascades. Brief G (chambers, grows) decides ON DELETE
+    # CASCADE versus RESTRICT when it adds the first reference.
+    await db.delete(target)
+    await db.flush()
+    # Same transaction as the delete: if this raises, the member is not deleted.
+    await audit_crud.record_member_delete(db, actor.id, member_id, role)
+    await db.commit()

@@ -55,8 +55,16 @@ async def check_budget(db: AsyncSession, member_id: int) -> None:
     (with Retry-After, in seconds until the window rolls over) if they are at
     or over budget. Commits the reset in the same transaction as the check."""
     await db.execute(_RESET_STALE_WINDOW, {"id": member_id})
-    row = (await db.execute(_READ_BUDGET, {"id": member_id})).one()
+    row = (await db.execute(_READ_BUDGET, {"id": member_id})).one_or_none()
     await db.commit()
+    if row is None:
+        # Deleted (DELETE /members/{id}) after get_current_member passed: the same
+        # 401 that guard gives on the member's next request, not a 500.
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if row.tokens_used_today >= row.tokens_budget_daily:
         raise HTTPException(
             status_code=429,

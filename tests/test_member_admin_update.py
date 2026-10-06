@@ -27,36 +27,17 @@ from app.model.model import Member, MemberAuditEvent
 import app.router.member as member_router
 from app.router.member import update_member
 from app.schema.member import MemberAdminUpdate, MemberAdminView
-from tests.conftest import DEFAULT_PASSWORD, signup_member
-
-
-def sql(statement, **params):
-    with sync_engine.begin() as connection:
-        return connection.execute(text(statement), params)
-
-
-def add_member(role="member", **columns):
-    """One member by SQL; returns its id. `columns` are extra column values."""
-    columns = {"email": f"{role}-{secrets.token_hex(4)}@example.com", "role": role, **columns}
-    names = ", ".join(columns)
-    values = ", ".join(f":{name}" for name in columns)
-    return sql(
-        f"INSERT INTO members (password_hash, {names}) VALUES ('not-a-real-hash', {values}) RETURNING id",
-        **columns,
-    ).scalar_one()
-
-
-def member_row(member_id):
-    return sql(
-        "SELECT role, is_active, tokens_budget_daily, tokens_used_today, email, password_hash "
-        "FROM members WHERE id = :id", id=member_id,
-    ).one_or_none()
-
-
-def audit_rows():
-    return sql(
-        "SELECT actor_id, action, target_id, detail FROM member_audit_events ORDER BY id"
-    ).all()
+from tests.conftest import (
+    DEFAULT_PASSWORD,
+    active_admins,
+    add_member,
+    audit_rows,
+    call_handler,
+    member_row,
+    signup_member,
+    sql,
+    two_admins,
+)
 
 
 # --- who may patch -----------------------------------------------------------
@@ -264,34 +245,12 @@ def test_over_http_two_admins_demote_one_at_a_time_and_the_survivor_is_protected
     assert actor.patch(f"/members/{actor.member_id}", json={"role": "editor"}).status_code == 409
 
 
-def _call_handler(actor_id, target_id, **payload):
-    """update_member called directly with an actor loaded from the database now, to
-    model a request whose actor was deactivated or demoted after the guard passed
-    (the guard is not run here). Returns (status, the target's row, the audit rows)."""
-    engine = create_async_engine(app_db.ASYNC_DB_URL)
-
-    async def scenario():
-        async with AsyncSession(engine, expire_on_commit=False, autoflush=False) as session:
-            actor = await session.get(Member, actor_id)
-            try:
-                await update_member(target_id, MemberAdminUpdate(**payload), actor, session)
-                return 200
-            except HTTPException as error:
-                return error.status_code
-
-    try:
-        status = asyncio.run(asyncio.wait_for(scenario(), 30))
-    finally:
-        asyncio.run(engine.dispose())
-    return status, member_row(target_id), audit_rows()
-
-
 def test_a_healthy_active_admin_still_works_through_the_handler():
     actor = add_member("admin")
     editor = add_member("editor")
-    assert _call_handler(actor, editor, role="member")[0] == 200
-    assert _call_handler(actor, actor, tokens_budget_daily=7)[0] == 200  # own budget
-    status, row, audit = _call_handler(actor, actor, role="admin", is_active=True)  # re-send
+    assert call_handler(actor, editor, role="member")[0] == 200
+    assert call_handler(actor, actor, tokens_budget_daily=7)[0] == 200  # own budget
+    status, row, audit = call_handler(actor, actor, role="admin", is_active=True)  # re-send
     assert (status, row.is_active) == (200, True)
     assert len(audit) == 2
 
@@ -301,7 +260,7 @@ def test_an_actor_deactivated_after_authenticating_is_refused_403_and_nothing_ch
     editor = add_member("editor")
     sql("UPDATE members SET is_active = false WHERE id = :id", id=actor)  # after the guard
     for payload in ({"is_active": False}, {"role": "member"}, {"tokens_budget_daily": 5}):
-        status, row, audit = _call_handler(actor, editor, **payload)
+        status, row, audit = call_handler(actor, editor, **payload)
         assert status == 403, payload
         assert (row.role, row.is_active, row.tokens_budget_daily) == ("editor", True, 20000)
         assert audit == []
@@ -311,18 +270,18 @@ def test_an_actor_demoted_after_authenticating_cannot_promote_anyone():
     actor = add_member("admin")
     plain = add_member("member")
     sql("UPDATE members SET role = 'editor' WHERE id = :id", id=actor)  # after the guard
-    status, row, audit = _call_handler(actor, plain, role="admin")
+    status, row, audit = call_handler(actor, plain, role="admin")
     assert (status, row.role, audit) == (403, "member", [])
 
 
 def test_a_stale_actor_gets_403_before_404_so_it_learns_nothing_about_ids():
     actor = add_member("admin", is_active=False)
-    assert _call_handler(actor, 99999, role="editor")[0] == 403
+    assert call_handler(actor, 99999, role="editor")[0] == 403
 
 
 def test_a_stale_actor_who_is_also_the_target_is_refused_403():
     actor = add_member("admin", is_active=False)
-    status, row, audit = _call_handler(actor, actor, is_active=True)  # would re-activate itself
+    status, row, audit = call_handler(actor, actor, is_active=True)  # would re-activate itself
     assert (status, row.is_active, audit) == (403, False, [])
 
 
@@ -331,7 +290,7 @@ def test_the_target_being_returned_does_not_make_the_actor_an_active_admin():
     # who is an active admin. A stale actor aimed at an active admin is refused.
     actor = add_member("admin", is_active=False)
     other_admin = add_member("admin")
-    status, row, audit = _call_handler(actor, other_admin, role="member")
+    status, row, audit = call_handler(actor, other_admin, role="member")
     assert (status, row.role, audit) == (403, "admin", [])
 
 
@@ -397,7 +356,7 @@ def test_an_inactive_admin_is_not_counted_as_the_last_active_admin():
     test_a_stale_actor_who_is_also_the_target_is_refused_403."""
     actor = add_member("admin", is_active=False)
     target = add_member("admin", is_active=False)
-    status, row, audit = _call_handler(actor, target, role="member")
+    status, row, audit = call_handler(actor, target, role="member")
     assert (status, row.role, audit) == (403, "admin", [])
     assert member_router.last_admin_refusal(target, [], {"role": {"from": "admin", "to": "member"}}) is None
 
@@ -511,76 +470,14 @@ def test_if_the_database_rejects_the_audit_row_the_change_is_rolled_back(client_
     assert audit_rows() == []
 
 
-# --- overlapping transactions: plain count versus FOR UPDATE ------------------
-
-def _two_admins():
-    return add_member("admin"), add_member("admin")
-
-
-def _demote_if_not_last(connection, target, *, lock):
-    """The last-admin rule as SQL, in the caller's open transaction. Returns True
-    when it demoted the target, False when it refused."""
-    if lock:
-        ids = connection.execute(text(
-            "SELECT id FROM members WHERE role = 'admin' AND is_active ORDER BY id FOR UPDATE"
-        )).scalars().all()
-        remaining = len(ids)
-    else:
-        remaining = connection.execute(text(
-            "SELECT count(*) FROM members WHERE role = 'admin' AND is_active"
-        )).scalar_one()
-    if remaining <= 1:
-        return False
-    connection.execute(text("UPDATE members SET role = 'member' WHERE id = :id"), {"id": target})
-    return True
-
-
-def _active_admins():
-    return sql("SELECT count(*) FROM members WHERE role = 'admin' AND is_active").scalar_one()
-
-
-def test_a_plain_count_lets_two_overlapping_demotions_remove_both_admins():
-    a, b = _two_admins()
-    with sync_engine.connect() as first, sync_engine.connect() as second:
-        first_tx, second_tx = first.begin(), second.begin()
-        # Each transaction counts before the other has written: both see 2.
-        assert _demote_if_not_last(first, b, lock=False) is True
-        assert _demote_if_not_last(second, a, lock=False) is True
-        first_tx.commit()
-        second_tx.commit()
-    assert _active_admins() == 0
-
-
-def test_for_update_makes_the_second_demotion_wait_and_then_refuse():
-    a, b = _two_admins()
-    outcome = {}
-
-    def second_request(connection):
-        with connection.begin():
-            outcome["demoted"] = _demote_if_not_last(connection, a, lock=True)
-
-    with sync_engine.connect() as first, sync_engine.connect() as second:
-        first_tx = first.begin()
-        assert _demote_if_not_last(first, b, lock=True) is True
-        thread = threading.Thread(target=second_request, args=(second,))
-        thread.start()
-        thread.join(timeout=1.0)
-        assert thread.is_alive(), "the second transaction should be waiting on the admin row locks"
-        assert "demoted" not in outcome
-        first_tx.commit()
-        thread.join(timeout=10)
-        assert not thread.is_alive()
-    assert outcome == {"demoted": False}
-    assert _active_admins() == 1
-    assert member_row(a).role == "admin"
-
+# --- overlapping transactions ------------------------------------------------
 
 def test_two_admins_demoting_each_other_through_the_handler_leave_one_admin(monkeypatch):
     """The same overlap through the real update_member: the first request is
     held after its audit helper runs (change flushed, lock held, not committed);
     the second must block on the lock, then find its actor no longer an active
     admin and answer 403 (the actor check comes before the last-admin rule)."""
-    a, b = _two_admins()
+    a, b = two_admins()
     engine = create_async_engine(app_db.ASYNC_DB_URL)
     real_record = audit_crud.record_member_update
 
@@ -617,7 +514,7 @@ def test_two_admins_demoting_each_other_through_the_handler_leave_one_admin(monk
     finally:
         asyncio.run(engine.dispose())
     assert results == (200, 403)
-    assert _active_admins() == 1
+    assert active_admins() == 1
     assert len(audit_rows()) == 1
 
 
@@ -625,12 +522,13 @@ def test_many_concurrent_patches_through_the_handler_never_deadlock():
     """10 workers send random role and budget changes (promotions and demotions
     among 4 admins and 4 members) straight to update_member on their own
     sessions. A refusal (409) is fine; a database error (a deadlock victim
-    would surface as one, and a 500) is not."""
+    would surface as one, and a 500) is not. At least one patch must have
+    gone through (200), so a run drained by refusals cannot pass."""
     ids = [add_member("admin") for _ in range(4)] + [add_member("member") for _ in range(4)]
     engine = create_async_engine(app_db.ASYNC_DB_URL, pool_size=10)
 
     async def worker(seed):
-        rng, problems = random.Random(seed), []
+        rng, problems, done = random.Random(seed), [], 0
         for _ in range(40):
             payload = rng.choice([
                 {"role": rng.choice(["admin", "editor", "member"])},
@@ -640,11 +538,12 @@ def test_many_concurrent_patches_through_the_handler_never_deadlock():
                 try:
                     actor = await session.get(Member, rng.choice(ids[:4]))
                     await update_member(rng.choice(ids), MemberAdminUpdate(**payload), actor, session)
+                    done += 1
                 except HTTPException:
                     pass
                 except Exception as error:
                     problems.append(type(error).__name__)
-        return problems
+        return problems, done
 
     async def scenario():
         return await asyncio.wait_for(asyncio.gather(*(worker(seed) for seed in range(10))), 120)
@@ -653,13 +552,15 @@ def test_many_concurrent_patches_through_the_handler_never_deadlock():
         results = asyncio.run(scenario())
     finally:
         asyncio.run(engine.dispose())
-    assert [p for problems in results for p in problems] == []
-    assert _active_admins() >= 1
+    assert [p for problems, _ in results for p in problems] == []
+    assert sum(done for _, done in results) >= 1
+    assert active_admins() >= 1
 
 
-def test_locking_the_admins_and_then_the_member_in_two_statements_deadlocks():
-    """The hazard the single statement removes (sync engine, two connections, the
-    two queries in the order the first design ran them). t1 locks the admin set
+def test_why_the_lock_is_one_statement_two_statement_locking_deadlocks():
+    """A "why" test: it documents the Postgres hazard the single ordered statement
+    avoids and exercises no app code (raw SQL on the sync engine, two connections,
+    the two queries in the order the first design ran them). t1 locks the admin set
     {a}; N is promoted and committed; t2 locks the new set {N, a}, waits on a;
     t1 then locks N."""
     n = add_member("member")  # the lower id
@@ -679,7 +580,7 @@ def test_locking_the_admins_and_then_the_member_in_two_statements_deadlocks():
         t1_tx = t1.begin()
         assert t1.execute(text(admins)).scalars().all() == [a]
         sql("UPDATE members SET role = 'admin' WHERE id = :id", id=n)
-        thread = threading.Thread(target=t2_request, args=(t2,))
+        thread = threading.Thread(target=t2_request, args=(t2,), daemon=True)
         thread.start()
         thread.join(timeout=0.5)
         assert thread.is_alive()  # t2 holds n and waits on a

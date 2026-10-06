@@ -208,7 +208,8 @@ manages. A test asserts that refusal.
 | `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email, a wrong password and a deactivated member |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
 | `GET` | `/members` | Admin only (`401` without a token, `403` otherwise). `limit` 1-100 (default 50), `offset`, filters `role` and `is_active`; ordered by id; never the password hash |
-| `PATCH` | `/members/{id}` | Admin only. Body `role`, `tokens_budget_daily` (0-10 000 000) and/or `is_active` (a JSON boolean only); any other field or an empty body is `422`; `404` for an unknown id. `is_active: false` deactivates a member at once (their token gets `401` on the next request and works again on reactivation). `403` if the acting admin was deactivated or demoted while the request was in flight (nothing changes, no audit row); `409` if an admin changes their own role or deactivates themselves, or removes the role of, or deactivates, the last active admin. Each real change writes one `member_audit_events` row in the same transaction (no email); a PATCH that changes nothing is `200` with no row |
+| `PATCH` | `/members/{id}` | Admin only. Body `role`, `tokens_budget_daily` (0-10 000 000) and/or `is_active` (a JSON boolean only); any other field or an empty body is `422`; `404` for an unknown id. `is_active: false` deactivates a member at once (their token gets `401` on the next request and works again on reactivation). `403` if the acting admin was deactivated or demoted while the request was in flight (nothing changes, no audit row); `409` if an admin changes their own role or deactivates themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each real change writes one `member_audit_events` row in the same transaction (no email); a PATCH that changes nothing is `200` with no row |
+| `DELETE` | `/members/{id}` | Admin only. `204`, a hard delete of the member row; their token gets `401` on the next request and login with their email is the usual `401`. `404` for an unknown id (so a second delete is `404`); `403` if the acting admin was deactivated or demoted while the request was in flight; `409` if an admin deletes themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each delete writes one `member_audit_events` row (`action` `delete`, `detail` `{"role": ...}` only, no email) in the same transaction; the row outlives the member (no foreign key). Refusals delete nothing and write no row |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
 
 ## Members and the token budget
@@ -228,6 +229,9 @@ route (`/members/me`, `/chat`, the editor and admin routes) and works again, unc
 right password for a deactivated member returns the very same `401 "Incorrect email or password"` as a wrong password (the password is verified first,
 so the cost and the answer do not tell a caller the account is deactivated). An admin cannot deactivate themselves and the last active admin cannot be
 deactivated (`409`, no audit row).
+An admin deletes a member with `DELETE /members/{id}`: a hard delete, audited (the row keeps the deleted member's role and nothing else), and an admin cannot delete
+themselves. Nothing references `members` yet, so a delete removes only the member row and nothing cascades; Brief G (chambers, grows) decides `ON DELETE CASCADE`
+versus `RESTRICT` when it adds the first reference.
 The budget exists for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
