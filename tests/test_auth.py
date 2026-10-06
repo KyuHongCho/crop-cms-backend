@@ -17,6 +17,7 @@ from app.auth.auth import ALGORITHM, create_access_token
 from app.auth.budget import record_usage, require_budget
 from app.db.db import get_db
 from app.db.migrate_db import engine as sync_engine
+from tests.conftest import signup_member
 
 PASSWORD = "correct horse battery"
 
@@ -29,9 +30,7 @@ def secret_key(monkeypatch):
 
 
 def signup(client, email="grower@example.com", password=PASSWORD, **extra):
-    return client.post(
-        "/members/signup", json={"email": email, "password": password, **extra}
-    )
+    return signup_member(client, email, password, **extra)
 
 
 def login_token(client, email="grower@example.com", password=PASSWORD):
@@ -110,8 +109,11 @@ def test_only_the_expected_routes_require_a_token():
     )
     assert guarded == [
         "DELETE /main-categories/{main_category_id}",
+        "DELETE /members/{member_id}",
         "DELETE /sub-categories/{sub_category_id}",
+        "GET /members",
         "GET /members/me",
+        "PATCH /members/{member_id}",
         "POST /chat",
         "POST /items",
         "POST /main-categories",

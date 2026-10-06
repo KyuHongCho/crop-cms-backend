@@ -26,7 +26,7 @@ source that disagrees reaches the answer.
 
 | Works today | Not built yet |
 |---|---|
-| Document store — 5 content tables (6 with `members`), sources recorded per document | |
+| Document store — 5 content tables (7 with `members` and `member_audit_events`), sources recorded per document | |
 | Members: signup, login (JWT), `/members/me`; daily token budget, enforced by `/chat` | Editing (`PATCH`) and deleting documents |
 | Embeddings for every document, offline-testable (`scripts/reindex.py`) | Frontend and deployment |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
@@ -205,8 +205,11 @@ manages. A test asserts that refusal.
 | `DELETE` | `/sub-categories/{id}` | Editor or admin. Refiles its documents to "Uncategorised" and returns the count |
 | `GET` `POST` | `/items` | A document and its sources. `POST` needs editor or admin |
 | `POST` | `/members/signup` | `201`; `400` on a duplicate email. Argon2id hash, run in the threadpool |
-| `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email and a wrong password |
+| `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email, a wrong password and a deactivated member |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
+| `GET` | `/members` | Admin only (`401` without a token, `403` otherwise). `limit` 1-100 (default 50), `offset`, filters `role` and `is_active`; ordered by id; never the password hash |
+| `PATCH` | `/members/{id}` | Admin only. Body `role`, `tokens_budget_daily` (0-10 000 000) and/or `is_active` (a JSON boolean only); any other field or an empty body is `422`; `404` for an unknown id. `is_active: false` deactivates a member at once (their token gets `401` on the next request and works again on reactivation). `403` if the acting admin was deactivated or demoted while the request was in flight (nothing changes, no audit row); `409` if an admin changes their own role or deactivates themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each real change writes one `member_audit_events` row in the same transaction (no email); a PATCH that changes nothing is `200` with no row |
+| `DELETE` | `/members/{id}` | Admin only. `204`, a hard delete of the member row; their token gets `401` on the next request and login with their email is the usual `401`. `404` for an unknown id (so a second delete is `404`); `403` if the acting admin was deactivated or demoted while the request was in flight; `409` if an admin deletes themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each delete writes one `member_audit_events` row (`action` `delete`, `detail` `{"role": ...}` only, no email) in the same transaction; the row outlives the member (no foreign key). Refusals delete nothing and write no row |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
 
 ## Members and the token budget
@@ -219,6 +222,16 @@ again. Every CMS read is open. **Who may write:** the five CMS write routes (`PO
 creates a `member`; it cannot set a role. The role is read from the member's row on every request, not from the token, so a
 demotion takes effect at once. An operator grants the first role with SQL, for example
 `UPDATE members SET role = 'admin' WHERE email = '...'` (the column accepts `member`, `editor`, `admin`; a CHECK refuses anything else).
+An admin lists members with `GET /members` and changes a member's role or daily budget with `PATCH /members/{id}`, audited in
+`member_audit_events` (`is_active` included: `{"is_active": {"from": true, "to": false}}`). `is_active` is read on every request, like the role, so
+deactivating a member (`PATCH {"is_active": false}`) takes effect at once: their existing token gets the usual `401 Not authenticated` on every
+route (`/members/me`, `/chat`, the editor and admin routes) and works again, unchanged, after `{"is_active": true}`; nothing is revoked. Login with the
+right password for a deactivated member returns the very same `401 "Incorrect email or password"` as a wrong password (the password is verified first,
+so the cost and the answer do not tell a caller the account is deactivated). An admin cannot deactivate themselves and the last active admin cannot be
+deactivated (`409`, no audit row).
+An admin deletes a member with `DELETE /members/{id}`: a hard delete, audited (the row keeps the deleted member's role and nothing else), and an admin cannot delete
+themselves. No foreign key references `members` yet, so a delete removes only the member row and nothing cascades; whoever adds the first one decides `ON DELETE CASCADE`
+versus `RESTRICT` then.
 The budget exists for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
