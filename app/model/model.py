@@ -199,6 +199,12 @@ class ItemChunk(Base):
     embedded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+# The roles a member can hold, least to most privileged. The CHECK on
+# members.role below is built from it; the migration that adds the column writes
+# it as a literal (a migration is frozen and does not import this).
+MEMBER_ROLES = ("member", "editor", "admin")
+
+
 class Member(Base):
     """A registered member. Everything in this app is per-member: chambers,
     grows and chat history all hang off this row."""
@@ -207,6 +213,12 @@ class Member(Base):
     __table_args__ = (
         CheckConstraint("tokens_used_today >= 0", name="tokens_used_today_non_negative"),
         CheckConstraint("tokens_budget_daily >= 0", name="tokens_budget_daily_non_negative"),
+        # Text + CHECK, not a native enum: a CHECK can be widened, and the new
+        # value used, in one transaction; an enum value cannot.
+        CheckConstraint(
+            "role IN (" + ", ".join(f"'{role}'" for role in MEMBER_ROLES) + ")",
+            name="role_valid",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -215,6 +227,11 @@ class Member(Base):
     # documentation a reader of the schema gets that no plaintext is stored.
     password_hash = Column(Text, nullable=False)
     display_name = Column(String(64))
+
+    # What the member may do beyond reading: see app/auth/dependency.py. Signup
+    # never sets it (MemberCreate has no such field), so everyone starts as
+    # "member"; an operator grants the first admin with SQL.
+    role = Column(Text, nullable=False, server_default=text("'member'"))
 
     # Per-member daily model budget; see app/auth/budget.py (enforced by POST /chat).
     tokens_used_today = Column(Integer, nullable=False, server_default=text("0"))

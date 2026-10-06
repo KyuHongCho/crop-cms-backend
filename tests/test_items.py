@@ -18,7 +18,7 @@ def _seed_crop(slug: str = "basil") -> int:
         return result.inserted_primary_key[0]
 
 
-def test_create_item_then_it_appears_in_the_list(client):
+def test_create_item_then_it_appears_in_the_list(editor_client):
     crop_id = _seed_crop()
     body = {
         "sub_category_id": UNCATEGORISED_SUB_CATEGORY_ID,
@@ -31,10 +31,10 @@ def test_create_item_then_it_appears_in_the_list(client):
         "read_directly": True,
     }
 
-    created = client.post("/items", json=body)
+    created = editor_client.post("/items", json=body)
     assert created.status_code == 201
 
-    listed = client.get("/items")
+    listed = editor_client.get("/items")
     assert listed.status_code == 200
     titles = [item["title"] for item in listed.json()]
     assert "a document" in titles
