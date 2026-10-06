@@ -112,6 +112,7 @@ def test_only_the_expected_routes_require_a_token():
         "DELETE /sub-categories/{sub_category_id}",
         "GET /members",
         "GET /members/me",
+        "PATCH /members/{member_id}",
         "POST /chat",
         "POST /items",
         "POST /main-categories",

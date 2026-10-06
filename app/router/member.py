@@ -1,9 +1,10 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.crud.audit as audit_crud
 import app.crud.member as member_crud
 import app.model.model as model
 import app.schema.member as member_schema
@@ -16,6 +17,9 @@ router = APIRouter(prefix="/members")
 # One message for an unknown email and a wrong password: distinct ones would
 # tell an attacker which emails are registered.
 _BAD_LOGIN = "Incorrect email or password"
+
+# members.id is a 32-bit integer: a larger id in the path would reach the database as an overflow (500).
+MAX_MEMBER_ID = 2**31 - 1
 
 
 # Admin-only. Declare static routes before any future "/{member_id}" route.
@@ -65,3 +69,38 @@ async def login(payload: member_schema.MemberLogin, db: AsyncSession = Depends(g
 @router.get("/me", response_model=member_schema.MemberResponse)
 async def me(current_member: model.Member = Depends(get_current_member)):
     return current_member
+
+
+# Declared last: a path parameter would otherwise shadow the static routes above.
+@router.patch("/{member_id}", response_model=member_schema.MemberAdminView)
+async def update_member(
+    member_id: int = Path(ge=1, le=MAX_MEMBER_ID),
+    payload: member_schema.MemberAdminUpdate = Body(),
+    actor: model.Member = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    # One locking statement for the target and every active admin (see the crud
+    # docstring for why not two), so every check below reads state nobody else
+    # can change until we commit.
+    target, admin_ids = await member_crud.lock_member_and_active_admins(db, member_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    changes = {
+        field: {"from": getattr(target, field), "to": value}
+        for field, value in payload.model_dump(exclude_unset=True).items()
+        if getattr(target, field) != value
+    }
+    if "role" in changes:
+        if target.id == actor.id:
+            raise HTTPException(status_code=409, detail="An admin cannot change their own role")
+        if target.role == "admin" and admin_ids == [target.id]:
+            raise HTTPException(status_code=409, detail="The last active admin cannot lose the admin role")
+    if not changes:
+        return target  # nothing changed, so nothing to audit
+    for field, change in changes.items():
+        setattr(target, field, change["to"])
+    await db.flush()
+    # Same transaction as the change: if this raises, the change is rolled back.
+    await audit_crud.record_member_update(db, actor.id, target.id, changes)
+    await db.commit()
+    return target

@@ -1,7 +1,7 @@
 """Data access for members."""
 import os
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.model.model as model
@@ -29,6 +29,41 @@ async def get_member_by_email(db: AsyncSession, email: str) -> model.Member | No
 
 async def get_member(db: AsyncSession, member_id: int) -> model.Member | None:
     return await db.get(model.Member, member_id)
+
+
+async def lock_member_and_active_admins(
+    db: AsyncSession, member_id: int
+) -> tuple[model.Member | None, list[int]]:
+    """Lock the member and every active admin in ONE statement, ordered by id.
+
+    Returns (the member, or None if there is none; the ids of the active admins).
+    The locks are held until the transaction ends. Locking the admins and then
+    the member in two statements can deadlock: a promotion committed between
+    them changes which admin rows the next request locks, so the two requests
+    no longer lock in one global order. One ordered statement takes every lock
+    in ascending id, so requests wait in a line and never in a cycle.
+
+    A plain count of admins lets two admins who demote each other at once both
+    see 2 and both succeed; with the lock the second waits, then sees 1.
+
+    The session never expires objects (autoflush off, expire_on_commit off), so
+    one loaded earlier in the request would be stale: populate_existing
+    refreshes it from the locked row."""
+    result = await db.execute(
+        select(model.Member)
+        .where(
+            or_(
+                and_(model.Member.role == "admin", model.Member.is_active),
+                model.Member.id == member_id,
+            )
+        )
+        .order_by(model.Member.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    rows = list(result.scalars().all())
+    admin_ids = [row.id for row in rows if row.role == "admin" and row.is_active]
+    return next((row for row in rows if row.id == member_id), None), admin_ids
 
 
 async def list_members(

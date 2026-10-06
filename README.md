@@ -208,6 +208,7 @@ manages. A test asserts that refusal.
 | `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email and a wrong password |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
 | `GET` | `/members` | Admin only (`401` without a token, `403` otherwise). `limit` 1-100 (default 50), `offset`, filters `role` and `is_active`; ordered by id; never the password hash |
+| `PATCH` | `/members/{id}` | Admin only. Body `role` and/or `tokens_budget_daily` (0-10 000 000); any other field or an empty body is `422`; `404` for an unknown id. `409` if an admin changes their own role or removes the last active admin. Each real change writes one `member_audit_events` row in the same transaction (no email); a PATCH that changes nothing is `200` with no row |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
 
 ## Members and the token budget
@@ -220,8 +221,8 @@ again. Every CMS read is open. **Who may write:** the five CMS write routes (`PO
 creates a `member`; it cannot set a role. The role is read from the member's row on every request, not from the token, so a
 demotion takes effect at once. An operator grants the first role with SQL, for example
 `UPDATE members SET role = 'admin' WHERE email = '...'` (the column accepts `member`, `editor`, `admin`; a CHECK refuses anything else).
-An admin lists members with `GET /members`. `members.is_active` and the empty `member_audit_events` table exist for the
-member-management routes still to come; nothing reads or writes them yet.
+An admin lists members with `GET /members` and changes a member's role or daily budget with `PATCH /members/{id}`, audited in
+`member_audit_events`. `members.is_active` is listed and filterable and the last-admin rule reads it, but no request is refused for it yet (the deactivate route is still to come).
 The budget exists for the model-calling route, `POST /chat`.
 
 Each member has a daily token budget (`members.tokens_budget_daily`, default 20000), implemented in
