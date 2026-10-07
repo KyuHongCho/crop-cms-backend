@@ -1,7 +1,7 @@
 """Vector topic selection: a question in, whole topics out.
 
-Rules 0-3 work on topics, never ranking documents inside one. Scored from the `published_item_chunks`
-view; documents come via topic_set_statement (the view lacks provenance; no raw tables here).
+Rules 0-3 (defined in docs/design-notes.md) work on topics, never ranking documents inside one.
+Scored from the `published_item_chunks` view; documents via topic_set_statement (it lacks provenance).
 """
 import os
 

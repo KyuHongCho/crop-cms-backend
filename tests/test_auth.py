@@ -167,7 +167,7 @@ class StubModel:
 
 @pytest.fixture
 def budget_app():
-    """(client, stub): a throwaway app with one route shaped like the future POST /chat
+    """(client, stub): a throwaway app with one route shaped like POST /chat
     (require_budget, model, record_usage)."""
     stub = StubModel()
     app = FastAPI()

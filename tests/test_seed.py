@@ -153,7 +153,8 @@ def test_second_hand_basil_via_and_url_match_the_live_advisor_claims_drift(sync_
                            "pest-and-disease": 3, "propagation": 3}),
         ("strawberry", 1112, {"optimal-temperature": 1, "watering-needs": 1, "nutrient-solution": 1,
                               "pest-and-disease": 2, "propagation": 2}),
-    # tomato and sweet pepper have no watering-needs document (all theirs are about solution composition).
+        # tomato and sweet pepper have no watering-needs document
+        # (all theirs are about solution composition).
         ("tomato", 1379, {"optimal-temperature": 1, "nutrient-solution": 3,
                           "pest-and-disease": 3, "propagation": 1}),
         ("cucumber", 817, {"optimal-temperature": 1, "watering-needs": 1, "nutrient-solution": 2,

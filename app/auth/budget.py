@@ -1,7 +1,7 @@
 """Per-member daily token budget, enforced by POST /chat (app/router/chat.py).
 
-SQL arithmetic (Python read-modify-write races); no lock, so overshoot is possible: keep a provider
-spend limit, and turn its limit error into a clean failure. Days follow the DB's CURRENT_DATE.
+SQL arithmetic (a Python read-modify-write races), no lock: concurrent requests can overshoot. The hard
+bound is the provider's spend limit (its error becomes a clean 503); days follow the DB's CURRENT_DATE.
 """
 from fastapi import Depends, HTTPException
 from sqlalchemy import text

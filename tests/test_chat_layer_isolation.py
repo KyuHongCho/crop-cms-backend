@@ -1,7 +1,7 @@
 """Tripwire: app/chat/ must not name the ORM models or the raw tables (read the published_item_chunks view).
 
 A convention, not enforcement: it greps source text, so a runtime-assembled name or an unlisted SQL
-form (FROM ONLY items, a comma join) gets past it. Word boundaries: item_chunks is inside the view name.
+form (FROM ONLY items, a comma join) gets past it. `\\bitem_chunks\\b` skips the view name: `_` is a word char.
 """
 import pathlib
 import re

@@ -1,6 +1,6 @@
 """Seeds the crop corpora via the ORM (a script, not a migration: crops have no author endpoint).
 ECOCROP `source`/`ecocrop_id` are pinned literals; tests/test_seed.py drift tests catch divergence.
-Keyed on (crop, title, source): title/source edits and earlier seeds' stale basil rows need hand removal."""
+Idempotent, keyed on (crop, title, source); title/source edits and stale basil rows need hand removal."""
 from sqlalchemy.orm import Session
 
 from app.db.migrate_db import engine as sync_engine

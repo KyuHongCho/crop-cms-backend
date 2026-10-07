@@ -3,9 +3,9 @@
     docker compose exec -T cms python -m scripts.reindex             # embed what changed
     docker compose exec -T cms python -m scripts.reindex --dry-run   # count only, embeds nothing
 
-Embeds every document, published or not (publishing is a metadata flip; the view filters at read time).
-A chunk is skipped when stored content_hash and model match, so a title-only edit or a new embedder re-embeds.
-A script, not app code: it names the raw table, which app/chat/ may not (tests/test_chat_layer_isolation.py).
+Embeds every document, published or not (the view filters at read time). A chunk is skipped when its
+content_hash and model match. `EMBEDDER` picks the provider: `openai` (default) needs OPENAI_API_KEY,
+`fake` runs offline. A script, not app code: it names the raw table, which app/chat/ may not.
 """
 import argparse
 from dataclasses import dataclass, field

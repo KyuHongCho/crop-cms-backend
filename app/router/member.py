@@ -19,11 +19,10 @@ router = APIRouter(prefix="/members")
 # one message for unknown email and wrong password: distinct ones reveal which emails exist.
 _BAD_LOGIN = "Incorrect email or password"
 
-# path ids above these would overflow the column (500): members.id and member_invites.id
-# are 32-bit, OFFSET is a bigint.
+# path ids above these would overflow the column (500): members.id and member_invites.id are 32-bit.
 MAX_MEMBER_ID = 2**31 - 1
 MAX_INVITE_ID = 2**31 - 1
-MAX_OFFSET = 2**63 - 1
+MAX_OFFSET = 2**63 - 1  # the ?offset query parameter; OFFSET is a PostgreSQL bigint
 
 
 # declared before "/{member_id}", whose path parameter would shadow static routes.

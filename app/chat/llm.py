@@ -113,7 +113,8 @@ class Generator(Protocol):
 
 class LLMUnavailable(Exception):
     """The model service cannot be used: missing key or SDK, or a provider error. The SDK has
-    already retried transient errors (max_retries=2); usage-limit errors will not clear on retry."""
+    already retried transient errors (max_retries=2); a usage-limit 400 or spend-limit 429 will not
+    clear on retry (the 429 is still retried: 3 calls in all)."""
 
 
 @dataclass
