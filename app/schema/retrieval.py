@@ -1,19 +1,7 @@
 """Response shapes for topic-set retrieval.
 
-There is deliberately **no request shape and no `limit` field** anywhere
-in this module. The endpoint takes a crop and a topic and returns the
-whole set: see Item's docstring in `app/model/model.py` -- "retrieval
-returns every document sharing a `topic` rather than a top-k slice --
-otherwise a LIMIT silently picks a winner among disagreeing sources." An
-opt-in `limit` would still let a caller pick that winner, so none is
-offered.
-
-`RetrievedDocument` deliberately does not reuse `app/schema/item.py`'s
-`ItemResponse`. That one is the CMS's authoring view and carries
-`sub_category_id` -- filing metadata the retrieval consumer has no use
-for, and which is not provenance. The overlap is not accidental
-duplication: the two shapes answer to different callers and are free to
-diverge.
+No request shape or `limit` field on purpose: a caller-chosen limit could pick a winner among
+disagreeing sources. RetrievedDocument stays separate from item.py's ItemResponse (authoring view).
 """
 from typing import Literal
 
@@ -36,7 +24,7 @@ class RetrievedDocument(BaseModel):
     title: str
     body: str
 
-    # --- provenance, modelled on crop_advisor/claims.py's Claim -------------
+    # provenance, modelled on crop_advisor/claims.py's Claim
     source: str
     reference: str
     url: str
@@ -73,7 +61,7 @@ class TopicSetResponse(BaseModel):
     document_count: int
     documents: list[RetrievedDocument]
 
-    # Budget accounting -- see app/crud/retrieval.py for the ratio's rationale.
+    # budget accounting; see app/crud/retrieval.py
     context_chars: int
     context_char_budget: int
     chars_per_token: float
@@ -81,12 +69,9 @@ class TopicSetResponse(BaseModel):
 
 
 class BudgetRefusal(BaseModel):
-    """Rule 3's refusal step (see assemble_within_budget): refuse only when a
-    single topic alone exceeds the budget.
+    """Refusal (HTTP 413 detail) only when a single topic alone exceeds the budget.
 
-    Carried as the `detail` of an HTTP 413. Naming the topic and its document
-    count is the whole point -- the refusal has to be more useful than a
-    truncation would have been, or dropping the truncation gains nothing.
+    Names the topic and document count so the refusal beats a silent truncation.
     """
 
     reason: Literal["topic_alone_exceeds_context_budget"] = (

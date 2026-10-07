@@ -1,20 +1,16 @@
 """Turns a document into the text that gets embedded.
 
-One chunk per document today: the threshold below is above the longest embedded
-text in the seed corpus (874 characters), so the paragraph split exists for the
-corpus growing, not for now.
+One chunk per document today; the paragraph split exists for the corpus growing.
 """
 import hashlib
 
-CHUNK_SPLIT_THRESHOLD_CHARS = 1_000   # measured 2026-10-03: longest embedded_text(title, body) is 874
-                                      # chars over 62 documents, 40 exceed 500, none exceed 1,000 --
-                                      # this never fires today, with 126 chars of headroom
+# measured 2026-10-03: longest embedded text is 874 chars over 62 documents, so this never fires
+CHUNK_SPLIT_THRESHOLD_CHARS = 1_000
 
 
 def embedded_text(title: str, body: str) -> str:
-    """Title and body only. Provenance (`source` and the rest) is NOT
-    embedded: `source` is a pinned exact literal, so "what does Walters say?"
-    is a `WHERE source = ...` lookup, not a similarity search."""
+    """Title and body only. Provenance is NOT embedded: `source` is a pinned literal, so
+    "what does Walters say?" is a `WHERE source = ...` lookup, not a similarity search."""
     return f"{title}\n{body}"
 
 
@@ -24,15 +20,13 @@ def chunk_document(title: str, body: str, threshold: int = CHUNK_SPLIT_THRESHOLD
 
 
 def content_hash(text: str) -> str:
-    """Hash of the embedded text -- title included. Hashing the body alone
-    would miss a title-only edit and leave a stale vector silently."""
+    """Hash of the embedded text, title included: a body-only hash would miss a title-only edit."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _split_on_paragraphs(text: str, threshold: int) -> list[str]:
-    """Greedily packs blank-line-separated paragraphs into chunks of at most
-    `threshold` characters. A single paragraph longer than `threshold` is cut
-    into `threshold`-sized pieces, so every chunk respects the limit."""
+    """Greedily packs blank-line-separated paragraphs into chunks of at most `threshold`
+    characters; an over-long paragraph is cut into `threshold`-sized pieces."""
     chunks: list[str] = []
     current = ""
     for paragraph in (p.strip() for p in text.split("\n\n")):

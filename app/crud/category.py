@@ -1,8 +1,5 @@
-"""Data access for the knowledge taxonomy.
-
-No response is built field by field here. Where a function returns ORM objects,
-the routers' response_model turns them into JSON through the schemas in
-app/schema/category.py (from_attributes).
+"""Data access for the knowledge taxonomy; returns ORM objects that the routers'
+response_model serialises via app/schema/category.py (from_attributes).
 """
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,11 +10,8 @@ import app.schema.category as category_schema
 
 
 async def get_main_categories(db: AsyncSession) -> list[model.MainCategory]:
-    """selectinload is mandatory, not an optimisation.
-
-    See MainCategoryResponse's docstring (app/schema/category.py) for why a
-    lazy load under the async session would turn this into an HTTP 500.
-    """
+    """selectinload is mandatory: a lazy load under the async session becomes a 500
+    (see MainCategoryResponse in app/schema/category.py)."""
     result = await db.execute(
         select(model.MainCategory)
         .options(selectinload(model.MainCategory.subcategories))
@@ -32,20 +26,15 @@ async def create_main_category(
     main_category = model.MainCategory(**body.model_dump())
     db.add(main_category)
     await db.commit()
-    # expire_on_commit=False in db.py keeps the scalar columns readable here
-    # without a refresh -- but .subcategories was never loaded, and
-    # MainCategoryResponse reads it. Without this line the create returns 500.
+    # expire_on_commit=False keeps scalars readable, but .subcategories was never loaded
+    # and MainCategoryResponse reads it; without this refresh the create returns 500.
     await db.refresh(main_category, ["subcategories"])
     return main_category
 
 
 async def count_sub_categories(db: AsyncSession, main_category_id: int) -> int:
-    """How many sub-categories hang off this main category.
-
-    The router refuses the delete with this number rather than letting the
-    database raise, whose foreign-key error would reach the client as an opaque
-    500 -- the same reason the create endpoints pre-check their parents.
-    """
+    """How many sub-categories hang off this main category (so the 409 can say how many,
+    instead of the FK error reaching the client as a 500)."""
     return await db.scalar(
         select(func.count())
         .select_from(model.SubCategory)
@@ -56,11 +45,8 @@ async def count_sub_categories(db: AsyncSession, main_category_id: int) -> int:
 async def delete_main_category(
     db: AsyncSession, main_category: model.MainCategory
 ) -> None:
-    """Delete a main category the caller has already found to be empty.
-
-    Nothing cascades (see model.py), so this is a single DELETE. If a child
-    appeared in the meantime, ON DELETE RESTRICT stops it.
-    """
+    """Delete a main category the caller found empty; a child appearing meanwhile is
+    stopped by ON DELETE RESTRICT."""
     await db.delete(main_category)
     await db.commit()
 
@@ -90,15 +76,8 @@ async def delete_sub_category(
 ) -> int:
     """Delete a sub-category and report how many documents were refiled.
 
-    The refiling happens in the database trigger, not here:
-    it moves the documents as part of the same DELETE, so psql behaves the
-    same way. This only adds the count, taken first, since afterwards the
-    moved documents look identical to ones already in the bucket.
-
-    The count can under-report a document inserted between the count and
-    the DELETE -- refiled but not counted. Locking the sub-category first
-    (SELECT ... FOR UPDATE) would close that gap but is not worth it here:
-    this is a single-user CMS with no concurrent writer.
+    The trigger refiles; the count is taken first (afterwards moved documents look like bucket
+    ones). It can under-report an insert in between; no lock in this single-user CMS.
     """
     refiled = await db.scalar(
         select(func.count())

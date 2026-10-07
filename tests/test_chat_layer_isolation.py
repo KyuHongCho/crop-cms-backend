@@ -1,15 +1,7 @@
-"""Tripwire: app/chat/ must not name the ORM models or the raw tables.
+"""Tripwire: app/chat/ must not name the ORM models or the raw tables (read the published_item_chunks view).
 
-The chat layer reads published content through the `published_item_chunks`
-view. This test is a convention with a tripwire, not enforcement: it greps
-source text, so a name assembled at run time would get past it, as would an
-SQL form the patterns below do not list (FROM ONLY items, a comma join); and
-the database itself still lets the application role read every table.
-
-Word boundaries are required, not a substring search: `"item_chunks" in src`
-also matches the legitimate view name `published_item_chunks` and would fail
-on correct code. `\\bitem_chunks\\b` does not match inside it, because `_` is a
-word character.
+A convention, not enforcement: it greps source text, so a runtime-assembled name or an unlisted SQL
+form (FROM ONLY items, a comma join) gets past it. Word boundaries: item_chunks is inside the view name.
 """
 import pathlib
 import re
@@ -20,9 +12,8 @@ CHAT_DIR = pathlib.Path(__file__).resolve().parent.parent / "app" / "chat"
 
 FORBIDDEN = [re.compile(p, flags) for p, flags in (
     (r"\bItem\b", 0), (r"\bItemChunk\b", 0), (r"\bitem_chunks\b", 0),
-    # The raw documents table carries the drafts the published_item_chunks view
-    # filters out. Not a bare \bitems\b, which dict.items() would trip: only the
-    # SQL positions, and SQLAlchemy Core's table("items", ...).
+    # the raw documents table carries the drafts the view filters out. Not a bare word-boundary
+    # match on items, which dict.items() would trip: only SQL positions and Core's table("items", ...).
     (r"""\b(?:from|join|into|update)\s+(?:"?public"?\.)?["']?items\b""", re.IGNORECASE),
     (r"""\btable\(\s*["']items["']""", 0),
 )]

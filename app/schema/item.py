@@ -1,44 +1,30 @@
 """Request/response shapes for one narrative document and its provenance.
 
-The provenance block is modelled on crop_advisor.claims.Claim in the advisor
-repo, but is not a field-for-field mirror (the advisor's Claim carries an optional
-`licence_note` too, but has no `topic`, `title` or `body`).
-
-Deliberately absent: opt_min / opt_max. Agronomic bands are the advisor's data,
-never CMS prose -- see Item's docstring in model.py. If a figure's only home is
-an item body, it is in the wrong system.
-
-Every length bound mirrors a column in model.py. Without them an over-long value
-reaches PostgreSQL, raises DataError, and FastAPI serves HTTP 500; with them the
-client gets 422 naming the field.
+Provenance mirrors crop_advisor.claims.Claim. No opt_min/opt_max: bands are the advisor's data.
+Length bounds mirror model.py columns, so an over-long value is a 422, not a DataError 500.
 """
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ItemBase(BaseModel):
-    """Fields only -- no cross-field rule.
+    """Fields only, no cross-field rule.
 
-    Create and Response both derive from this rather than Response inheriting
-    Create, so that tightening an inbound rule can never turn a GET of an
-    already-stored row into HTTP 500. That is not hypothetical: the database's
-    CHECK forbids read_directly=true with a via, but permits read_directly=false
-    with via=NULL, so a stricter write rule inherited by the response model
-    would raise ResponseValidationError on rows the database happily holds.
+    Response derives from this, not from Create: the DB CHECK permits read_directly=false
+    with via=NULL, so a stricter inherited write rule would 500 on rows the database holds.
     """
 
     sub_category_id: int
     crop_id: int
-    # Mirrors Item.topic (see its comment in model.py for why retrieval
-    # groups by this field). String(128) on that column.
+    # mirrors Item.topic (String(128)); retrieval groups by it.
     topic: str | None = Field(default=None, max_length=128)
-    title: str = Field(min_length=1, max_length=255)  # Item.title
-    body: str = Field(min_length=1)                   # Text, no max
-    published: bool = False                           # Item.published
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1)  # Text, no max
+    published: bool = False
 
-    # --- provenance, mirroring claims.py's Claim -----------------------------
-    source: str = Field(min_length=1, max_length=255)  # Item.source
-    reference: str = Field(min_length=1)               # Text, no max
-    url: str = Field(min_length=1)                     # Text, no max
+    # --- provenance, mirroring claims.py's Claim ---
+    source: str = Field(min_length=1, max_length=255)
+    reference: str = Field(min_length=1)  # Text, no max
+    url: str = Field(min_length=1)
     read_directly: bool
     via: str | None = None
     condition: str | None = None
@@ -72,13 +58,8 @@ class ItemCreate(ItemBase):
 
     @model_validator(mode="after")
     def _read_directly_excludes_via(self) -> "ItemCreate":
-        """Mirror of Claim.__post_init__ (in the advisor repo) and of the
-        database's read_directly_excludes_via CHECK on Item.__table_args__.
-
-        Without this the row is still rejected -- but by PostgreSQL, as an
-        unhandled IntegrityError, which FastAPI serves as HTTP 500. With it the
-        client gets 422 naming the rule.
-        """
+        """Mirrors Claim.__post_init__ and the read_directly_excludes_via CHECK: gives a 422
+        naming the rule instead of an unhandled IntegrityError (500)."""
         if self.read_directly and (self.via or "").strip():
             raise ValueError(
                 "read_directly=true cannot also name a 'via' source: it would "

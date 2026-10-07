@@ -1,17 +1,7 @@
 """Topic-set retrieval: the no-truncation guarantee.
 
-A common RAG pattern asks for the top-k most similar documents
-(`similarity_search(query, k=N)`). This system does not: `k` will select
-*topics*, and every selected topic returns *complete*.
-
-Why: published sources disagree. Basil's optimal temperature is carried as
-three attributed claims that contradict each other (FAO ECOCROP,
-Chang/Alderson/Wright, Walters & Currey). A `LIMIT 1` or `LIMIT 2` over that set
-silently drops at least one of them, with nothing in the response to say so.
-
-That is why several tests below check that something is *absent* -- no LIMIT
-in the SQL, no `limit` parameter in the API -- rather than that a feature is
-present.
+Published sources disagree (basil's optimal temperature has three contradicting claims), so a
+LIMIT would silently drop one; several tests check something is *absent* (no LIMIT, no `limit`).
 """
 import logging
 import os
@@ -83,12 +73,11 @@ def _document(topic: str = "t", body: str = "b", index: int = 0) -> RetrievedDoc
     )
 
 
-# --- the guarantee itself ----------------------------------------------------
+# --- the guarantee itself ---
 
 
 def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
-    """Twelve is more than any plausible `k` (3 by default). A top-k slice would
-    return 3; this endpoint must return all twelve."""
+    """Twelve is more than any plausible `k` (3 by default); a top-k slice would return 3."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12)
 
@@ -105,9 +94,8 @@ def test_twelve_documents_under_one_topic_all_come_back_with_provenance(client):
 
 
 def test_a_normal_response_always_carries_a_dropped_field(client):
-    """`dropped` is always present, even though a single-topic request never
-    populates it: multi-topic selection can fill it later without changing
-    the response shape (TopicSetResponse in app/schema/retrieval.py)."""
+    """`dropped` is always present, even though a single-topic request never populates it, so
+    multi-topic selection can fill it later without changing the response shape."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 2)
 
@@ -159,13 +147,12 @@ def test_documents_under_another_topic_are_excluded(client):
     assert not [title for title in titles if title.startswith("watering")], titles
 
 
-# --- the absence assertions --------------------------------------------------
+# --- the absence assertions ---
 
 
 def test_the_topic_set_statement_compiles_without_a_limit():
-    """Asserted against the compiled statement, not just the executed one, so
-    it fails at the point a LIMIT is written rather than only when a request
-    happens to run."""
+    """Asserted on the compiled statement, so it fails where a LIMIT is written, not only
+    when a request happens to run."""
     sql = str(
         retrieval.topic_set_statement(crop_id=1, topic="optimal-temperature").compile(
             dialect=postgresql.dialect()
@@ -176,9 +163,8 @@ def test_the_topic_set_statement_compiles_without_a_limit():
 
 
 def test_the_sql_actually_executed_contains_no_limit(client, caplog):
-    """The other half of the pair above: `engine.echo = True` (app/db/db.py's
-    default) logs every statement, so what PostgreSQL was really asked is
-    observable."""
+    """The other half of the pair above: engine.echo=True logs every statement, so what
+    PostgreSQL was really asked is observable."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12)
 
@@ -201,15 +187,14 @@ def test_the_sql_actually_executed_contains_no_limit(client, caplog):
 
 
 def test_the_api_surface_carries_no_limit_parameter(client):
-    """No `limit` parameter: a caller cannot ask for a truncated topic set,
-    even deliberately."""
+    """No `limit` parameter: a caller cannot ask for a truncated topic set, even deliberately."""
     schema = client.get("/openapi.json").json()
     path = schema["paths"]["/retrieval/{crop_slug}/{topic}"]["get"]
     names = [parameter["name"] for parameter in path.get("parameters", [])]
     assert names == ["crop_slug", "topic"], names
 
 
-# --- edges -------------------------------------------------------------------
+# --- edges ---
 
 
 def test_an_unknown_crop_is_404(client):
@@ -222,9 +207,8 @@ def test_an_unknown_crop_is_404(client):
 
 
 def test_a_topic_with_no_published_documents_returns_an_empty_set_not_404(client):
-    """200 with no documents, not 404: `topic` is free text with no registry
-    to check it against, and here the topic does exist -- its documents are
-    all unpublished drafts."""
+    """200 with no documents, not 404: `topic` is free text, and here it exists but all
+    its documents are unpublished drafts."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 3, published=False)
 
@@ -235,27 +219,20 @@ def test_a_topic_with_no_published_documents_returns_an_empty_set_not_404(client
     assert response.json()["documents"] == []
 
 
-# --- Topic selection and the context budget ----------------------------------
-#
-# Three rules: (1) score a topic by its best-matching chunk, (2) keep the top k
-# topics, (3) fit the kept topics into the context budget. Rules 1 and 2
-# depend on embeddings, so only k's value is checked directly. Rule 3 is
-# built and tested below with hand-made TopicCandidates, ready for real
-# scores from Rules 1 and 2 once they exist.
+# --- Topic selection and the context budget ---
+# only k's value is checked directly (Rules 1/2 depend on embeddings); Rule 3 is tested below
+# with hand-made TopicCandidates.
 
 
 def test_k_defaults_to_3():
-    """Rule 2: k is 3 by default. Checked directly, since no code drives it
-    through real topic selection."""
+    """Rule 2: k is 3 by default, checked directly since no code drives it through selection."""
     assert retrieval.TOPIC_SELECTION_K == 3
 
 
 def test_k_is_configurable_via_env_var():
-    """Runs in a subprocess because the value is read at import time.
-
-    Reloading the module in this process (importlib.reload) would create a new
-    TopicBudgetExceeded class that app/router/retrieval.py's `except` no
-    longer matches, breaking later tests with an unrelated 500.
+    """Runs in a subprocess because the value is read at import time: importlib.reload here would
+    create a new TopicBudgetExceeded that app/router/retrieval.py's `except` no longer matches
+    (an unrelated 500 in later tests).
     """
     env = {**os.environ, "TOPIC_SELECTION_K": "5"}
     result = subprocess.run(
@@ -270,8 +247,7 @@ def test_k_is_configurable_via_env_var():
 
 
 def test_context_token_budget_is_configurable_via_env_var():
-    """Subprocess for the same reason as the test above. Also checks the
-    derived CONTEXT_CHAR_BUDGET (tokens x CHARS_PER_TOKEN), so a misspelled env
+    """Subprocess, same reason. Also checks the derived CONTEXT_CHAR_BUDGET, so a misspelled env
     var that silently fell back to the default would fail here."""
     env = {**os.environ, "CONTEXT_TOKEN_BUDGET": "100"}
     result = subprocess.run(
@@ -297,13 +273,11 @@ def test_assemble_within_budget_keeps_everything_when_it_all_fits():
 
 
 def test_assemble_within_budget_keeps_everything_when_combination_exactly_equals_budget():
-    """Boundary: a combination exactly AT the budget fits, so nothing is
-    dropped. Catches a `>` turned into `>=`; no other combination test sits
-    exactly on the budget."""
+    """Boundary: exactly AT the budget fits, nothing dropped. Catches a `>` turned into `>=`;
+    no other combination test sits on the budget."""
     a = retrieval.TopicCandidate(topic="a", score=0.9, documents=[_document(index=0, body="x" * 95)])
     b = retrieval.TopicCandidate(topic="b", score=0.5, documents=[_document(index=0, body="y" * 95)])
-    # Each candidate is len("doc 0") + 95 == 100 characters; the budget below
-    # is set to their combined total (200) exactly.
+    # each candidate is len("doc 0") + 95 == 100 chars; the budget is their total (200).
     assert a.context_chars == 100
     assert b.context_chars == 100
 
@@ -314,12 +288,11 @@ def test_assemble_within_budget_keeps_everything_when_combination_exactly_equals
 
 
 def test_assemble_within_budget_does_not_refuse_a_single_topic_exactly_at_budget():
-    """Boundary: a single topic exactly AT the budget is kept, not refused.
-    Catches a `>` turned into `>=`; the other refusal tests are well over."""
+    """Boundary: a single topic exactly AT the budget is kept, not refused (`>` vs `>=`)."""
     candidate = retrieval.TopicCandidate(
         topic="exact", score=1.0, documents=[_document(index=0, body="z" * 95)],
     )
-    # len("doc 0") + 95 == 100 -- the budget below is set to that exact figure.
+    # len("doc 0") + 95 == 100 -- the budget below is exactly that.
     assert candidate.context_chars == 100
 
     kept, dropped = retrieval.assemble_within_budget([candidate], budget=100)
@@ -329,14 +302,13 @@ def test_assemble_within_budget_does_not_refuse_a_single_topic_exactly_at_budget
 
 
 def test_assemble_within_budget_drops_whole_topics_lowest_score_first():
-    """Over budget: drop whole topics, lowest score first, until the rest
-    fits -- and name what was dropped. Each topic here fits alone; all three
-    together do not."""
+    """Over budget: drop whole topics, lowest score first, until the rest fits, and name the
+    dropped. Each fits alone; all three together do not."""
     high = retrieval.TopicCandidate(topic="high", score=0.9, documents=[_document(body="h" * 40)])
     mid = retrieval.TopicCandidate(topic="mid", score=0.5, documents=[_document(body="m" * 40)])
     low = retrieval.TopicCandidate(topic="low", score=0.1, documents=[_document(body="l" * 40)])
-    # Each is 45 chars (40 + len("doc 0")); the budget is 50. All three = 135,
-    # without "low" = 90, without "mid" too = 45, which fits.
+    # 45 chars each (40 + len("doc 0")), budget 50: all three 135, without "low" 90, without
+    # "mid" too 45, which fits.
 
     kept, dropped = retrieval.assemble_within_budget([mid, low, high], budget=50)
 
@@ -344,13 +316,13 @@ def test_assemble_within_budget_drops_whole_topics_lowest_score_first():
     assert [c.topic for c in dropped] == ["low", "mid"], (
         "dropped topics must be named, lowest-score-first"
     )
-    # Never partially truncated: the survivor's document set is untouched.
+    # never partially truncated: the survivor's document set is untouched.
     assert kept[0].documents == high.documents
 
 
 def test_assemble_within_budget_never_partially_truncates_a_kept_topic():
-    """A kept topic's document set is bit-for-bit what was passed in -- Rule 3
-    forbids dropping some of a topic's documents while keeping the rest."""
+    """A kept topic's document set is bit-for-bit what was passed in: Rule 3 never drops some
+    of a topic's documents while keeping the rest."""
     documents = [_document(index=i, body="z" * 10) for i in range(5)]
     candidate = retrieval.TopicCandidate(topic="t", score=1.0, documents=documents)
 
@@ -362,9 +334,8 @@ def test_assemble_within_budget_never_partially_truncates_a_kept_topic():
 
 
 def test_assemble_within_budget_refuses_when_a_single_topic_alone_exceeds_budget():
-    """Rule 3's refusal step (see assemble_within_budget): refuse only when a
-    single topic alone exceeds the budget -- dropping every other topic could
-    not make it fit."""
+    """Refuse only when a single topic alone exceeds the budget: dropping every other topic
+    could not make it fit."""
     oversized = retrieval.TopicCandidate(
         topic="huge", score=1.0, documents=[_document(index=i, body="x" * 1000) for i in range(5)],
     )
@@ -378,14 +349,12 @@ def test_assemble_within_budget_refuses_when_a_single_topic_alone_exceeds_budget
 
 
 def test_assemble_within_budget_drops_an_oversized_low_scoring_topic_to_save_two_smaller_ones():
-    """Regression guard: an oversized topic that also scores lowest is
-    dropped, letting the two smaller topics through -- checking for an
-    oversized topic must happen after dropping, not before, or the whole
-    request would be refused instead."""
+    """Regression guard: an oversized topic that also scores lowest is dropped, letting the two
+    smaller through; the oversize check must happen after dropping, or the request is refused."""
     good_a = retrieval.TopicCandidate(topic="good-a", score=0.9, documents=[_document(body="a" * 20)])
     good_b = retrieval.TopicCandidate(topic="good-b", score=0.8, documents=[_document(body="b" * 20)])
     huge = retrieval.TopicCandidate(topic="huge", score=0.1, documents=[_document(body="h" * 1000)])
-    # good_a and good_b: 25 chars each (5 + 20). huge: 1005 (5 + 1000). Budget: 100.
+    # good_a/good_b: 25 chars each (5 + 20); huge: 1005 (5 + 1000); budget 100.
     assert good_a.context_chars == 25
     assert good_b.context_chars == 25
     assert huge.context_chars == 1005
@@ -397,16 +366,15 @@ def test_assemble_within_budget_drops_an_oversized_low_scoring_topic_to_save_two
 
 
 def test_assemble_within_budget_drops_the_lower_scored_oversized_topic_then_refuses_the_survivor():
-    """Both topics are too big on their own: drop the lower-scored one first,
-    then refuse, naming the survivor -- never the dropped topic, and never an
-    empty result."""
+    """Both too big alone: drop the lower-scored first, then refuse naming the survivor, never
+    the dropped topic and never an empty result."""
     high = retrieval.TopicCandidate(
         topic="high", score=0.9, documents=[_document(index=i, body="x" * 30) for i in range(5)],
     )
     low = retrieval.TopicCandidate(
         topic="low", score=0.5, documents=[_document(index=i, body="y" * 40) for i in range(5)],
     )
-    # high: 5 x (5 + 30) = 175 chars; low: 5 x (5 + 40) = 225. Budget: 100.
+    # high: 5 x (5 + 30) = 175 chars; low: 5 x (5 + 40) = 225; budget 100.
     assert high.context_chars == 175
     assert low.context_chars == 225
 
@@ -418,9 +386,8 @@ def test_assemble_within_budget_drops_the_lower_scored_oversized_topic_then_refu
 
 
 def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
-    """Over HTTP: a topic too large for the default budget (32,000 chars) gets
-    a 413 naming the topic and its document count. Twelve 3,000-char documents
-    exceed the default, so no config override is needed."""
+    """Over HTTP: a topic over the default budget (32,000 chars) gets a 413 naming it and its
+    document count; twelve 3,000-char documents exceed it, so no override is needed."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12, body="x" * 3000)
 
@@ -433,17 +400,13 @@ def test_an_oversized_topic_is_refused_with_413_naming_it_and_its_count(client):
     assert detail["reason"] == "topic_alone_exceeds_context_budget"
 
 
-# --- topic casing/whitespace normalisation -----------------------------------
-#
-# Item.topic is normalised by a SQLAlchemy @validates hook on the model
-# (Item._normalize_topic), not a Pydantic validator: scripts/seed.py builds Item
-# objects directly and never goes through Pydantic. The hook covers both the
-# API and the seed script.
+# --- topic casing/whitespace normalisation ---
+# Item.topic is normalised by a @validates hook (Item._normalize_topic), not a Pydantic validator:
+# scripts/seed.py builds Items directly, so the hook covers both the API and the seed.
 
 
 def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(editor_client):
-    """Two documents posted via the real POST /items endpoint with a
-    casing/whitespace-variant topic must come back together as one topic
+    """Two documents posted with a casing/whitespace-variant topic must come back as one topic
     set, not two silently disjoint ones."""
     crop_id = _make_crop("basil")
 
@@ -475,8 +438,7 @@ def test_casing_variant_topics_are_unified_over_the_real_http_endpoint(editor_cl
 
 
 def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(sync_db_session):
-    """The seed script's write path: Item objects built directly with the ORM,
-    bypassing HTTP and Pydantic. It must normalise topics too."""
+    """The seed script's write path (ORM objects built directly, no HTTP or Pydantic) must normalise too."""
     crop_id = _make_crop("basil")
 
     def _write(topic: str, title: str) -> None:
@@ -503,10 +465,8 @@ def test_casing_variant_topics_are_unified_via_the_seed_script_write_pattern(syn
 
 
 def test_normalization_does_not_heal_a_row_written_without_the_orm(client):
-    """Known limitation: rows written without the ORM are not normalised after
-    the fact. A Core insert (used here) skips @validates, so this row keeps its
-    original casing. Existing data would need a one-time backfill; none is
-    included because the dev database holds no un-normalised topics."""
+    """Known limitation: a Core insert skips @validates, so this row keeps its casing. Existing
+    data would need a one-time backfill; none is included (the dev database has none)."""
     crop_id = _make_crop("basil")
     with sync_engine.begin() as connection:
         connection.execute(

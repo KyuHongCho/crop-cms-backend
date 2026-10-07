@@ -9,8 +9,7 @@ import app.model.model as model
 from app.auth.auth import decode_access_token
 from app.db.db import get_db
 
-# auto_error=False so a missing header is the same 401 as a bad token, rather
-# than whatever status the framework picks for it.
+# auto_error=False so a missing header is the same 401 as a bad token.
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -29,9 +28,8 @@ async def get_current_member(
     if member_id is None:
         raise unauthorised
     member = await member_crud.get_member(db, member_id)
-    # is_active is read per request, like the role: a deactivated member's
-    # existing token is refused on the next call and works again on reactivation.
-    # Every guard and route below sits on this dependency, so none can forget it.
+    # is_active is read per request, like the role: a deactivated member's token is refused
+    # on the next call and works again on reactivation. Every guard sits on this dependency.
     if member is None or not member.is_active:
         raise unauthorised
     return member
@@ -40,10 +38,8 @@ async def get_current_member(
 def require_roles(*allowed: str):
     """A dependency that lets only members holding one of `allowed` roles through.
 
-    401 when there is no valid token (from get_current_member), 403 when the
-    member is known but their role is not enough. The role is read from the
-    member row on every request, never from the token, so a demotion takes
-    effect on the next request instead of when the token expires.
+    401 without a valid token, 403 for an insufficient role. The role is read from the member
+    row on every request, never the token, so a demotion bites on the next request.
     """
     unknown = set(allowed) - set(model.MEMBER_ROLES)
     if unknown:
@@ -54,12 +50,12 @@ def require_roles(*allowed: str):
             raise HTTPException(status_code=403, detail="Not enough permissions")
         return member
 
-    # Read by the route-guard test to see which roles each route admits.
+    # read by the route-guard test to see which roles each route admits.
     guard.allowed_roles = tuple(allowed)
     return guard
 
 
-# Content (add and delete) is for editors and admins.
+# content (add and delete) is for editors and admins.
 require_editor = require_roles("editor", "admin")
-# Defined ahead of the first admin-only route (member management).
+# ahead of the first admin-only route (member management).
 require_admin = require_roles("admin")

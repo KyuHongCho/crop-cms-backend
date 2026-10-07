@@ -1,12 +1,7 @@
 """Request/response shapes for the knowledge taxonomy.
 
-Field names match app/model/model.py exactly, so crud can build a model straight
-from a request body -- `model.MainCategory(**body.model_dump())` -- with no
-renaming in between.
-
-Length limits copy the column sizes, so an over-long value is rejected with a
-422 naming the field instead of failing inside PostgreSQL as a 500. Response
-models have no limits: their values already came out of those columns.
+Field names match model.py so crud can do `model.X(**body.model_dump())`. Length limits copy
+the column sizes: 422 naming the field instead of a PostgreSQL 500 (responses need none).
 """
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,11 +22,10 @@ class MainCategoryCreate(BaseModel):
         }
     )
 
-    # Required: the column is NOT NULL with no default, so a missing slug is a
-    # 422 here rather than a database error at commit().
+    # required: the column is NOT NULL with no default, so a missing slug is a 422, not a commit() error.
     slug: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
-    position: int = 0  # mirrors MainCategory.position server_default=text("0")
+    position: int = 0  # mirrors server_default=text("0")
 
 
 class SubCategoryCreate(BaseModel):
@@ -47,8 +41,7 @@ class SubCategoryCreate(BaseModel):
     )
 
     main_category_id: int
-    # Unique per parent, not globally: UniqueConstraint(main_category_id, slug)
-    # on SubCategory.__table_args__.
+    # unique per parent, not globally (UniqueConstraint on SubCategory).
     slug: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     position: int = 0
@@ -72,8 +65,7 @@ class SubCategoryDeleteResponse(BaseModel):
     """
 
     documents_refiled: int
-    # Returned so the caller can find the moved documents without knowing the
-    # bucket's id in advance.
+    # so the caller can find the moved documents without knowing the bucket id.
     refiled_to: int
 
 
@@ -91,6 +83,5 @@ class MainCategoryResponse(BaseModel):
     slug: str
     name: str
     position: int
-    # `= []` is safe here: pydantic deep-copies field defaults, so two
-    # instances do not share one list.
+    # `= []` is safe: pydantic deep-copies field defaults.
     subcategories: list[SubCategoryResponse] = []

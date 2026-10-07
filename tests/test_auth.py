@@ -1,9 +1,7 @@
 """Members-only auth (signup/login/me) and the per-member token budget.
 
-No network and no real SECRET_KEY: the `secret_key` fixture generates one.
-The budget is exercised through a throwaway app whose route calls a stub
-"model"; the stub records its calls so
-"429 and no model call" is asserted on the stub, not just the status code.
+No network or real SECRET_KEY (the `secret_key` fixture generates one). The budget runs through a
+throwaway app calling a stub model, so "429 and no model call" is asserted on the stub's call record.
 """
 import secrets
 
@@ -96,9 +94,8 @@ def test_existing_endpoints_work_without_a_token(client, path):
 
 
 def test_only_the_expected_routes_require_a_token():
-    # Every route that declares the bearer scheme shows up in the OpenAPI schema
-    # with a `security` entry, so this pins which routes are guarded -- the CMS
-    # writes included -- and fails when one is added or removed.
+    # every route declaring the bearer scheme has a `security` entry in OpenAPI, so this pins which
+    # routes are guarded (CMS writes included) and fails when one is added or removed.
     from app.main import app
 
     guarded = sorted(
@@ -170,8 +167,8 @@ class StubModel:
 
 @pytest.fixture
 def budget_app():
-    """(client, stub): a throwaway app with one route shaped like the future
-    POST /chat -- require_budget, then the model, then record_usage."""
+    """(client, stub): a throwaway app with one route shaped like the future POST /chat
+    (require_budget, model, record_usage)."""
     stub = StubModel()
     app = FastAPI()
 
@@ -276,8 +273,7 @@ def test_require_budget_returns_the_member_after_the_reset(client):
 
 
 def test_record_usage_is_an_atomic_increment(budget_app, member):
-    # Two requests' worth of usage added back to back must both land: the
-    # UPDATE adds to the stored value, it does not write a Python-side sum.
+    # two requests' usage added back to back must both land: the UPDATE adds, not a Python-side sum.
     client, stub = budget_app
     member_id, headers = member
     stub.tokens = 7
@@ -317,8 +313,8 @@ def test_empty_secret_key_fails_loudly_too(monkeypatch):
 
 
 def test_unknown_email_login_still_runs_a_password_verification(client, monkeypatch):
-    # Timing side channel: skipping argon2 for an unknown email makes it answer
-    # ~10x faster than a wrong password, revealing which emails are registered.
+    # timing side channel: skipping argon2 for an unknown email answers ~10x faster than a wrong
+    # password, revealing which emails are registered.
     import app.router.member as member_router
 
     seen = []

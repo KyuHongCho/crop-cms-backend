@@ -1,9 +1,7 @@
 """Signup needs an invite: POST /members/signup claims one atomically.
 
-Tests whose subject is signup itself post to the route directly; every other test
-that needs a member uses signup_member, which stores an invite first. The
-concurrency tests call the handler / the crud function in one event loop, not
-the ASGI stack (concurrent TestClients in threads hang intermittently).
+Tests of signup itself post directly; others use signup_member. Concurrency tests call the handler
+or crud function in one event loop (concurrent TestClients in threads hang intermittently).
 """
 import asyncio
 import json
@@ -230,9 +228,8 @@ def test_a_failing_create_member_leaves_the_invite_unused(client, monkeypatch):
 # --- concurrency -------------------------------------------------------------
 
 def test_two_connections_race_for_one_invite_and_one_wins():
-    """claim_invite on two connections: the second waits on the first's row lock,
-    and once the first commits it re-reads the row, finds it used, and gets
-    nothing. (Without `used_at IS NULL` in the UPDATE it would claim it again.)"""
+    """claim_invite on two connections: the second waits on the first's row lock, then finds the
+    row used and gets nothing (without `used_at IS NULL` in the UPDATE it would claim it again)."""
     code = make_invite()
     engine = create_async_engine(app_db.ASYNC_DB_URL)
 
@@ -252,10 +249,8 @@ def test_two_connections_race_for_one_invite_and_one_wins():
 
 
 def test_twenty_concurrent_signups_do_not_exhaust_the_pool(monkeypatch):
-    """Each valid signup holds its invite's row lock and a pooled connection across
-    hashing. 20 at once against the app's default pool (5 + 10) must all succeed:
-    the ones beyond the pool wait their turn, none times out. Calls the handler
-    function, not the ASGI stack."""
+    """Each valid signup holds its invite's row lock and a pooled connection across hashing. 20 at
+    once against the default pool (5 + 10) must all succeed: the surplus waits, none times out."""
     running = peak = 0
 
     async def slow_hash(plain):

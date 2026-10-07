@@ -41,10 +41,8 @@ class LazyEmbedder:
 def get_chat_embedder() -> Embedder:
     """FastAPI dependency; tests override it with the fake embedder.
 
-    Cheap and cannot fail, like get_chat_llm: the OpenAI client is built on the first
-    embed(), after the budget check, so a missing OPENAI_API_KEY is LLMUnavailable (503)
-    (dispatch wraps every embed failure), and a bad body (422) or an over-budget member
-    (429) never reaches it."""
+    Cheap and cannot fail: the client is built on the first embed(), after the budget check, so
+    a missing key is a 503 (dispatch wraps embed failures) and 422/429 never reach it."""
     return LazyEmbedder()
 
 
@@ -60,7 +58,7 @@ async def post_chat(
     try:
         return await dispatch.answer(db, current_member.id, body.question, llm, embedder)
     except TopicBudgetExceeded as exc:
-        # Same refusal, same shape, as GET /retrieval: a topic alone is too big.
+        # same refusal and shape as GET /retrieval.
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=retrieval_schema.BudgetRefusal(
@@ -73,8 +71,8 @@ async def post_chat(
         ) from exc
     except LLMUnavailable as exc:
         logger.warning("chat model unavailable: %s", exc.__cause__, exc_info=exc)
-        # Missing key, usage limit, rate limit, outage: retrying does not help, and the
-        # cause is logged here and never sent to the client.
+        # missing key, usage/rate limit, outage: retrying does not help; the cause is logged,
+        # never sent to the client.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The answering service is unavailable. Please try again later.",

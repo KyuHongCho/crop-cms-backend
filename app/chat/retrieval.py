@@ -1,24 +1,7 @@
 """Vector topic selection: a question in, whole topics out.
 
-Four rules, in order. Each works on **topics**; none ever filters or ranks the
-documents inside one, because that is the winner-picking app/model/model.py
-forbids for sources that disagree.
-
-    Rule 0 -- abstain when no topic clears the relevance floor.
-    Rule 1 -- score a topic by its best-matching chunk (MAX, not mean).
-    Rule 2 -- keep the top k topics.
-    Rule 3 -- fit the kept topics into the context budget
-              (assemble_within_budget, reused unchanged).
-
-Topics are *scored* from the `published_item_chunks` view. Each selected
-topic's documents are then fetched by app/crud/retrieval.py's
-`topic_set_statement` -- the same no-LIMIT query GET /retrieval uses -- because
-the view carries no title or provenance, and this package may not name the
-raw tables (tests/test_chat_layer_isolation.py). Importing it keeps one
-definition of "a topic's complete published document set".
-
-Functions take a synchronous Session. An async caller can reach them through
-`AsyncSession.run_sync`.
+Rules 0-3 work on topics, never ranking documents inside one. Scored from the `published_item_chunks`
+view; documents come via topic_set_statement (the view lacks provenance; no raw tables here).
 """
 import os
 
@@ -34,20 +17,12 @@ from app.crud.retrieval import (
     topic_set_statement,
 )
 
-# Rule 0's floor, on raw cosine similarity (range -1..1).
-#
-# Ships dark. -1.0 is the one value that is a true no-op: cosine similarity
-# cannot go below it. A floor of 0.0 would already drop a topic whose best
-# chunk is slightly anti-correlated with the question. The real value cannot be
-# chosen before real embeddings exist -- scripts/calibrate_floor.py measures
-# it -- and the course's 0.4 does not port: it sits on LangChain's normalised
-# [0,1] relevance scale, not raw cosine.
-#
-# Override with the TOPIC_SCORE_FLOOR env var (read at import time).
+# Rule 0's floor on raw cosine similarity. Ships dark at -1.0, the only true no-op (0.0 would
+# drop anti-correlated topics); scripts/calibrate_floor.py measures the real value (the course's
+# 0.4 is on a normalised scale). Override with TOPIC_SCORE_FLOOR (read at import).
 TOPIC_SCORE_FLOOR = float(os.environ.get("TOPIC_SCORE_FLOOR", "-1.0"))
 
-# Only the columns this module reads; not a mapped class. Read through
-# SQLAlchemy Core so no model is named here.
+# only the columns read here, via Core so no model is named.
 _view = table(
     "published_item_chunks",
     column("source_id"),
@@ -68,15 +43,10 @@ def score_topics(
     k: int = TOPIC_SELECTION_K,
     crop_id: int | None = None,
 ) -> list[tuple[int, str, float]]:
-    """Rule 1 and the SQL half of Rule 2: (crop_id, topic, score) for the k
-    best topics, best first.
+    """Rule 1 and the SQL half of Rule 2: (crop_id, topic, score) for the k best topics.
 
-    A topic's score is the MAX cosine similarity over its chunks. A mean would
-    penalise topics holding many disagreeing sources -- perverse in a system
-    built to surface them. LIMIT applies to topics, never to documents.
-    Grouped by (crop_id, topic): a topic name is only unique within a crop.
-    With `crop_id`, only that crop's topics compete; without it every crop does,
-    so a question about one crop can select another's topic.
+    Score is MAX similarity over chunks (a mean would penalise topics with many disagreeing
+    sources). LIMIT applies to topics, never documents. Without `crop_id`, every crop competes.
     """
     similarity = 1 - _view.c.embedding.cosine_distance(query_vector)
     score = func.max(similarity).label("score")
@@ -94,8 +64,7 @@ def score_topics(
 def fetch_candidates(
     session: Session, scored: list[tuple[int, str, float]]
 ) -> list[TopicCandidate]:
-    """Each topic's complete published document set -- a second query per
-    topic, no LIMIT."""
+    """Each topic's complete published document set; a second query per topic, no LIMIT."""
     return [
         TopicCandidate(
             topic=topic,
@@ -112,7 +81,7 @@ def select_topics(
     k: int = TOPIC_SELECTION_K,
     floor: float = TOPIC_SCORE_FLOOR,
 ) -> list[TopicCandidate]:
-    relevant = [c for c in candidates if c.score >= floor]  # Rule 0: whole topics only
+    relevant = [c for c in candidates if c.score >= floor]  # Rule 0
     if not relevant:
         raise NoRelevantTopics(
             f"no topic scored at or above the floor {floor} "
@@ -130,10 +99,7 @@ def retrieve_topics(
     floor: float = TOPIC_SCORE_FLOOR,
     crop_id: int | None = None,
 ) -> tuple[list[TopicCandidate], list[TopicCandidate]]:
-    """Rules 0-3 end to end. Returns (kept, dropped_for_budget).
-
-    Raises NoRelevantTopics (Rule 0) or TopicBudgetExceeded (Rule 3).
-    """
+    """Rules 0-3 end to end: (kept, dropped_for_budget). Raises NoRelevantTopics or TopicBudgetExceeded."""
     (query_vector,) = embedder.embed([question])
     candidates = fetch_candidates(session, score_topics(session, query_vector, k, crop_id))
     return assemble_within_budget(select_topics(candidates, k, floor))

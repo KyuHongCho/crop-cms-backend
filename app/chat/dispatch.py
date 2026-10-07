@@ -1,13 +1,7 @@
 """Run one chat question: classify, select topics, generate.
 
-Citations are keys, not inline provenance: the prompt carries "[S1] title +
-condition + body", the server holds {"S1": document} and renders provenance
-into the response from the retrieved set. That server-rendered `documents` list
-is the authoritative provenance. The model's prose is returned as written and
-its keys are not validated, so an invented "[S#]" in the answer text is NOT
-prevented; a warning is logged when the answer cites a key that was not sent.
-
-Token usage is recorded right after each model call (reported counts).
+Provenance is server-rendered from the retrieved set; the model's prose is returned as written,
+so an invented "[S#]" is NOT prevented (a warning is logged for unsent keys).
 """
 import logging
 import re
@@ -30,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _unknown_keys(text: str, sources: dict) -> list[str]:
-    """Source keys the answer cites that were never sent, e.g. [S4] with three sources or [S1, S4]."""
+    """Source keys the answer cites that were never sent, e.g. [S4] with three sources."""
     cited = {key for group in re.findall(r"\[([^\]]*)\]", text) for key in re.findall(r"S\d+", group)}
     return sorted(cited - sources.keys())
 
@@ -49,9 +43,8 @@ TRUNCATION_NOTICE = "[Answer cut off at the length limit; it may be incomplete.]
 def build_prompt(
     question: str, kept: list[TopicCandidate], crop_slugs: dict[int, str] | None = None
 ) -> tuple[str, dict[str, CitedDocument]]:
-    """`crop_slugs` is given only when the retrieval was not crop-scoped; sources
-    are then labelled and grouped by crop (kept is highest score first, so the
-    groups follow the best-scoring topic of each crop)."""
+    """`crop_slugs` is given only when retrieval was not crop-scoped; sources are then labelled
+    and grouped by crop, following each crop's best-scoring topic."""
     sources: dict[str, CitedDocument] = {}
     blocks = []
     if crop_slugs is not None:
@@ -76,17 +69,15 @@ async def answer(
 ) -> ChatResponse:
     classification = await run_in_threadpool(classify, question, llm.classifier)
     await record_usage(db, member_id, classification.tokens)
-    if classification.intent == OUT_OF_SCOPE:  # scope check: before retrieval, nothing else runs
+    if classification.intent == OUT_OF_SCOPE:  # before retrieval; nothing else runs
         return ChatResponse(answer=DECLINE_MESSAGE, abstained=Abstention(reason=OUT_OF_SCOPE))
 
     crop_id = None
     if classification.crop_slug:
-        # An unknown slug leaves retrieval unscoped; the response then names each
-        # topic's crop, exactly as when no crop was given.
+        # an unknown slug leaves retrieval unscoped; the response then names each topic's crop.
         crop_id = await retrieval_crud.get_crop_id_by_slug(db, classification.crop_slug)
 
-    # Rules 0-3 of app/chat/retrieval.py's retrieve_topics, with the embedding
-    # call moved off the event loop; the selection itself is unchanged.
+    # Rules 0-3 of retrieve_topics, with the embedding call moved off the event loop.
     try:
         (query_vector,) = await run_in_threadpool(embedder.embed, [question])
     except Exception as exc:  # missing key, usage limit, outage: all 503, cause logged by the router
@@ -98,11 +89,11 @@ async def answer(
     )
     try:
         selected = select_topics(candidates)
-    except NoRelevantTopics:  # relevance check: no generation call
+    except NoRelevantTopics:  # no generation call
         return ChatResponse(answer=NO_TOPIC_MESSAGE, abstained=Abstention(reason="no_relevant_topics"))
     kept, dropped = assemble_within_budget(selected)
 
-    # Crop labels only when retrieval was not crop-scoped; slugs resolved once.
+    # crop labels only when retrieval was not crop-scoped.
     crop_slugs = None
     if crop_id is None:
         crop_slugs = await retrieval_crud.get_crop_slugs(db, {c.crop_id for c in selected})
@@ -110,7 +101,7 @@ async def answer(
     prompt, sources = build_prompt(question, kept, crop_slugs)
     result = await run_in_threadpool(llm.generator.generate, GENERATOR_SYSTEM_PROMPT, prompt)
     await record_usage(db, member_id, result.tokens)
-    if unknown := _unknown_keys(result.text, sources):  # logged, not refused: the prose is returned as written
+    if unknown := _unknown_keys(result.text, sources):  # logged, not refused
         logger.warning("answer cites keys that were not sent: %s (sent: %s)", unknown, list(sources))
 
     return ChatResponse(

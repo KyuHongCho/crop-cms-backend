@@ -1,10 +1,7 @@
 """Member management for admins: DELETE /members/{id} (hard delete, audited).
 
-Covers who may delete, the 422/403/404 order, the self and last-admin 409 rules,
-the effects of a delete (token, login, listing), the audit row that survives the
-member, its rollback with the delete, and the overlapping-request tests (two
-admins deleting each other, a delete against a PATCH, a short stress run). The
-helpers are the shared ones in tests/conftest.py.
+Covers access, the 422/403/404 order, the self and last-admin 409 rules, effects of a delete, the
+audit row (which survives the member and rolls back with the delete) and overlapping requests.
 """
 import asyncio
 import json
@@ -40,9 +37,8 @@ def _session(engine):
 
 
 def _call_delete(actor_id, target_id):
-    """delete_member called directly with an actor loaded from the database now, to
-    model a request whose actor was deactivated or demoted after the guard passed.
-    Returns (status, the target's row, the audit rows)."""
+    """delete_member called directly with an actor loaded from the database now, to model an actor
+    deactivated or demoted after the guard passed. Returns (status, target row, audit rows)."""
     engine = create_async_engine(app_db.ASYNC_DB_URL)
 
     async def scenario():
@@ -141,8 +137,7 @@ def test_a_second_delete_is_404_and_the_id_is_not_reused(client_with_role):
     assert admin.delete(f"/members/{target}").status_code == 204
     assert admin.delete(f"/members/{target}").status_code == 404
     assert len(audit_rows()) == 1
-    # The identity sequence is not reset: the next member gets a new id. (Only the
-    # test database restarts identities, between tests; production never does.)
+    # the identity sequence is not reset (only the test database restarts identities between tests).
     assert add_member() > target
 
 
@@ -347,9 +342,8 @@ def test_if_the_database_rejects_the_audit_row_the_member_is_not_deleted(client_
 # --- overlapping requests ----------------------------------------------------
 
 def test_two_admins_deleting_each_other_through_the_handler_leave_one_admin(monkeypatch):
-    """The first request is held after its audit helper (delete flushed, locks held,
-    not committed); the second blocks on the lock, then finds its actor gone from
-    the table: a stale actor, 403. One admin is left and one audit row written."""
+    """The first request is held after its audit helper (delete flushed, locks held); the second
+    blocks, then finds its actor gone: a stale actor, 403. One admin left, one audit row."""
     a, b = two_admins()
     engine = create_async_engine(app_db.ASYNC_DB_URL)
     real_record = audit_crud.record_member_delete
@@ -440,12 +434,9 @@ def test_a_delete_and_a_concurrent_patch_of_the_same_member_are_serialised(monke
 
 
 def test_many_concurrent_deletes_and_patches_through_the_handlers_never_deadlock():
-    """8 workers send random deletes and role, is_active and budget patches among
-    4 admins (the actors, never deleted) and 8 members straight to the handlers on
-    their own sessions, on one event loop. Refusals (HTTPException) are fine; any
-    other error (a deadlock victim would surface as one) is not. The last active
-    admin must survive, and real work must have happened: at least one delete (204)
-    and one patch (200) went through, so a run drained by refusals cannot pass."""
+    """8 workers send random deletes and patches among 4 admins (never deleted) and 8 members straight
+    to the handlers. Refusals are fine; any other error (a deadlock victim) is not. The last active
+    admin must survive and at least one delete and one patch must succeed, so refusals cannot pass."""
     ids = [add_member("admin") for _ in range(4)] + [add_member("member") for _ in range(8)]
     engine = create_async_engine(app_db.ASYNC_DB_URL, pool_size=8)
 

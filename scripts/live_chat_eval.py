@@ -2,29 +2,10 @@
 
     docker compose exec -T cms python -m scripts.live_chat_eval --db-host db --db-name cms [--repeats 3]
 
-Runs every question in tests/routing_questions.py through the app's own path
-(app.chat.dispatch.answer, the real classifier and generator, real embeddings) against the
-database you name. `--db-host` and `--db-name` are both required: the container's default
-environment is the dev database, and this script will not pick one for you. It needs
-ANTHROPIC_API_KEY and OPENAI_API_KEY (the embedder) in the environment, and refuses to run
-without them. Nothing is written to the database: usage is not recorded against any member.
-
-Each question is asked `--repeats` times (default 3). It reports, per question, routing
-accuracy (the share of repeats routed as labelled: intent, plus crop_slug for a lookup), and
-the overall accuracy and flip rate (the share of questions whose repeats did not all route
-the same way). Accuracy is a rate, not an assertion: temperature cannot be set here (the pinned SDK has no such
-argument), so identical input can route and word differently between runs. A repeat refused for
-the context budget still has its routing recorded and is counted separately.
-
-Tokens are the provider-reported input + output per call (classifier, generator); a declined
-question has no generator call. It prints per-call summaries, the per-question range and
-median, the total and mean, and the questions a member could ask per day at --budget
-(default 20000 = tokens_budget_daily). Use the LOOKUP-ONLY figure for the budget decision:
-declined questions cost one cheap call, so the all-questions median flatters the budget.
-
-If a call fails (provider error, embedder error) the run stops, names the cause, and still
-prints the report for what completed. Output goes to stdout, and to --out PATH if given
-(never overwritten). Do not commit it as a fixture.
+--db-host/--db-name are required (the default env is the dev DB); needs both API keys; writes nothing.
+Accuracy is a rate: temperature cannot be set, so repeats can differ. For the budget use the LOOKUP-ONLY
+figure: declined questions cost one cheap call and flatter the all-questions median.
+--out is never overwritten; do not commit its output as a fixture.
 """
 import argparse
 import asyncio
@@ -39,7 +20,7 @@ DEFAULT_BUDGET = 20000
 
 
 class Call(NamedTuple):
-    routed: tuple  # (intent, crop_slug or None), as the classifier routed it, even when refused
+    routed: tuple  # (intent, crop_slug or None), even when refused
     refused: bool  # the context budget refused the request after routing
     classifier_tokens: int
     generator_tokens: int | None  # None: no generator call
@@ -50,7 +31,7 @@ class Call(NamedTuple):
         return self.classifier_tokens + (self.generator_tokens or 0)
 
 
-# --- the summary maths: pure, so tests/test_live_chat_eval.py can pin it ---------
+# --- the summary maths: pure, so tests/test_live_chat_eval.py can pin it ---
 
 def want(question) -> tuple:
     return (question.intent, question.crop_slug if question.intent == DOCUMENT_LOOKUP else None)
@@ -103,7 +84,7 @@ def describe(exc: BaseException) -> str:
 
 async def run_questions(questions, repeats: int, ask, emit=lambda line: None):
     """Asks each question `repeats` times via `ask(question) -> Call`. A failing call stops the run;
-    what completed is returned with the reason: (rows, stop_reason or None)."""
+    returns (rows, stop_reason or None)."""
     rows = []
     for q in questions:
         calls = []
@@ -169,7 +150,7 @@ def report(rows, stop, repeats: int, budget: int, show_answers: bool, emit) -> N
              "(If this is a usage or spend limit, retrying will not clear it; a 401 means a bad key.)")
 
 
-# --- wiring ---------------------------------------------------------------------
+# --- wiring ---
 
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -222,7 +203,7 @@ async def run(args, emit) -> int:
         sys.exit("DB_PASSWORD is not set; refusing to run.")
     if os.environ.get("EMBEDDER", "openai") != "openai":
         sys.exit("EMBEDDER must be openai: fake vectors carry no meaning, so retrieval would be arbitrary.")
-    # Imported only now: app.db.db reads DB_HOST/DB_NAME at import time.
+    # imported only now: app.db.db reads DB_HOST/DB_NAME at import time.
     from sqlalchemy import text
 
     import app.chat.dispatch as dispatch

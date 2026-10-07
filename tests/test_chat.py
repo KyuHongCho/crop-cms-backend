@@ -1,10 +1,7 @@
 """POST /chat, happy path: classify -> select topics -> generate, with stubs.
 
-No network and no API key: the classifier and generator are stubs that record
-what they were given, the embedder is a fixed-vector fake, and the seeded
-corpus (scripts/seed.py) is re-embedded with hand-set vectors so retrieval is
-deterministic. A stub can prove what the prompt carries; it cannot prove the
-model obeys the prompt.
+No network or key: stubs record what they were given, the embedder is a fixed-vector fake and
+the seeded corpus is re-embedded with hand-set vectors. A stub proves the prompt, not that the model obeys it.
 """
 import asyncio
 import logging
@@ -531,8 +528,7 @@ def test_an_embedder_that_raises_is_503_and_the_classifier_call_stays_charged(cl
     response = ask(client, token)
     assert response.status_code == 503, response.text
     assert "sk-secret" not in response.text
-    # The classifier runs before embed, so its tokens are charged with no answer
-    # (charging the classifier call with no answer is deliberate).
+    # the classifier runs before embed, so its tokens are charged even with no answer (deliberate).
     assert sql("SELECT tokens_used_today FROM members").scalar_one() == CLASSIFIER_TOKENS
 
 

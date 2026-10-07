@@ -1,9 +1,7 @@
 """POST /chat request and response shapes.
 
-HTTP 200 throughout, with `abstained` as the discriminator: a question that
-retrieval cannot answer is not an HTTP error (the same convention as an empty
-topic set in GET /retrieval). The refusals that are errors are the context
-budget (413) and an unusable model service (503).
+HTTP 200 with `abstained` as discriminator: an unanswerable question is not an error. The
+errors are the context budget (413) and an unusable model service (503).
 """
 from pydantic import BaseModel, Field, field_validator
 
@@ -26,26 +24,24 @@ class CitedDocument(RetrievedDocument):
     """A RetrievedDocument plus the key the answer cites it by ("S1")."""
 
     key: str
-    crop_slug: str | None = None  # set only when the question did not fix the crop
+    crop_slug: str | None = None  # only when the question did not fix the crop
 
 
 class DroppedChatTopic(DroppedTopic):
-    crop_slug: str | None = None  # set only when the question did not fix the crop
+    crop_slug: str | None = None  # only when the question did not fix the crop
 
 
 class Abstention(BaseModel):
-    reason: str  # "out_of_scope" (declined, no retrieval) or "no_relevant_topics"
+    reason: str  # "out_of_scope" (no retrieval) or "no_relevant_topics"
 
 
 class ChatResponse(BaseModel):
     answer: str
-    # Provenance is rendered from the retrieved set, never from model output:
-    # `reference`, `url` and `licence_note` are the stored values, verbatim.
+    # provenance comes from the retrieved set, never model output (stored values, verbatim).
     documents: list[CitedDocument] = []
     topics_used: list[str] = []
-    # Parallel to topics_used (same order and same length when unscoped): the crop of each topic. Empty when
-    # the question fixed the crop, so a shared topic name stays distinguishable.
+    # parallel to topics_used: each topic's crop; empty when the question fixed the crop.
     topics_used_crops: list[str] = []
     dropped: list[DroppedChatTopic] = []
-    abstained: Abstention | None = None  # None on a normal answer
-    truncated: bool = False  # the answer was cut at the generator's max_tokens, so it may be incomplete
+    abstained: Abstention | None = None
+    truncated: bool = False  # cut at the generator's max_tokens, so possibly incomplete

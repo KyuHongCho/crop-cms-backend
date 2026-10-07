@@ -1,8 +1,7 @@
 """HTTP-level smoke test for the item endpoints.
 
-There is deliberately no POST /crops (see app/schema/crop.py) -- crops are
-seeded from the advisor's ECOCROP data, not authored via the API. So the
-fixture crop here is inserted directly, not over HTTP.
+There is deliberately no POST /crops (crops are seeded from the advisor's data), so the fixture
+crop is inserted directly, not over HTTP.
 """
 from app.db.migrate_db import engine as sync_engine
 from app.model.model import UNCATEGORISED_SUB_CATEGORY_ID, Crop
