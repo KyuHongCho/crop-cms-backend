@@ -226,7 +226,10 @@ asserts `DB_HOST=db-test` / `DB_NAME=cms_test` before anything else runs, and
 content table between tests — omitting the `-e` overrides fails loudly rather than quietly
 touching the dev database. That fixture also reseeds the "Uncategorised" bucket after every
 TRUNCATE (`RESTART IDENTITY CASCADE` would otherwise remove it, breaking every test after the
-first one that touches it).
+first one that touches it). `alembic downgrade` has its own guard in `alembic/env.py`: it refuses any
+database not named `*_test` unless `ALEMBIC_ALLOW_DESTRUCTIVE=1` is set. `alembic upgrade` and the
+`scripts/` commands have no guard, and the `cms` container's default environment is the dev database,
+so check `DB_HOST` and `DB_NAME` first.
 
 Dev tooling: `pytest==9.1.1`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
 `TestClient` raises `RuntimeError` naming `httpx2` rather than merely warning), both in
