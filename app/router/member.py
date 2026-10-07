@@ -109,8 +109,8 @@ async def create_invite(
 async def signup(payload: member_schema.MemberCreate, db: AsyncSession = Depends(get_db)):
     email = normalise_email(payload.email)
     # first: a bad code costs one cheap UPDATE and gets one answer (unknown/used/expired/wrong
-    # email). A match holds the invite lock across the ~300 ms hashing below, so pool exhaustion
-    # is the risk: test_twenty_concurrent_signups_do_not_exhaust_the_pool.
+    # email). A match holds the invite lock across the ~25 ms hashing below, so pool exhaustion
+    # is the risk: test_twenty_concurrent_signups_do_not_exhaust_the_pool (it stubs 0.2 s).
     role = await invite_crud.claim_invite(db, payload.invite_code, email)
     if role is None:
         raise HTTPException(status_code=400, detail="Invalid or expired invite")
