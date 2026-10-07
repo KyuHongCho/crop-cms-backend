@@ -216,7 +216,7 @@ manages. A test asserts that refusal.
 | `DELETE` | `/sub-categories/{id}` | Editor or admin. Refiles its documents to "Uncategorised" and returns the count |
 | `GET` `POST` | `/items` | A document and its sources. `POST` needs editor or admin |
 | `POST` | `/members/signup` | Needs an `invite_code` in the body (`422` without one). `201`; the new member takes the invite's role and a `role` in the body is ignored. `400 "Invalid or expired invite"` for an unknown, used, expired or wrong-email code (one message for all four); `400` on a duplicate email, which leaves the invite unused. Argon2id hash, run in the threadpool |
-| `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email, a wrong password and a deactivated member |
+| `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email, a wrong password and a deactivated member. `429` with `Retry-After` once an account has used its counted attempts (see Login throttling); `422` for an email over 255 characters or containing NUL, or a password over 128 |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
 | `POST` | `/members/invites` | Admin only (`401` without a token, `403` otherwise). Body `role` (`member` default, or `editor`; `admin` is `422`), `expires_in_days` (1-30, default 7) and an optional `email` the invite is bound to (stored stripped and lower-cased). `201` returns the 43-character `code` **once**; only its SHA-256 is stored. Writes an `invite_create` audit row (role and expiry, never the code or the email). The operator, with no admin yet, runs `docker compose exec -T cms python -m scripts.make_invite [--role editor] [--days N] [--email ADDRESS]` (prints the code; no audit row). Signup consumes it |
 | `GET` | `/members/invites` | Admin only (`401` without a token, `403` otherwise). The invites that can still be claimed (unused and unexpired), ordered by id, `limit` 1-100 (default 50) and `offset` >= 0 (else `422`). Each is `id`, `role`, `email`, `created_at`, `expires_at`; never the code or its hash |
@@ -224,6 +224,7 @@ manages. A test asserts that refusal.
 | `GET` | `/members` | Admin only (`401` without a token, `403` otherwise). `limit` 1-100 (default 50), `offset`, filters `role` and `is_active`; ordered by id; never the password hash |
 | `PATCH` | `/members/{id}` | Admin only. Body `role`, `tokens_budget_daily` (0-10 000 000) and/or `is_active` (a JSON boolean only); any other field or an empty body is `422`; `404` for an unknown id. `is_active: false` deactivates a member at once (their token gets `401` on the next request and works again on reactivation). `403` if the acting admin was deactivated or demoted while the request was in flight (nothing changes, no audit row); `409` if an admin changes their own role or deactivates themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each real change writes one `member_audit_events` row in the same transaction (no email); a PATCH that changes nothing is `200` with no row |
 | `DELETE` | `/members/{id}` | Admin only. `204`, a hard delete of the member row; their token gets `401` on the next request and login with their email is the usual `401`. `404` for an unknown id (so a second delete is `404`); `403` if the acting admin was deactivated or demoted while the request was in flight; `409` if an admin deletes themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each delete writes one `member_audit_events` row (`action` `delete`, `detail` `{"role": ...}` only, no email) in the same transaction; the row outlives the member (no foreign key). Refusals delete nothing and write no row |
+| `POST` | `/members/{id}/unlock` | Admin only (`401` without a token, `403` otherwise). Clears that account's login throttle (`204`; idempotent: nothing to clear is still `204`); an unknown id is `404`; `403` if the acting admin was deactivated or demoted while the request was in flight. Every successful call writes an `unlock` audit row (`{"cleared": 0 or 1}`, the member id as target, never the email). The delete and the audit row commit together |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
 
 ## Members and the token budget
@@ -257,6 +258,40 @@ page); this budget is the per-member control on top of it.
 
 `TOKENS_BUDGET_DAILY` (default 20000) sets the starting budget for members who sign up after the
 container is recreated (`docker compose up -d`; a plain `restart` does not re-read the environment); existing members keep theirs, so raise one with an `UPDATE members SET tokens_budget_daily = ...`.
+
+## Login throttling
+
+`POST /members/login` counts attempts per account (the SHA-256 of the stripped, lower-cased email, so
+case and padding share one counter) in the `login_throttle` table: `LOGIN_MAX_FAILURES` (default 10) per
+window of `LOGIN_WINDOW_SECONDS` (default 900). The next attempt in that window is `429 "Too many failed
+attempts"` with `Retry-After`, even with the correct password, and does no hashing. A wrong password and
+an unknown email each count one (a row is made for an unknown email, so a `429` does not reveal which
+emails exist); a correct password for an active member deletes the row; a deactivated member's correct
+password keeps the attempt and gets the usual `401`. A `422` counts nothing. Both settings are read at
+import (`docker compose up -d` after changing them) and a value below 1 or not an integer stops the app
+at startup, naming the variable; `LOGIN_WINDOW_SECONDS` must also be <= 315360000 (10 years).
+
+The counter is one atomic statement in the database, so it holds across workers and restarts. The
+window is fixed: it starts at the first attempt after the previous one expired, so a burst can straddle
+a boundary, but at most 50 attempts per account fit in any 3600 seconds. There is no per-IP limit, and
+guesses spread across many accounts are not stopped.
+
+**Lockout risk:** someone who sends ten attempts at the start of every 900-second window keeps one
+account locked out indefinitely, and `Retry-After` tells them when the next window opens. This is
+accepted.
+
+**Recovery:** an admin with a valid token calls `POST /members/{id}/unlock`, which deletes the account's
+throttle row so the owner can log in at once. A persistent attacker can lock the account again, so this
+buys a gap, not a fix. A sole admin who is locked out and whose token has expired (30 minutes) has no
+in-band recovery; the lock lifts when the current window ends unless the attacker keeps going.
+
+Expired rows are pruned by later logins (up to 20 per attempt). To sweep them by hand, with the
+`LOGIN_WINDOW_SECONDS` value in place of `<seconds>`:
+`DELETE FROM login_throttle WHERE window_started_at < now() - make_interval(secs => <seconds>);`
+
+The throttle table must exist before the new code runs: if it is missing every login fails with a `500`
+(the throttle fails closed). Run `alembic upgrade head` first. To roll back, revert the code, then
+`alembic downgrade -1`, which loses only the throttle's counts.
 
 ## Live eval (manual)
 

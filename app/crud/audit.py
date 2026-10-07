@@ -52,3 +52,18 @@ async def record_invite_revoke(db: AsyncSession, actor_id: int, invite_id: int, 
             detail={"role": role},
         )
     )
+
+
+def build_unlock_event(actor_id: int, target_id: int | None, cleared: int) -> model.MemberAuditEvent:
+    """The 'unlock' row. Detail is the cleared count only (0 or 1): never the email or the throttle
+    key, which is a digest of it."""
+    return model.MemberAuditEvent(
+        actor_id=actor_id, action="unlock", target_id=target_id, detail={"cleared": cleared}
+    )
+
+
+async def record_member_unlock(
+    db: AsyncSession, actor_id: int, target_id: int | None, cleared: int
+) -> None:
+    """Add one 'unlock' row in the caller's transaction, so a failure here loses the delete too."""
+    db.add(build_unlock_event(actor_id, target_id, cleared))
