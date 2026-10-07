@@ -86,6 +86,14 @@ def test_an_unknown_address_is_a_harmless_no_op_with_one_audit_row(client):
     assert unlock_login("Typo@Nowhere.com", sync_engine) == 0
 
 
+def test_an_address_that_is_not_a_member_but_was_throttled_is_cleared_and_reported_unlocked(client):
+    lock(client, "ghost@example.com")
+    result = run_script(" Ghost@Example.com ")
+    assert (result.returncode, result.stdout) == (0, "unlocked\n"), result.stderr
+    assert rows() == {}
+    assert audit_rows() == [(SYSTEM_ACTOR_ID, "unlock", None, {"cleared": 1})]
+
+
 def test_a_known_member_with_no_throttle_row_is_cleared_0_with_their_id():
     member = add_member("member", email="known@example.com")
     assert unlock_login(" KNOWN@example.com ", sync_engine) == 0
