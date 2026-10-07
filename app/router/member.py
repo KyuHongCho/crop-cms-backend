@@ -2,7 +2,6 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -275,7 +274,7 @@ async def unlock_member(
     # the request session, not throttle.clear's own connection: the audit row below must be able
     # to undo this delete. Idempotent; every call is audited, cleared or not.
     result = await db.execute(
-        text("DELETE FROM login_throttle WHERE email_key = :key"),
+        throttle.CLEAR_SQL,
         {"key": throttle_key(member.email)},
     )
     await audit_crud.record_member_unlock(db, actor.id, member.id, result.rowcount)

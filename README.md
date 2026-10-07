@@ -283,7 +283,7 @@ accepted.
 **Recovery:** an admin with a valid token calls `POST /members/{id}/unlock`, which deletes the account's
 throttle row so the owner can log in at once. A persistent attacker can lock the account again, so this
 buys a gap, not a fix. A sole admin who is locked out and whose token has expired (30 minutes) has no
-in-band recovery: the operator script for that case arrives in a later PR, and until it does there is none.
+in-band recovery; the lock lifts when the current window ends unless the attacker keeps going.
 
 Expired rows are pruned by later logins (up to 20 per attempt). To sweep them by hand, with the
 `LOGIN_WINDOW_SECONDS` value in place of `<seconds>`:
