@@ -3,6 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.model.model as model
 
+# 0 = operator or script, never a member id (members.id starts at 1). A reader that joins
+# actor_id to members must treat it as "not a member".
+SYSTEM_ACTOR_ID = 0
+
 
 async def record_member_update(
     db: AsyncSession, actor_id: int, target_id: int, changes: dict[str, dict]

@@ -282,8 +282,30 @@ accepted.
 
 **Recovery:** an admin with a valid token calls `POST /members/{id}/unlock`, which deletes the account's
 throttle row so the owner can log in at once. A persistent attacker can lock the account again, so this
-buys a gap, not a fix. A sole admin who is locked out and whose token has expired (30 minutes) has no
-in-band recovery; the lock lifts when the current window ends unless the attacker keeps going.
+buys a gap, not a fix. A sole admin who is locked out and whose token has expired (30 minutes) uses the
+operator script below; without shell access to the deployment it cannot be cleared early, and the lock
+lifts when the current window ends unless the attacker keeps going.
+
+**Operator unlock:** `docker compose exec -T cms python -m scripts.unlock_login ADDRESS` deletes that
+account's throttle row and prints `unlocked`, or `nothing to unlock` if it had none. Case and padding of
+`ADDRESS` do not matter. An address starting with `-` needs `--` before it
+(`... scripts.unlock_login -- -a@b.c`). An argument that is not valid UTF-8 is refused with exit 2
+before any database access. An address with no throttle row prints `nothing to unlock` and is a harmless
+no-op, member or not. An address that is not a member but was tried at login does have a throttle row;
+that row is deleted and reported as `unlocked`. Every run that reaches
+the database writes one `unlock` audit row (`{"cleared": 0 or 1}`) in the same transaction as the
+delete, with `actor_id` 0, which means "operator or script, not a member" (the target is the member's id,
+or NULL if the address is not a member); anything that joins `actor_id` to `members` must treat 0 that
+way. It works even when `LOGIN_MAX_FAILURES` or `LOGIN_WINDOW_SECONDS` is invalid.
+
+**Check the database first.** The script acts on the database named by `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_USER` and `DB_PASSWORD`. Under `docker compose exec cms` that is the DEV database `cms` on host `db`.
+Check `DB_HOST` and `DB_NAME` in the environment before you run it, for example by printing them; for
+production, export that environment's values first. The stderr line
+`unlock_login: DB_HOST=... DB_NAME=...` (host and database only, not port or user) names the database the
+script is about to act on. It is printed before the connection is opened, in the same call that deletes
+and commits, so it cannot stop a wrong-database run, and it still appears if the connection then fails.
+Worst case against the wrong database: one throttle row deleted and one audit row added.
 
 Expired rows are pruned by later logins (up to 20 per attempt). To sweep them by hand, with the
 `LOGIN_WINDOW_SECONDS` value in place of `<seconds>`:
