@@ -137,7 +137,7 @@ jobs:
               WHERE schemaname = 'public' AND tablename <> 'alembic_version';" \
             | tr -d '[:space:]')
           echo "content tables created: $tables"
-          test "$tables" = "crops,item_chunks,items,main_categories,member_audit_events,member_invites,members,sub_categories"
+          test "$tables" = "crops,item_chunks,items,login_throttle,main_categories,member_audit_events,member_invites,members,sub_categories"
           # A view is invisible to pg_tables and to `alembic check`, so the
           # published filter the chat layer reads is asserted on its own.
           views=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \

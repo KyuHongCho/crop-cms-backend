@@ -92,8 +92,10 @@ class InviteAdminView(BaseModel):
 
 
 class MemberLogin(BaseModel):
-    email: str
-    password: str
+    # no min_length: an empty email stays a 401. A length or pattern also makes pydantic refuse lone
+    # surrogates; the 422 then needs the handler in app/main.py.
+    email: str = Field(max_length=255, pattern=r"^[^\x00]*$")
+    password: str = Field(max_length=128)
 
 
 class TokenResponse(BaseModel):

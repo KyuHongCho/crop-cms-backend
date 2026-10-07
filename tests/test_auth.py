@@ -117,6 +117,7 @@ def test_only_the_expected_routes_require_a_token():
         "POST /items",
         "POST /main-categories",
         "POST /members/invites",
+        "POST /members/{member_id}/unlock",
         "POST /sub-categories",
     ]
 

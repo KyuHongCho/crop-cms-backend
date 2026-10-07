@@ -1,20 +1,25 @@
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.auth.throttle as throttle
 import app.crud.audit as audit_crud
 import app.crud.invite as invite_crud
 import app.crud.member as member_crud
 import app.model.model as model
 import app.schema.member as member_schema
+from app.auth.account_key import throttle_key
 from app.auth.auth import DUMMY_HASH, create_access_token, hash_password, verify_password
 from app.auth.dependency import get_current_member, require_admin
 from app.auth.invite import normalise_email
 from app.db.db import get_db
 
 router = APIRouter(prefix="/members")
+logger = logging.getLogger(__name__)
 
 # one message for unknown email and wrong password: distinct ones reveal which emails exist.
 _BAD_LOGIN = "Incorrect email or password"
@@ -129,18 +134,35 @@ async def signup(payload: member_schema.MemberCreate, db: AsyncSession = Depends
 
 @router.post("/login", response_model=member_schema.TokenResponse)
 async def login(payload: member_schema.MemberLogin, db: AsyncSession = Depends(get_db)):
-    member = await member_crud.get_member_by_email(db, payload.email.strip().lower())
-    if member is None:
-        # equalise timing with the wrong-password path (see DUMMY_HASH).
-        await verify_password(payload.password, DUMMY_HASH)
+    key = throttle_key(payload.email)
+    # first DB statement, on its own connection. Fail-closed: if it raises, nothing else runs.
+    reservation = await throttle.reserve(db.bind, key)
+    if reservation is None:
+        wait = await throttle.retry_after(db.bind, key)
+        raise HTTPException(
+            status_code=429, detail="Too many failed attempts", headers={"Retry-After": str(wait)}
+        )
+    try:
+        member = await member_crud.get_member_by_email(db, normalise_email(payload.email))
+    except Exception:
+        # no password was evaluated, so this attempt is given back. Never from a finally or on
+        # BaseException: a cancelled request's argon2 thread keeps running, and that work must count.
+        try:
+            await throttle.release(db.bind, key, reservation.window_id)
+        except Exception:
+            logger.exception("login throttle: release failed, the attempt stays counted")
+        raise
+    member_id = member.id if member else None
+    password_hash = member.password_hash if member else DUMMY_HASH  # equalise timing, see DUMMY_HASH
+    is_active = member.is_active if member else False
+    # end the lookup transaction so the request holds no pooled connection while argon2 runs.
+    await db.rollback()
+    verified = await verify_password(payload.password, password_hash)
+    # one 401 for unknown email, wrong password and an inactive member (whose attempt stays counted).
+    if member_id is None or not verified or not is_active:
         raise HTTPException(status_code=401, detail=_BAD_LOGIN)
-    if not await verify_password(payload.password, member.password_hash):
-        raise HTTPException(status_code=401, detail=_BAD_LOGIN)
-    if not member.is_active:
-        # only after the password verified, so an inactive member costs the same argon2
-        # work and gets the same 401: nothing reveals the account is deactivated.
-        raise HTTPException(status_code=401, detail=_BAD_LOGIN)
-    return member_schema.TokenResponse(access_token=create_access_token(member.id))
+    await throttle.clear(db.bind, key)
+    return member_schema.TokenResponse(access_token=create_access_token(member_id))
 
 
 @router.get("/me", response_model=member_schema.MemberResponse)
@@ -235,4 +257,26 @@ async def delete_member(
     await db.flush()
     # same transaction as the delete: if this raises, the member is not deleted.
     await audit_crud.record_member_delete(db, actor.id, member_id, role)
+    await db.commit()
+
+
+@router.post("/{member_id}/unlock", status_code=204)
+async def unlock_member(
+    member_id: int = Path(ge=1, le=MAX_MEMBER_ID),
+    actor: model.Member = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    # as in create_invite: 403 before the 404, actor row read FOR SHARE.
+    if not await member_crud.actor_is_active_admin(db, actor.id):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    member = await member_crud.get_member(db, member_id)
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    # the request session, not throttle.clear's own connection: the audit row below must be able
+    # to undo this delete. Idempotent; every call is audited, cleared or not.
+    result = await db.execute(
+        text("DELETE FROM login_throttle WHERE email_key = :key"),
+        {"key": throttle_key(member.email)},
+    )
+    await audit_crud.record_member_unlock(db, actor.id, member.id, result.rowcount)
     await db.commit()

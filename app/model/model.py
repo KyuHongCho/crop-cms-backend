@@ -3,7 +3,7 @@ from sqlalchemy import (
     Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, String,
     Text, UniqueConstraint, func, text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship, validates
 
 from app.db.db import Base
@@ -235,3 +235,20 @@ class MemberInvite(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
     # NULL until claimed; the claim is one atomic UPDATE ... WHERE used_at IS NULL.
     used_at = Column(DateTime(timezone=True))
+
+
+class LoginThrottle(Base):
+    """Failed-login counter, one row per account (app/auth/throttle.py). The key is a SHA-256 of
+    the normalised email, so unknown addresses leave no personal data. No foreign keys."""
+
+    __tablename__ = "login_throttle"
+    __table_args__ = (
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        Index("ix_login_throttle_window_started_at", "window_started_at"),
+    )
+
+    email_key = Column(String(64), primary_key=True)
+    attempts = Column(Integer, nullable=False)
+    window_started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # new on every window restart: a release only applies to the window it reserved in.
+    window_id = Column(UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()"))

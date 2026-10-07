@@ -38,6 +38,7 @@ ADMIN_ROUTES = [
     "POST /members/invites",
     "PATCH /members/{member_id}",
     "DELETE /members/{member_id}",
+    "POST /members/{member_id}/unlock",
 ]
 ADMIN_ROLES = ("admin",)
 

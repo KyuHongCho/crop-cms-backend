@@ -43,6 +43,9 @@ services:
       TOKENS_BUDGET_DAILY: ${TOKENS_BUDGET_DAILY:-20000}
       # Token lifetime in minutes; read at import, so a change needs `up -d`.
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      # Login throttle (app/auth/throttle.py); read at import, so a change needs `up -d`.
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-10}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-900}
     depends_on:
       db:
         condition: service_healthy
