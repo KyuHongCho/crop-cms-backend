@@ -257,3 +257,32 @@ class MemberAuditEvent(Base):
     action = Column(Text, nullable=False)
     target_id = Column(Integer)
     detail = Column(JSONB)
+
+
+# The roles an invite may grant. Never "admin": the first admin is promoted by an
+# operator with SQL, so a leaked invite can never mint one.
+INVITE_ROLES = ("member", "editor")
+
+
+class MemberInvite(Base):
+    """A one-time signup invitation. Only the SHA-256 of the code is stored (hex,
+    64 characters): the code itself is shown once, at creation. No foreign keys:
+    like member_audit_events, a row outlives whoever made or used it."""
+
+    __tablename__ = "member_invites"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN (" + ", ".join(f"'{role}'" for role in INVITE_ROLES) + ")",
+            name="invite_role_valid",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    # When set, only a signup with this (lower-cased) email may claim the invite.
+    email = Column(String(255))
+    role = Column(Text, nullable=False, server_default=text("'member'"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    # NULL until claimed; the claim is one atomic UPDATE ... WHERE used_at IS NULL.
+    used_at = Column(DateTime(timezone=True))

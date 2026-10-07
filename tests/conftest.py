@@ -26,6 +26,7 @@ from app.main import app
 from app.model.model import Member
 from app.router.member import update_member
 from app.schema.member import MemberAdminUpdate
+from scripts.make_invite import make_invite as _store_invite
 
 DEFAULT_PASSWORD = "correct horse battery"
 
@@ -58,7 +59,7 @@ def truncate_and_reseed() -> None:
         connection.execute(
             text(
                 "TRUNCATE items, sub_categories, main_categories, crops, members, "
-                "member_audit_events RESTART IDENTITY CASCADE"
+                "member_audit_events, member_invites RESTART IDENTITY CASCADE"
             )
         )
         connection.execute(text(SEED_BUCKET_SQL))
@@ -128,12 +129,27 @@ def signup_member(client, email="grower@example.com", password=DEFAULT_PASSWORD,
 
     The one place a test that needs a real login (a password hash argon2 can
     verify) creates its member, so a change to how members come into being is
-    one edit here. `**extra` is merged into the JSON body. Tests whose subject
-    is signup itself may still post to /members/signup directly.
+    one edit here. Signup needs an invite, so this stores one (make_invite, below)
+    and sends its code, unless `invite_code` is passed in `**extra`. The rest of
+    `**extra` is merged into the JSON body, so `role="admin"` is a body key the
+    route must ignore. Two keys are for the helper and never sent: `invite_role`
+    (the role the invite grants, default member) and `invite_email` (bind the
+    invite to that address). Tests whose subject is signup itself may still post
+    to /members/signup directly.
     """
+    invite_role = extra.pop("invite_role", "member")
+    invite_email = extra.pop("invite_email", None)
+    if "invite_code" not in extra:
+        extra["invite_code"] = make_invite(role=invite_role, email=invite_email)
     return client.post(
         "/members/signup", json={"email": email, "password": password, **extra}
     )
+
+
+def make_invite(role="member", email=None, days=7):
+    """Store one invite by the same code path as scripts/make_invite.py and
+    return its plaintext code (what a test hands to signup)."""
+    return _store_invite(role=role, days=days, email=email)
 
 
 # --- member-management helpers shared by the member test modules --------------

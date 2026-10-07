@@ -5,11 +5,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.crud.audit as audit_crud
+import app.crud.invite as invite_crud
 import app.crud.member as member_crud
 import app.model.model as model
 import app.schema.member as member_schema
 from app.auth.auth import DUMMY_HASH, create_access_token, hash_password, verify_password
 from app.auth.dependency import get_current_member, require_admin
+from app.auth.invite import normalise_email
 from app.db.db import get_db
 
 router = APIRouter(prefix="/members")
@@ -20,6 +22,7 @@ _BAD_LOGIN = "Incorrect email or password"
 
 # members.id is a 32-bit integer: a larger id in the path would reach the database as an overflow (500).
 MAX_MEMBER_ID = 2**31 - 1
+MAX_INVITE_ID = 2**31 - 1  # member_invites.id is a 32-bit integer too
 MAX_OFFSET = 2**63 - 1  # OFFSET is a PostgreSQL bigint
 
 
@@ -40,17 +43,99 @@ async def list_members(
     return await member_crud.list_members(db, limit, offset, role, is_active)
 
 
+# Declared before the "/{member_id}" routes: the paths below have a literal second
+# segment ("invites"), which "/{member_id}" would otherwise try to read as an id.
+@router.get(
+    "/invites",
+    response_model=list[member_schema.InviteAdminView],
+    dependencies=[Depends(require_admin)],
+)
+async def list_invites(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=MAX_OFFSET),
+    db: AsyncSession = Depends(get_db),
+):
+    return await invite_crud.list_open_invites(db, limit, offset)
+
+
+@router.delete("/invites/{invite_id}", status_code=204)
+async def revoke_invite(
+    invite_id: int = Path(ge=1, le=MAX_INVITE_ID),
+    actor: model.Member = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    # Order of checks: auth (the dependencies) -> 422 (the path) -> actor still an
+    # active admin (403) -> lock the invite -> 404 -> used 409 -> delete -> audit ->
+    # one commit. Revoking is a HARD delete of the row; an expired but unused
+    # invite may be revoked (it is harmless but listed nowhere, so this is tidying);
+    # a used one is refused (409): it is already spent, so there is nothing to
+    # revoke; the row stays as the record that the code was claimed (and, if it
+    # was bound, for which email). It does not name the member.
+    # Stale actor: as in update_member, 403 before the 404 so it learns nothing
+    # about which ids exist. Here the actor row is read FOR SHARE, so a concurrent
+    # demotion or deactivation waits for our commit instead of racing the check.
+    if not await member_crud.actor_is_active_admin(db, actor.id):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    invite = await invite_crud.lock_invite(db, invite_id)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.used_at is not None:
+        raise HTTPException(status_code=409, detail="A used invite cannot be revoked")
+    role = invite.role  # read before the row goes; the audit keeps only this
+    await db.delete(invite)
+    await db.flush()
+    # Same transaction as the delete: if this raises, the invite is not deleted.
+    await audit_crud.record_invite_revoke(db, actor.id, invite_id, role)
+    await db.commit()
+
+
+@router.post("/invites", response_model=member_schema.InviteResponse, status_code=201)
+async def create_invite(
+    payload: member_schema.InviteCreate,
+    actor: model.Member = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    # As in revoke_invite: a just-demoted admin must not mint an invite (an editor
+    # invite is a promotion). Read FOR SHARE, so a concurrent demotion waits for our commit.
+    if not await member_crud.actor_is_active_admin(db, actor.id):
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    invite, code = await invite_crud.create_invite(
+        db, payload.role, payload.expires_in_days, payload.email
+    )
+    # Same transaction as the invite: if this raises, no invite is stored.
+    await audit_crud.record_invite_create(db, actor.id, invite.id, invite.role, invite.expires_at)
+    await db.commit()
+    return member_schema.InviteResponse(
+        id=invite.id,
+        code=code,
+        role=invite.role,
+        email=invite.email,
+        expires_at=invite.expires_at,
+    )
+
+
 @router.post("/signup", response_model=member_schema.MemberResponse, status_code=201)
 async def signup(payload: member_schema.MemberCreate, db: AsyncSession = Depends(get_db)):
-    email = payload.email.strip().lower()
+    email = normalise_email(payload.email)
+    # First, before any other work (no email lookup, no hashing): a bad code costs
+    # one cheap UPDATE that matches nothing. The caller gets the same answer for an
+    # unknown, used, expired or wrong-email code. A match claims the invite and
+    # holds its row lock until the commit in create_member, across the hashing
+    # below (about 300 ms; see test_twenty_concurrent_signups_do_not_exhaust_the_pool).
+    role = await invite_crud.claim_invite(db, payload.invite_code, email)
+    if role is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired invite")
     if await member_crud.get_member_by_email(db, email) is not None:
+        await db.rollback()  # explicit un-claim (get_db's close would also roll back)
         raise HTTPException(status_code=400, detail="Email already registered")
     hashed = await hash_password(payload.password)
     try:
-        return await member_crud.create_member(db, email, hashed, payload.display_name)
+        # One commit for the claim and the member: both stand or neither does.
+        return await member_crud.create_member(db, email, hashed, payload.display_name, role)
     except IntegrityError:
         # Two signups for one email racing past the check above; the UNIQUE
-        # constraint is the real guard.
+        # constraint is the real guard. The rollback un-claims the invite (as would
+        # get_db's close).
         await db.rollback()
         raise HTTPException(status_code=400, detail="Email already registered")
 
