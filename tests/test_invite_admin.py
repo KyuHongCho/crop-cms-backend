@@ -9,8 +9,10 @@ import secrets
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+import app.crud.member as member_crud
 import app.db.db as app_db
 from app.model.model import Member
 from app.router.member import create_invite, revoke_invite
@@ -265,3 +267,27 @@ def test_an_actor_demoted_after_the_guard_cannot_create_an_invite():
     assert _create_as_loaded_actor(actor) == 403
     assert invite_ids() == []
     assert audit_rows() == []
+
+
+def test_a_concurrent_demotion_waits_for_the_actor_lock():
+    admin_id = add_member("admin")
+
+    async def scenario():
+        engine = create_async_engine(app_db.ASYNC_DB_URL)
+        try:
+            async with AsyncSession(engine) as holder, AsyncSession(engine) as demoter:
+                assert await member_crud.actor_is_active_admin(holder, admin_id)
+
+                async def demote():
+                    await demoter.execute(text("UPDATE members SET role = 'member' WHERE id = :i"), {"i": admin_id})
+                    await demoter.commit()
+
+                task = asyncio.create_task(demote())
+                _, pending = await asyncio.wait({task}, timeout=0.5)
+                assert task in pending  # blocked while the holder's FOR SHARE lock stands
+                await holder.commit()
+                await asyncio.wait_for(task, 5)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(asyncio.wait_for(scenario(), 30))

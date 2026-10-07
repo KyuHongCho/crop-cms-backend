@@ -222,7 +222,7 @@ def test_the_script_function_refuses_what_the_route_refuses(kwargs):
 
 
 @pytest.mark.parametrize(
-    "email", ["a", "   ", "", "no-at-sign", "a@b@c", "a b@c.io", "a\x00b@x.io", "\x1c@b", "a@\x1c", "\x1c@\x1c", "\x1f@b", "x" * 256 + "@a.io", "@"]
+    "email", ["a", "   ", "", "no-at-sign", "a@b@c", "a b@c.io", "a\x00b@x.io", "\x1c@b", "a@\x1c", "\x1c@\x1c", "\x1f@b", "\x1ca@b.io", "a@b.io\x1f", "x" * 256 + "@a.io", "@"]
 )
 def test_the_script_function_refuses_a_bad_email_like_the_route(email):
     with pytest.raises(ValueError):

@@ -1,11 +1,10 @@
 """Member request/response shapes. MemberResponse and MemberAdminView have no
 password_hash field, so the hash cannot leak through response_model."""
-import re
 from datetime import date, datetime
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 import app.model.model as model
 
@@ -22,12 +21,17 @@ INVITE_EMAIL_MIN = 3
 INVITE_EMAIL_MAX = 255
 
 
+_INVITE_EMAIL = TypeAdapter(
+    Annotated[str, Field(min_length=INVITE_EMAIL_MIN, max_length=INVITE_EMAIL_MAX, pattern=INVITE_EMAIL_PATTERN)]
+)
+
+
 def check_invite_email(email: str) -> None:
-    """Raise ValueError unless `email` passes what the route accepts."""
-    if not INVITE_EMAIL_MIN <= len(email) <= INVITE_EMAIL_MAX or not re.fullmatch(
-        INVITE_EMAIL_PATTERN, email
-    ):
-        raise ValueError(f"email must look like a@b, {INVITE_EMAIL_MIN}-{INVITE_EMAIL_MAX} characters, got {email!r}")
+    """Raise ValueError unless `email` passes what the route accepts (same engine)."""
+    try:
+        _INVITE_EMAIL.validate_python(email)
+    except ValidationError as error:
+        raise ValueError(f"email must look like a@b, {INVITE_EMAIL_MIN}-{INVITE_EMAIL_MAX} characters, got {email!r}") from error
 
 
 class MemberCreate(BaseModel):
