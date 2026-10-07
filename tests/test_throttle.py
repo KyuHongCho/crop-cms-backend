@@ -20,7 +20,7 @@ from app.db import db as app_db
 from app.db.migrate_db import engine as sync_engine
 from app.main import app
 from app.schema.member import MemberLogin
-from tests.conftest import DEFAULT_PASSWORD, _import_in_subprocess, add_member, signup_member, sql
+from tests.conftest import DEFAULT_PASSWORD, add_member, import_in_subprocess, signup_member, sql
 
 URL = "/members/login"
 BAD = {"detail": "Incorrect email or password"}
@@ -597,7 +597,7 @@ _IMPORT = "import app.auth.throttle"
 
 
 def test_l0_valid_environment_imports_cleanly():
-    result = _import_in_subprocess(_IMPORT)
+    result = import_in_subprocess(_IMPORT)
     assert result.returncode == 0, result.stderr
 
 
@@ -607,21 +607,21 @@ def test_l0_valid_environment_imports_cleanly():
     ids=["max-failures-0", "window-abc"],
 )
 def test_l_a_bad_setting_stops_the_import_and_names_the_variable(name, value):
-    result = _import_in_subprocess(_IMPORT, {name: value})
+    result = import_in_subprocess(_IMPORT, {name: value})
     assert result.returncode != 0
     # the last line is the exception message; the traceback above it names the variable regardless.
     assert name in result.stderr.strip().splitlines()[-1]
 
 
 def test_l_d_window_above_ten_years_stops_the_import_and_the_cap_itself_is_accepted():
-    over = _import_in_subprocess(_IMPORT, {"LOGIN_WINDOW_SECONDS": "315360001"})
+    over = import_in_subprocess(_IMPORT, {"LOGIN_WINDOW_SECONDS": "315360001"})
     assert over.returncode != 0
     assert "LOGIN_WINDOW_SECONDS" in over.stderr.strip().splitlines()[-1]
-    at_cap = _import_in_subprocess(_IMPORT, {"LOGIN_WINDOW_SECONDS": "315360000"})
+    at_cap = import_in_subprocess(_IMPORT, {"LOGIN_WINDOW_SECONDS": "315360000"})
     assert at_cap.returncode == 0, at_cap.stderr
 
 
 def test_l_c_the_key_module_does_not_pull_in_the_settings():
     code = "import sys, app.auth.account_key; sys.exit(3 if 'app.auth.throttle' in sys.modules else 0)"
-    result = _import_in_subprocess(code)
+    result = import_in_subprocess(code)
     assert result.returncode == 0, result.stderr

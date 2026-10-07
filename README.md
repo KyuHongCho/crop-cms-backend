@@ -282,8 +282,27 @@ accepted.
 
 **Recovery:** an admin with a valid token calls `POST /members/{id}/unlock`, which deletes the account's
 throttle row so the owner can log in at once. A persistent attacker can lock the account again, so this
-buys a gap, not a fix. A sole admin who is locked out and whose token has expired (30 minutes) has no
-in-band recovery; the lock lifts when the current window ends unless the attacker keeps going.
+buys a gap, not a fix. A sole admin who is locked out and whose token has expired (30 minutes) uses the
+operator script below; without shell access to the deployment there is no recovery, and the lock lifts
+when the current window ends unless the attacker keeps going.
+
+**Operator unlock:** `docker compose exec -T cms python -m scripts.unlock_login ADDRESS` deletes that
+account's throttle row and prints `unlocked`, or `nothing to unlock` if it had none. Case and padding of
+`ADDRESS` do not matter. An address starting with `-` needs `--` before it
+(`... scripts.unlock_login -- -a@b.c`). An argument that is not valid UTF-8 is refused with exit 2
+before any database access. An address that is not a member is a harmless no-op. Every run that reaches
+the database writes one `unlock` audit row (`{"cleared": 0 or 1}`) in the same transaction as the
+delete, with `actor_id` 0, which means "operator or script, not a member" (the target is the member's id,
+or NULL if the address is not a member); anything that joins `actor_id` to `members` must treat 0 that
+way. It works even when `LOGIN_MAX_FAILURES` or `LOGIN_WINDOW_SECONDS` is invalid.
+
+**Check the database first.** The script acts on the database named by `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_USER` and `DB_PASSWORD`. Under `docker compose exec cms` that is the DEV database `cms` on host `db`.
+Check `DB_HOST` and `DB_NAME` in the environment before you run it, for example by printing them; for
+production, export that environment's values first. The stderr line `unlock_login: DB_HOST=... DB_NAME=...`
+(host and database only, not port or user) confirms which database was actually hit; it is printed in the
+same call that deletes and commits, so it cannot stop a wrong-database run. Worst case against the wrong
+database: one throttle row deleted and one audit row added.
 
 Expired rows are pruned by later logins (up to 20 per attempt). To sweep them by hand, with the
 `LOGIN_WINDOW_SECONDS` value in place of `<seconds>`:

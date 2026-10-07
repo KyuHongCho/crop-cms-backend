@@ -36,15 +36,19 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _LOGIN_SETTINGS = ("LOGIN_MAX_FAILURES", "LOGIN_WINDOW_SECONDS")
 
 
-def _import_in_subprocess(code, overrides=None):
-    """Run `code` in a fresh interpreter at the repo root with the login settings cleared, then
-    `overrides` applied. Not `-I`: that drops the cwd from sys.path and `import app` would fail."""
+def run_python(args, overrides=None):
+    """Run `python *args` in a fresh interpreter at the repo root with the login settings cleared,
+    then `overrides` applied. Not `-I`: that drops the cwd from sys.path and `import app` would fail."""
     assert "DB_PASSWORD" in os.environ, "premise not met: run inside the cms container"
     env = {key: value for key, value in os.environ.items() if key not in _LOGIN_SETTINGS}
     env.update(overrides or {})
     return subprocess.run(
-        [sys.executable, "-c", code], env=env, capture_output=True, text=True, cwd=str(REPO_ROOT)
+        [sys.executable, *args], env=env, capture_output=True, text=True, cwd=str(REPO_ROOT)
     )
+
+
+def import_in_subprocess(code, overrides=None):
+    return run_python(["-c", code], overrides)
 
 
 def _assert_test_database() -> None:
