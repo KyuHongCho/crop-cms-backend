@@ -1,7 +1,6 @@
-"""Topic-set retrieval: crop + topic in, the complete published document set
-out. See app/crud/retrieval.py for why there is no `limit` parameter here and
-none is ever coming -- Item's docstring in app/model/model.py is the
-constraint.
+"""Topic-set retrieval: crop + topic in, the complete published document set out.
+
+No `limit` parameter, ever: see Item's docstring in app/model/model.py.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,10 +42,8 @@ async def get_topic_set(
 
     documents = await retrieval_crud.get_topic_set(db, crop_id, topic)
 
-    # One candidate per request: topic *selection* (Rules 1/2) is not part of
-    # this path. It is routed through the same Rule 3 policy multi-topic
-    # selection will use, so the refusal path is real, tested code, not a
-    # stub.
+    # one candidate, no topic selection (Rules 1/2); routed through the Rule 3 policy so the
+    # refusal path is real, tested code.
     candidate = TopicCandidate(topic=topic, score=0.0, documents=documents)
     try:
         _kept, budget_dropped = assemble_within_budget([candidate])

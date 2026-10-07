@@ -1,23 +1,13 @@
 """The two model clients behind POST /chat: a classifier and a generator.
 
-Two objects, never one shared client: the classifier has a small `max_tokens`
-and the tool list bound; the generator has the citation system prompt and no
-tools. Each is a small class with one method, so the test suite can replace
-either with a stub and never needs a key. The SDK is imported inside each model
-call (`_create`), not at construction, so importing this module (and the stubbed
-tests) does not need `anthropic` installed; the tests that use the real client do.
-
-No sampling parameters are set on either client: the pinned SDK's
-`Messages.create` has no `temperature`, and newer models fix sampling anyway.
-Stability comes from the forced tool choice, the short
-classifier prompt and the small `max_tokens`; answers are not word-for-word
-repeatable.
+Separate objects so tests stub them without a key; the SDK is imported inside `_create`, so
+this module needs no `anthropic`. No sampling parameters: the pinned SDK has no `temperature`.
 """
 import os
 from dataclasses import dataclass, field
 from typing import Protocol
 
-# Same default for both: the split is for configurability, not cost.
+# same default for both: the split is for configurability, not cost.
 DEFAULT_MODEL = "claude-haiku-4-5"
 
 
@@ -32,9 +22,8 @@ CHAT_MODEL_GENERATE = _model_from_env("CHAT_MODEL_GENERATE")
 CLASSIFIER_MAX_TOKENS = 256
 GENERATOR_MAX_TOKENS = 1024
 
-# The classifier's whole tool list, in this one place. With the choice forced a
-# tool call is always made, so declining is itself a tool: out_of_scope. Adding an
-# intent is one more entry here.
+# the classifier's whole tool list. The choice is forced, so declining is itself a tool:
+# out_of_scope.
 TOOLS = [
     {
         "name": "document_lookup",
@@ -103,15 +92,15 @@ class ToolCall:
 
 @dataclass
 class ClassifierResult:
-    tool_call: ToolCall | None  # None: not expected (the choice is forced); treated as malformed
-    tokens: int                 # provider-reported input + output
+    tool_call: ToolCall | None  # None is unexpected (choice is forced): treated as malformed
+    tokens: int  # provider-reported input + output
 
 
 @dataclass
 class GeneratorResult:
     text: str
     tokens: int
-    truncated: bool = False  # the provider stopped at max_tokens: the text may be incomplete
+    truncated: bool = False  # provider stopped at max_tokens: text may be incomplete
 
 
 class Classifier(Protocol):
@@ -123,10 +112,9 @@ class Generator(Protocol):
 
 
 class LLMUnavailable(Exception):
-    """The model service cannot be used: missing key or SDK, or a provider error
-    (usage limit, rate limit, outage). The SDK has already retried transient
-    errors (default max_retries=2, so a 429 or 5xx is called 3 times); a usage-limit 400
-    or spend-limit 429 will not clear by retrying, but is retried (429) before this is raised."""
+    """The model service cannot be used: missing key or SDK, or a provider error. The SDK has
+    already retried transient errors (max_retries=2); a usage-limit 400 or spend-limit 429 will not
+    clear on retry (the 429 is still retried: 3 calls in all)."""
 
 
 @dataclass
@@ -136,22 +124,21 @@ class ChatLLM:
 
 
 def _create(client, **request):
-    """One messages.create call; any provider or configuration failure becomes
-    LLMUnavailable. The cause is chained and logged by the router, never sent to the client."""
+    """One messages.create call; any failure becomes LLMUnavailable (cause chained, logged by
+    the router, never sent to the client)."""
     try:
-        if client is None:  # built here, not at wiring time: a missing key or SDK is a runtime error
+        if client is None:  # built here, not at wiring time, so a missing key or SDK is a runtime error
             import anthropic
 
             client = anthropic.Anthropic()
         return client.messages.create(**request)
-    except Exception as exc:  # ImportError, AnthropicError (no key), APIStatusError, connection errors
+    except Exception as exc:  # ImportError, no key, APIStatusError, connection errors
         raise LLMUnavailable(type(exc).__name__) from exc
 
 
 class AnthropicClassifier:
     def __init__(self, client=None) -> None:
-        # `client` is for the offline transport test; None means a client is built,
-        # reading ANTHROPIC_API_KEY, on every call.
+        # `client` is for the offline transport test; None builds one per call.
         self._client = client
 
     def classify(self, question: str) -> ClassifierResult:
@@ -195,7 +182,6 @@ class AnthropicGenerator:
 def get_chat_llm() -> ChatLLM:
     """FastAPI dependency; tests override it with stubs.
 
-    Cheap and cannot fail: the SDK client is built inside each model call, after the budget
-    check, so a missing ANTHROPIC_API_KEY (or SDK) is LLMUnavailable (503), and an
-    over-budget member still gets the budget 429 first."""
+    Cheap and cannot fail: the SDK client is built inside each model call, after the budget check,
+    so a missing key is a 503 and an over-budget member still gets the 429 first."""
     return ChatLLM(AnthropicClassifier(), AnthropicGenerator())

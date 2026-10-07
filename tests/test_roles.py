@@ -1,8 +1,7 @@
 """Roles: who may write to the CMS (members.role, require_editor / require_admin).
 
-Content writes (add and delete) are for editors and admins. A bearer token alone
-is not enough: anyone holding an invite can sign up, so "has a token" only means
-"signed up".
+Content writes are for editors and admins; a token alone is not enough, since anyone holding
+an invite can sign up and "has a token" only means "signed up".
 """
 import importlib
 import pkgutil
@@ -21,9 +20,8 @@ from tests.conftest import signup_member
 
 PASSWORD = "correct horse battery"
 
-# Every route that mutates the CMS, in the order the matrix runs them. If a new
-# write route appears this list, the route-guard test below, and the OpenAPI
-# scan in test_auth.py must all be updated on purpose.
+# every route that mutates the CMS, in matrix order. A new write route means updating this
+# list, the route-guard test below and the OpenAPI scan in test_auth.py on purpose.
 WRITE_ROUTES = [
     "POST /main-categories",
     "POST /sub-categories",
@@ -50,8 +48,7 @@ def sql(statement, **params):
 
 
 def _guard_roles(route: APIRoute) -> set[tuple[str, ...]]:
-    """The allowed-role tuples of every require_roles() guard on a route,
-    found by walking its dependency tree (route-level and parameter-level)."""
+    """Allowed-role tuples of every require_roles() guard on a route (route- and parameter-level)."""
     found: set[tuple[str, ...]] = set()
     stack = [route.dependant]
     while stack:
@@ -68,10 +65,8 @@ def _guard_roles(route: APIRoute) -> set[tuple[str, ...]]:
 def _all_route_guards() -> dict[str, set[tuple[str, ...]]]:
     """"METHOD /path" -> role guards, for every route of every module in app/router.
 
-    Walks each router's own `.routes` (public API) rather than `app.routes`:
-    this FastAPI wraps an included router in a lazy private object, so the app
-    does not list its routes directly. The OpenAPI cross-check below proves no
-    route was missed."""
+    Walks each router's `.routes` (public API), not `app.routes`: this FastAPI wraps an included
+    router in a lazy private object. The OpenAPI cross-check below proves no route was missed."""
     guarded = {}
     for module in pkgutil.iter_modules(importlib.import_module("app.router").__path__):
         router = importlib.import_module(f"app.router.{module.name}").router
@@ -84,8 +79,8 @@ def _all_route_guards() -> dict[str, set[tuple[str, ...]]]:
 
 
 def test_exactly_the_five_cms_write_routes_are_guarded_by_require_editor_and_the_member_routes_by_require_admin():
-    """Fails if a guard is removed from one of the five routes or from GET
-    /members, PATCH /members/{member_id} or DELETE /members/{member_id}, or added to (or missing on) any other route."""
+    """Fails if a guard is removed from one of the five routes or from the member-management
+    routes, or added to (or missing on) any other route."""
     guarded = _all_route_guards()
 
     # Cross-check: this saw every route the app serves (bar the root "/").
@@ -115,9 +110,8 @@ def test_require_roles_refuses_a_role_that_does_not_exist():
 # --- role-by-route matrix ----------------------------------------------------
 
 def _run_write_routes(client) -> list[int]:
-    """Call the five write routes in dependency order and return their statuses.
-    Meant for a caller allowed to write: each id needed by a later call comes
-    from an earlier response."""
+    """Call the five write routes in dependency order and return their statuses (for a caller
+    allowed to write: later calls use ids from earlier responses)."""
     main = client.post("/main-categories", json={"slug": "m", "name": "M"})
     sub = client.post(
         "/sub-categories",
@@ -150,8 +144,8 @@ def _run_write_routes(client) -> list[int]:
 
 
 def _requests_for_member_without_setup(client) -> list[int]:
-    """The five calls with throwaway ids: a guard must answer before the route
-    looks anything up, so a refused caller sees 403 whether or not the row exists."""
+    """The five calls with throwaway ids: a guard must answer before any lookup, so a refused
+    caller sees 403 whether or not the row exists."""
     return [
         client.post("/main-categories", json={"slug": "m", "name": "M"}).status_code,
         client.post(
@@ -213,9 +207,8 @@ def _seed_rows() -> dict[str, int]:
 
 
 def _calls_that_would_change_rows(client, ids) -> list[int]:
-    """The five write calls with REAL ids and distinct slugs/titles, ordered so
-    nothing cancels: the POSTs go first (an unguarded one really inserts), then
-    the DELETEs hit the seeded rows. Used for a caller who must be refused."""
+    """The five write calls with REAL ids and distinct slugs, ordered so nothing cancels: POSTs
+    first (an unguarded one really inserts), then DELETEs. For a caller who must be refused."""
     return [
         client.post("/main-categories", json={"slug": "new-main", "name": "New"}).status_code,
         client.post(
@@ -255,8 +248,7 @@ def test_a_refused_member_changes_nothing(client_with_role):
 
 @pytest.mark.parametrize("role", EDITOR_ROLES)
 def test_editor_and_admin_clear_all_five_write_routes(client_with_role, role):
-    # 201 x3 for the creates, 200 for the sub-category delete (it returns a
-    # count), 204 for the main-category delete.
+    # 201 x3 for the creates, 200 for the sub-category delete (a count), 204 for the main-category delete.
     assert _run_write_routes(client_with_role(role)) == [201, 201, 201, 200, 204]
 
 
@@ -304,9 +296,8 @@ def test_the_database_check_rejects_an_unknown_role_on_insert(client):
 
 
 def test_role_is_read_from_the_member_row_not_the_token(client_with_role):
-    """Demote an editor: the token they already hold stops working at once;
-    promote them back and the same token works again. Nothing about a role is
-    in the token, so nothing waits for it to expire."""
+    """Demote an editor: their existing token stops working at once; promote back and it works
+    again. Nothing about a role is in the token."""
     editor = client_with_role("editor")
     body = {"slug": "first", "name": "First"}
     assert editor.post("/main-categories", json=body).status_code == 201
@@ -363,9 +354,8 @@ def test_signup_promote_login_then_write_and_a_promotion_reaches_an_issued_token
 
 
 def test_member_roles_match_what_the_database_check_accepts(client_with_role):
-    """MEMBER_ROLES, the model CHECK and the migration CHECK are three copies of
-    one list; `alembic check` does not compare CHECKs, so pin the pair that
-    matters here against the live constraint by trying each candidate."""
+    """MEMBER_ROLES, the model CHECK and the migration CHECK are three copies of one list, and
+    `alembic check` ignores CHECKs, so pin the live constraint by trying each candidate."""
     member = client_with_role("member")
     candidates = set(model.MEMBER_ROLES) | {"superuser", "root", "owner", "moderator", "Admin", ""}
     accepted = set()

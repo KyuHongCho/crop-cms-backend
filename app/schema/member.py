@@ -8,14 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 
 import app.model.model as model
 
-# Ceiling for tokens_budget_daily set by an admin: an assumption, change it here.
+# ceiling for an admin-set tokens_budget_daily: an assumption, change it here.
 MAX_TOKENS_BUDGET_DAILY = 10_000_000
-# Longest an invite may stay valid, in days.
+# longest an invite may stay valid, in days.
 MAX_INVITE_DAYS = 30
-# An invite's bound email: one rule for the route (InviteCreate) and
-# scripts/make_invite.py. Surrounding whitespace is allowed (stripped on save);
-# Control characters (incl. NUL, which PostgreSQL rejects, and \x1c-\x1f, which
-# str.strip removes but the route's Rust regex does not call whitespace) are refused.
+# one rule for the route and scripts/make_invite.py. Surrounding whitespace is allowed (stripped
+# on save); control characters are refused (NUL breaks PostgreSQL; \x1c-\x1f are stripped by
+# str.strip but not by the route's Rust regex).
 INVITE_EMAIL_PATTERN = r"^\s*[^@\s\x00-\x1f]+@[^@\s\x00-\x1f]+\s*$"
 INVITE_EMAIL_MIN = 3
 INVITE_EMAIL_MAX = 255
@@ -39,15 +38,13 @@ class MemberCreate(BaseModel):
     email: str = Field(min_length=3, max_length=255, pattern=r"^[^@\s\x00]+@[^@\s\x00]+$")
     password: str = Field(min_length=8, max_length=128)
     display_name: str | None = Field(default=None, max_length=64)
-    # Required: signup admits only a holder of an unused, unexpired invite. The
-    # member's role is the invite's; the body has no say (a "role" key is ignored).
+    # required: signup admits only an unused, unexpired invite; the role comes from the invite.
     invite_code: str = Field(min_length=20)
 
     @field_validator("display_name")
     @classmethod
     def _no_nul(cls, value):
-        # PostgreSQL rejects NUL in text. (Lone surrogates need no validator: pydantic
-        # already refuses them; see the 422 handler in app/main.py.)
+        # PostgreSQL rejects NUL in text. (Lone surrogates: pydantic refuses them already.)
         if value is not None and "\x00" in value:
             raise ValueError("must not contain NUL")
         return value
@@ -139,7 +136,7 @@ class MemberAdminUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     role: Literal[model.MEMBER_ROLES] = None
-    # strict: a JSON integer only (true, "5", 5.0 and 1e3 are 422, not coerced).
+    # strict: a JSON integer only (true, "5", 5.0 and 1e3 are 422).
     tokens_budget_daily: int = Field(default=None, strict=True, ge=0, le=MAX_TOKENS_BUDGET_DAILY)
     # strict: a JSON boolean only ("true", 1 and null are 422).
     is_active: bool = Field(default=None, strict=True)

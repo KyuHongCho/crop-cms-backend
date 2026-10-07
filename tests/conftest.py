@@ -1,11 +1,7 @@
 """Shared fixtures.
 
-Everything in this suite runs against `db-test`/`cms_test`, never the dev
-server's `db`/`cms` -- see test_categories.py::test_suite_talks_to_the_test_database_never_dev
-for the guard test proper. This module checks the same thing again, right
-before _clean_database TRUNCATEs anything, since that fixture runs before
-every test: if it were ever pointed at the dev database, it would not just
-fail loudly, it would wipe it.
+Everything runs against `db-test`/`cms_test`, never dev `db`/`cms`: this module re-checks that
+right before _clean_database TRUNCATEs (it runs before every test and would wipe the dev database).
 """
 import asyncio
 import os
@@ -43,18 +39,9 @@ def _assert_test_database() -> None:
 
 
 def truncate_and_reseed() -> None:
-    """TRUNCATE every content table and put the 'Uncategorised' bucket back.
-
-    Reused by `_clean_database` below and, mid-test, by
-    test_categories.py::test_bucket_survives_truncate_and_reseed, which
-    calls this function a second time within one test. That demonstrates
-    why a per-test TRUNCATE must reseed the bucket (main_category id 1 /
-    sub_category id 1) -- skipping it would break every later test that
-    touches it.
-
-    Uses migrate_db.py's own sync engine and SEED_BUCKET_SQL rather than
-    duplicating the seed here, so the two cannot drift apart.
-    """
+    """TRUNCATE every content table and put the 'Uncategorised' bucket back (also called mid-test by
+    test_categories.py::test_bucket_survives_truncate_and_reseed; skipping the reseed would break every
+    later test touching the bucket). Reuses SEED_BUCKET_SQL so the two cannot drift."""
     with sync_engine.begin() as connection:
         connection.execute(
             text(
@@ -74,9 +61,8 @@ def _clean_database():
 
 @pytest.fixture
 def client():
-    # raise_server_exceptions=False: an unhandled exception in the app
-    # surfaces as an HTTP 500 response, the way a real client sees it,
-    # instead of bubbling up as a Python exception inside the test.
+    # raise_server_exceptions=False: an unhandled exception surfaces as an HTTP 500, as a real
+    # client sees it, not as a Python exception in the test.
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -91,13 +77,9 @@ def sync_db_session():
 
 @pytest.fixture
 def client_with_role(monkeypatch):
-    """A factory: `client_with_role("editor")` is a TestClient already carrying a
-    valid bearer token for a member who holds that role.
-
-    The member row is inserted through the sync engine and the token minted
-    directly, so no signup/argon2 round trip (and no role ever travels through
-    the API, which has no way to set one). It sets SECRET_KEY itself, so tests
-    that only want an authorised client need not.
+    """A factory: `client_with_role("editor")` is a TestClient with a valid bearer token for a member
+    holding that role. The member is inserted via the sync engine and the token minted directly (no
+    argon2 round trip; no role travels through the API). Sets SECRET_KEY itself.
     """
     monkeypatch.setenv("SECRET_KEY", secrets.token_hex(32))
 
@@ -127,16 +109,8 @@ def editor_client(client_with_role):
 def signup_member(client, email="grower@example.com", password=DEFAULT_PASSWORD, **extra):
     """Create a member through the signup route and return the Response.
 
-    The one place a test that needs a real login (a password hash argon2 can
-    verify) creates its member, so a change to how members come into being is
-    one edit here. Signup needs an invite, so this stores one (make_invite, below)
-    and sends its code, unless `invite_code` is passed in `**extra`. The rest of
-    `**extra` is merged into the JSON body, so `role="admin"` is a body key the
-    route must ignore. Two keys are for the helper and never sent: `invite_role`
-    (the role the invite grants, default member) and `invite_email` (bind the
-    invite to that address). Tests whose subject is signup itself may still post
-    to /members/signup directly.
-    """
+    Signup needs an invite, so this stores one unless `invite_code` is in `**extra`; the rest of
+    `**extra` joins the JSON body. `invite_role`/`invite_email` are for the helper, never sent."""
     invite_role = extra.pop("invite_role", "member")
     invite_email = extra.pop("invite_email", None)
     if "invite_code" not in extra:

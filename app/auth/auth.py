@@ -1,12 +1,7 @@
 """Password hashing and JWT signing. No database, no FastAPI.
 
-Argon2 (pwdlib's recommended hasher) is deliberately slow -- hundreds of
-milliseconds per call -- so `hash_password` / `verify_password` are async and
-run it in the threadpool; called directly inside an `async def` endpoint it
-would stall every concurrent request, not just the one logging in.
-
-There is no refresh-token flow: a token lives ACCESS_TOKEN_EXPIRE_MINUTES
-(30 by default) and the member logs in again.
+Argon2 is slow, so hash/verify run in the threadpool (inline they would stall every request).
+No refresh tokens: a token lives ACCESS_TOKEN_EXPIRE_MINUTES.
 """
 import os
 import secrets
@@ -21,19 +16,16 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
 
 _password_hash = PasswordHash.recommended()  # Argon2id
 
-# A real argon2 hash of a throwaway string, computed once. login verifies
-# against it when the email is unknown, so that path costs as much as a wrong
-# password and response time does not reveal which emails are registered.
+# a real argon2 hash of a throwaway string: login verifies against it for an unknown email,
+# so that path costs as much as a wrong password and timing does not reveal registered emails.
 DUMMY_HASH = _password_hash.hash(secrets.token_hex(16))
 
 
 def get_secret_key() -> str:
-    """The signing key. No default, so a missing one fails loudly -- but read
-    at call time, not import time (unlike DB_PASSWORD in app/db/db.py), so the
-    offline test suite, which signs with a key its own fixture generates, can
-    import the app with no SECRET_KEY set."""
-    key = os.environ["SECRET_KEY"]  # secret: no default, fail loudly
-    if not key:  # docker-compose.yaml's bare ${SECRET_KEY} passes "" when .env lacks it
+    """The signing key. No default, so a missing one fails loudly, but read at call time (unlike
+    DB_PASSWORD) so the offline test suite can import the app with no SECRET_KEY set."""
+    key = os.environ["SECRET_KEY"]
+    if not key:  # compose's bare ${SECRET_KEY} passes "" when .env lacks it
         raise KeyError("SECRET_KEY is set but empty")
     return key
 

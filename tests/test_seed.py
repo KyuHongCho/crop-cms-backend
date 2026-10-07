@@ -1,21 +1,7 @@
-"""Seed corpus tests.
+"""Seed corpus tests (db-test/cms_test; conftest's autouse _clean_database TRUNCATEs first).
 
-Runs against db-test/cms_test like every other test here (conftest.py's
-autouse _clean_database fixture TRUNCATEs first). scripts/seed.py never
-imports crop_advisor: its seven FAO ECOCROP `optimal-temperature` documents
-(one per crop) and the seven `ecocrop_id` values are pinned, along with basil's
-two second-hand journal documents (Chang et al. 2005, Walters & Currey 2019),
-to literal strings copied from crop_advisor/claims.py. The drift tests below
-(one for basil, one per other crop) notice when the two diverge, but need a
-*live* import of the sibling repo -- not always available to a developer who
-has not checked out crop-climate-advisor (CI always has it; both checkouts run
-before every other step).
-
-That import is guarded with pytest.importorskip rather than a bare
-`import`, because a failed bare import is a collection error: pytest exits
-2 and reddens the *whole* file, including tests that need no such thing.
-test_bare_advisor_import_would_fail_collection proves that failure mode
-directly, and that the guard avoids it.
+The drift tests need a live import of the advisor repo, guarded by pytest.importorskip: a bare
+import failing is a collection error (exit 2) that reddens the whole file. CI always has it.
 """
 import os
 import pathlib
@@ -30,12 +16,8 @@ from scripts import seed
 
 _ADVISOR_PATH = os.environ.get("ADVISOR_PATH")
 if _ADVISOR_PATH and _ADVISOR_PATH not in sys.path:
-    # append, not insert(0): insert(0) would put /advisor ahead of /src and the
-    # stdlib -- guaranteed by list.insert's own semantics, not something
-    # specific to this repo. Nothing collides only because the advisor's
-    # scripts/ and tests/ lack __init__.py, so this repo's regular packages
-    # win regardless of order -- a property of the advisor's layout, not one
-    # this file asserts.
+    # append, not insert(0), which would put /advisor ahead of /src and the stdlib. Nothing
+    # collides only because the advisor's scripts/ and tests/ lack __init__.py.
     sys.path.append(_ADVISOR_PATH)
 
 claims = pytest.importorskip(
@@ -68,9 +50,8 @@ def _items_for_crop(db_session, crop_slug: str) -> list[Item]:
 
 
 def test_basil_corpus_counts_per_topic(sync_db_session):
-    """basil's corpus, counted exactly (the other crops are counted by their own test below).
-    Published and unpublished are split so the DRAFT fixture cannot hide a missing document:
-    the five RHS claims with no CC BY basil source were dropped, not stood in for."""
+    """basil's corpus, counted exactly. Published and unpublished are split so the DRAFT fixture
+    cannot hide a missing document: the five RHS claims with no CC BY source were dropped."""
     seed.main()
     items = _items_for_crop(sync_db_session, "basil")
     published = {}
@@ -95,8 +76,8 @@ def test_basil_corpus_counts_per_topic(sync_db_session):
 
 
 def test_basil_propagation_document_says_it_is_not_about_cuttings(sync_db_session):
-    """The one published propagation document covers light while raising seedlings from
-    seed; it must say so, so it is not read as backing the dropped stem-cutting claim."""
+    """The one published propagation document covers raising seedlings from seed and must say
+    so, so it is not read as backing the dropped stem-cutting claim."""
     seed.main()
     (doc,) = [i for i in _items_by_topic(sync_db_session, "propagation") if i.published]
     assert doc.source == "Walters & Lopez (2022)"
@@ -109,8 +90,7 @@ def test_seed_is_idempotent(sync_db_session):
     first = sorted((i.title, i.topic, i.source) for i in sync_db_session.execute(select(Item)).scalars())
 
     seed.main()
-    # seed.main() writes through its own session, so force this one to re-read
-    # from the database rather than trust what it already holds in memory.
+    # seed.main() writes through its own session; force this one to re-read from the database.
     sync_db_session.expire_all()
     second = sorted((i.title, i.topic, i.source) for i in sync_db_session.execute(select(Item)).scalars())
 
@@ -118,10 +98,8 @@ def test_seed_is_idempotent(sync_db_session):
 
 
 def test_seed_repairs_a_row_edited_outside_the_script(sync_db_session):
-    """Re-running must bring an edited row back in line, not merely avoid
-    duplicating it. test_seed_is_idempotent cannot see this: both of its runs
-    write identical content, so an update branch that silently did nothing
-    would look exactly like one that works.
+    """Re-running must bring an edited row back in line, not merely avoid duplicating it.
+    test_seed_is_idempotent cannot see this: a do-nothing update branch looks identical there.
     """
     seed.main()
     doc = sync_db_session.execute(select(Item)).scalars().first()
@@ -146,9 +124,8 @@ def test_three_temperature_documents_share_one_topic(sync_db_session):
 
 
 def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_session):
-    """The drift test proper. Fails when the test suite runs if
-    scripts/seed.py's pinned literals stop matching what the advisor's
-    registry actually returns."""
+    """The drift test proper: fails when scripts/seed.py's pinned literals stop matching the
+    advisor's registry."""
     seed.main()
     seeded_sources = sorted(d.source for d in _items_by_topic(sync_db_session, "optimal-temperature"))
 
@@ -158,12 +135,8 @@ def test_optimal_temperature_sources_match_the_live_registry_drift(sync_db_sessi
 
 
 def test_second_hand_basil_via_and_url_match_the_live_advisor_claims_drift(sync_db_session):
-    """Drift check on the provenance of the two second-hand basil documents: the seeded
-    `via` and `url` equal the live advisor claim's, keyed by `source`.
-
-    NOTE: reads the advisor's `claims.JOURNAL_TEMPERATURE_CLAIMS`, and CI checks the advisor
-    out unpinned (.github/workflows/ci.yml), so this follows the advisor's default branch,
-    whose claims credit Walters, Tarr & Lopez 2023 (PMC10688745) for both."""
+    """Drift check on the two second-hand basil documents: seeded `via` and `url` equal the
+    live advisor claim's. CI checks the advisor out unpinned, so this follows its default branch."""
     seed.main()
     seeded = {d.source: d for d in _items_by_topic(sync_db_session, "optimal-temperature")}
     live = {c.source: c for c in claims.JOURNAL_TEMPERATURE_CLAIMS}
@@ -180,8 +153,8 @@ def test_second_hand_basil_via_and_url_match_the_live_advisor_claims_drift(sync_
                            "pest-and-disease": 3, "propagation": 3}),
         ("strawberry", 1112, {"optimal-temperature": 1, "watering-needs": 1, "nutrient-solution": 1,
                               "pest-and-disease": 2, "propagation": 2}),
-        # tomato and sweet pepper have no watering-needs document: all of theirs are about
-        # solution composition (gaps stay absent).
+        # tomato and sweet pepper have no watering-needs document
+        # (all theirs are about solution composition).
         ("tomato", 1379, {"optimal-temperature": 1, "nutrient-solution": 3,
                           "pest-and-disease": 3, "propagation": 1}),
         ("cucumber", 817, {"optimal-temperature": 1, "watering-needs": 1, "nutrient-solution": 2,
@@ -193,8 +166,7 @@ def test_second_hand_basil_via_and_url_match_the_live_advisor_claims_drift(sync_
     ],
 )
 def test_new_crop_pin_matches_the_live_registry(sync_db_session, slug, ecocrop_id, per_topic):
-    """Per-crop drift test: the seeded Crop.ecocrop_id and the ECOCROP
-    document's pinned source must equal what the advisor's registry returns."""
+    """Per-crop drift test: Crop.ecocrop_id and the ECOCROP document's source equal the registry's."""
     seed.main()
     live_claims = claims.temperature_claims(ecocrop.load_crop(slug))
     live_ecocrop_sources = [c.source for c in live_claims if c.source.startswith("FAO ECOCROP")]
@@ -213,11 +185,9 @@ def test_new_crop_pin_matches_the_live_registry(sync_db_session, slug, ecocrop_i
 
 
 def test_licence_notes_use_the_shared_wording(sync_db_session):
-    """Every ECOCROP document carries the shared FAO note and every journal document
-    carries the shared CC BY note. The constants are also pinned by literal substrings
-    (the FAO terms URL, "non-commercially", "CC BY 4.0", "changes were made"), so the
-    wording cannot be edited away without this test noticing. It does not check that the
-    wording is legally sufficient, only that these terms are still present."""
+    """Every ECOCROP document carries the shared FAO note and every journal document the CC BY
+    note, pinned by literal substrings so the wording cannot be edited away unnoticed (not that
+    it is legally sufficient)."""
     assert "https://www.fao.org/contact-us/terms/en/" in seed._FAO_LICENCE_NOTE
     assert "non-commercially" in seed._FAO_LICENCE_NOTE
     assert "CC BY 4.0" in seed._CC_BY["licence_note"]
@@ -229,9 +199,8 @@ def test_licence_notes_use_the_shared_wording(sync_db_session):
     assert len(ecocrop_docs) == len(seed._CROP_SPECS)
     assert all(i.licence_note == seed._FAO_LICENCE_NOTE for i in ecocrop_docs)
 
-    # Journal documents: every non-basil crop's non-ECOCROP documents, plus basil's published
-    # journal documents (basil's temperature papers are read via a secondary source, the folk
-    # remedy and the DRAFT fixture are not journal documents).
+    # journal documents: non-ECOCROP documents of every non-basil crop, plus basil's published
+    # journal ones (its temperature papers are second-hand; folk remedy and DRAFT are not journals).
     cc_by_slugs = [c["slug"] for c, _, _ in seed._CROP_SPECS if c["slug"] != "basil"]
     journal_docs = [
         i for slug in cc_by_slugs for i in _items_for_crop(sync_db_session, slug)
@@ -245,8 +214,7 @@ def test_licence_notes_use_the_shared_wording(sync_db_session):
     journal_docs += basil_journal_docs
     assert all(i.licence_note == seed._CC_BY["licence_note"] for i in journal_docs)
 
-    # The two second-hand basil documents were read through a CC BY paper (Walters, Tarr &
-    # Lopez 2023): they carry the shared "via" note, which is not the direct-read CC BY note.
+    # the two second-hand basil documents carry the shared "via" note, not the direct-read CC BY one.
     via_note = seed._CC_BY_VIA_NOTE
     assert "https://creativecommons.org/licenses/by/4.0/" in via_note
     assert "changes were made" in via_note
@@ -286,15 +254,9 @@ def test_one_document_source_not_in_the_registry(sync_db_session):
 
 
 def test_bare_advisor_import_would_fail_collection():
-    """Regression test for the failure mode this design avoids: a bare
-    `import crop_advisor.claims`, collected with no ADVISOR_PATH on
-    sys.path, makes pytest exit 2 -- a collection error that reddens the
-    whole suite, not just the tests that need the advisor.
-
-    Reproduces that directly in a subprocess with ADVISOR_PATH stripped,
-    then asserts the *actual* guarded test_seed.py still collects as a
-    clean skip (exit 5) under the same environment -- proving the
-    importorskip guard is what prevents the failure demonstrated above.
+    """Regression test: a bare `import crop_advisor.claims` with no ADVISOR_PATH makes pytest exit 2
+    (collection error, whole suite). Reproduced in a subprocess, then asserts the guarded
+    test_seed.py collects as a clean skip (exit 5), proving importorskip is what prevents it.
     """
     env = {k: v for k, v in os.environ.items() if k != "ADVISOR_PATH"}
 
@@ -317,10 +279,8 @@ def test_bare_advisor_import_would_fail_collection():
         text=True,
         cwd=str(pathlib.Path(__file__).resolve().parent.parent),
     )
-    # 5 == "no tests collected": pytest's own code for a clean module-level
-    # skip (importorskip fires during collection). That is the guard working
-    # as intended -- the failure mode it guards against is 2 ("Interrupted:
-    # N errors during collection"), asserted above for the bare-import case.
+    # 5 == "no tests collected": pytest's code for a clean module-level skip; the failure
+    # mode guarded against is 2 (collection errors).
     assert guarded.returncode == 5, (
         f"guarded test_seed.py did not collect as a clean skip with "
         f"ADVISOR_PATH unset (exit {guarded.returncode}, expected 5):\n"

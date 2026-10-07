@@ -12,24 +12,10 @@ router = APIRouter()
 
 
 async def _raise_from_integrity_error(db: AsyncSession, exc: IntegrityError) -> None:
-    """Discriminate the SQLSTATE. Never returns normally -- always raises.
+    """Map an IntegrityError to an HTTP error by SQLSTATE; always raises.
 
-    23505 (unique_violation) -> 409, naming the constraint that actually
-    fired via exc.orig.diag.constraint_name. A blanket `IntegrityError -> 409`
-    would misreport a desynced sequence's pkey collision (constraint
-    "main_categories_pkey") as "a category with that slug already exists"
-    (constraint "main_categories_slug_key"); naming the real constraint
-    tells the two apart.
-
-    23514 (check_violation) -> 422, a documented drift backstop (see the
-    P0001 handler in delete_sub_category below). Neither category table has
-    a CHECK constraint today, so this branch is unreachable here -- it
-    exists for the day one is added, mirroring how
-    schema/item.py:ItemCreate's validator already returns 422 for
-    Item.read_directly_excludes_via before the database is asked.
-
-    Anything else is re-raised untouched: a real bug (a typo'd column, a
-    missing table) must stay a 500, not be dressed up as a conflict.
+    23505 -> 409 naming the constraint (a blanket 409 would hide a pkey collision as a duplicate
+    slug); 23514 -> 422 backstop for a future CHECK. Anything else is re-raised, staying a 500.
     """
     await db.rollback()
     sqlstate = getattr(exc.orig, "sqlstate", None)
@@ -47,8 +33,7 @@ async def _raise_from_integrity_error(db: AsyncSession, exc: IntegrityError) -> 
     raise exc
 
 
-# "main category" = kind of knowledge -- see MainCategory's docstring in
-# model.py for what that means and why a crop is not one.
+# "main category" = kind of knowledge (see MainCategory in model.py); a crop is not one.
 @router.get(
     "/main-categories",
     response_model=list[category_schema.MainCategoryResponse],
@@ -91,8 +76,7 @@ async def create_sub_category(
     body: category_schema.SubCategoryCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    # Checked here rather than left to the foreign key: the FK violation is an
-    # IntegrityError, which reaches the client as an opaque HTTP 500.
+    # checked here: the FK violation would reach the client as an opaque 500.
     if not await db.get(model.MainCategory, body.main_category_id):
         raise HTTPException(status_code=404, detail="Main category not found")
     try:
@@ -120,8 +104,7 @@ async def delete_main_category(
     if not main_category:
         raise HTTPException(status_code=404, detail="Main category not found")
 
-    # Counted here so the 409 can say how many. Left to the database, it would
-    # be a foreign-key error -- an opaque 500 (as with the create endpoint).
+    # counted here so the 409 can say how many; the FK error would be an opaque 500.
     children = await category_crud.count_sub_categories(db, main_category_id)
     if children:
         raise HTTPException(
@@ -156,10 +139,8 @@ async def delete_sub_category(
     if not sub_category:
         raise HTTPException(status_code=404, detail="Sub-category not found")
 
-    # The bucket is where everything else gets refiled TO. Without it, a later
-    # delete fails on a foreign key naming `items` -- a table the caller never
-    # touched. Checked here for a readable message; the trigger refuses it
-    # again anyway, for callers that never run this code.
+    # the bucket is where everything else is refiled TO; deleting it would break a later
+    # delete on a FK naming `items`. The trigger refuses it too, for callers outside this code.
     if sub_category_id == model.UNCATEGORISED_SUB_CATEGORY_ID:
         raise HTTPException(
             status_code=409,
@@ -172,11 +153,8 @@ async def delete_sub_category(
     try:
         refiled = await category_crud.delete_sub_category(db, sub_category)
     except ProgrammingError as exc:
-        # P0001 is the code PostgreSQL gives a trigger's own RAISE. Narrow on
-        # purpose: ProgrammingError also covers real bugs, like a typo'd query
-        # or a missing column, and dressing those up as an ordinary conflict is
-        # worse than a 500. Everything else is re-raised untouched. (Duplicate
-        # slugs and the like are IntegrityError, which never reaches here.)
+        # P0001 is a trigger's own RAISE. Narrow on purpose: ProgrammingError also covers
+        # real bugs (typo'd query, missing column), which must stay a 500.
         if getattr(exc.orig, "sqlstate", None) != "P0001":
             raise
         await db.rollback()

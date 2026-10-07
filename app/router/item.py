@@ -10,8 +10,7 @@ from app.db.db import get_db
 router = APIRouter()
 
 
-# Unfiltered, deliberately -- see get_items's docstring in app/crud/item.py
-# for why (Item.published defaults to false server-side).
+# unfiltered on purpose: Item.published defaults to false (see app/crud/item.py).
 @router.get("/items", response_model=list[item_schema.ItemResponse])
 async def get_items(db: AsyncSession = Depends(get_db)):
     return await item_crud.get_items(db)
@@ -27,9 +26,8 @@ async def create_item(
     body: item_schema.ItemCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    # Both checked here rather than left to the foreign keys, for the same
-    # reason as create_sub_category in app/router/category.py: an FK
-    # violation would otherwise reach the client as an opaque HTTP 500.
+    # checked here: an FK violation would reach the client as an opaque 500
+    # (as in create_sub_category).
     if not await db.get(model.SubCategory, body.sub_category_id):
         raise HTTPException(status_code=404, detail="Sub-category not found")
     if not await db.get(model.Crop, body.crop_id):

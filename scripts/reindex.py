@@ -3,26 +3,9 @@
     docker compose exec -T cms python -m scripts.reindex             # embed what changed
     docker compose exec -T cms python -m scripts.reindex --dry-run   # count only, embeds nothing
 
-`EMBEDDER` selects the provider (app/chat/embeddings.py): `openai` by default,
-which needs OPENAI_API_KEY; `fake` for offline runs.
-
-- **Every** document is embedded, published or not. Publishing is a metadata
-  flip; the `published_item_chunks` view filters at read time. Embedding only
-  published documents would reproduce, one layer down, the trap
-  app/router/item.py documents for GET /items.
-- A chunk is skipped when its stored `content_hash` and `model` both match.
-  The hash covers the embedded text (title + body), so a title-only edit
-  re-embeds too; the model check means switching embedder re-embeds rather
-  than leaving a mixed-model table.
-- When a document shrinks from N chunks to M, `chunk_index >= M` is deleted in
-  the same transaction as the upsert, so no orphan chunk outlives the text it
-  came from.
-- `--dry-run` reads and counts but never constructs the embedder, so it costs
-  nothing and needs no key.
-
-A script rather than app code: it writes the raw table through the ORM
-metadata, which app/chat/ is not allowed to name
-(tests/test_chat_layer_isolation.py).
+Embeds every document, published or not (the view filters at read time). A chunk is skipped when its
+content_hash and model match. `EMBEDDER` picks the provider: `openai` (default) needs OPENAI_API_KEY,
+`fake` runs offline. A script, not app code: it names the raw table, which app/chat/ may not.
 """
 import argparse
 from dataclasses import dataclass, field
@@ -44,8 +27,7 @@ _chunks = ItemChunk.__table__
 class _DocumentPlan:
     item_id: int
     chunk_count: int
-    # (chunk_index, text, hash) for every chunk whose stored copy is missing
-    # or out of date.
+    # (chunk_index, text, hash) for every chunk whose stored copy is missing or stale.
     to_embed: list[tuple[int, str, str]] = field(default_factory=list)
     stale: int = 0  # stored chunks at index >= chunk_count
 
@@ -100,8 +82,7 @@ def _write(engine: Engine, plan: _DocumentPlan, vectors: list[list[float]], mode
                     content_hash=statement.excluded.content_hash,
                     embedding=statement.excluded.embedding,
                     model=statement.excluded.model,
-                    # A new vector, so a new embed time. created_at is left
-                    # alone: it records the row's first insert.
+                    # new vector, new embed time; created_at stays the first insert.
                     embedded_at=func.now(),
                 ),
             ))
@@ -147,8 +128,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true",
                         help="print the chunk count and what would change, then stop")
     args = parser.parse_args()
-    # migrate_db.py's engine is built with echo=True; the SQL log would bury
-    # the counts this script exists to print.
+    # migrate_db.py's engine has echo=True; the SQL log would bury the counts.
     sync_engine.echo = False
     reindex(dry_run=args.dry_run)
 

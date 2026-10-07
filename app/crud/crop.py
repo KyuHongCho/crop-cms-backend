@@ -1,9 +1,4 @@
-"""Data access for crops.
-
-Read-only by design -- see app/schema/crop.py's module docstring for why
-(crops mirror the advisor's ECOCROP data) and CropResponse for the field
-mapping.
-"""
+"""Data access for crops; read-only by design (see app/schema/crop.py)."""
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

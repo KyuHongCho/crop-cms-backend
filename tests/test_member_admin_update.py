@@ -1,10 +1,7 @@
 """Member management for admins: PATCH /members/{id} (role, daily budget, is_active).
 
-Covers who may call it, the 422 and 404 cases, the self and last-admin 409
-rules, one audit row per real change in the same transaction as the change, and
-the two overlapping-transaction tests (plain count versus FOR UPDATE). The role
-matrix uses client_with_role; the one test that needs a real login uses
-signup_member.
+Covers access, the 422/404 cases, the self and last-admin 409 rules, one audit row per change in
+the same transaction, and the two overlapping-transaction tests (plain count versus FOR UPDATE).
 """
 import asyncio
 import random
@@ -350,10 +347,9 @@ def test_the_lock_returns_only_the_active_admins_and_the_target():
 
 
 def test_an_inactive_admin_is_not_counted_as_the_last_active_admin():
-    """An inactive admin target is not "the only active admin" (the decision gets []),
-    and an inactive actor is refused 403. The `row.is_active` mutant is killed by
-    test_the_lock_returns_only_the_active_admins_and_the_target and by
-    test_a_stale_actor_who_is_also_the_target_is_refused_403."""
+    """An inactive admin target is not "the only active admin" (the decision gets []); an inactive
+    actor is refused 403. Kills the `row.is_active` mutant, with
+    test_the_lock_returns_only_the_active_admins_and_the_target and ..._the_target_is_refused_403."""
     actor = add_member("admin", is_active=False)
     target = add_member("admin", is_active=False)
     status, row, audit = call_handler(actor, target, role="member")
@@ -473,10 +469,9 @@ def test_if_the_database_rejects_the_audit_row_the_change_is_rolled_back(client_
 # --- overlapping transactions ------------------------------------------------
 
 def test_two_admins_demoting_each_other_through_the_handler_leave_one_admin(monkeypatch):
-    """The same overlap through the real update_member: the first request is
-    held after its audit helper runs (change flushed, lock held, not committed);
-    the second must block on the lock, then find its actor no longer an active
-    admin and answer 403 (the actor check comes before the last-admin rule)."""
+    """The same overlap through the real update_member: the first request is held after its audit
+    helper (change flushed, lock held, uncommitted); the second blocks, then finds its actor no
+    longer an active admin and answers 403 (actor check precedes the last-admin rule)."""
     a, b = two_admins()
     engine = create_async_engine(app_db.ASYNC_DB_URL)
     real_record = audit_crud.record_member_update
@@ -519,11 +514,9 @@ def test_two_admins_demoting_each_other_through_the_handler_leave_one_admin(monk
 
 
 def test_many_concurrent_patches_through_the_handler_never_deadlock():
-    """10 workers send random role and budget changes (promotions and demotions
-    among 4 admins and 4 members) straight to update_member on their own
-    sessions. A refusal (409) is fine; a database error (a deadlock victim
-    would surface as one, and a 500) is not. At least one patch must have
-    gone through (200), so a run drained by refusals cannot pass."""
+    """10 workers send random role and budget changes among 4 admins and 4 members straight to
+    update_member. A 409 is fine; a database error (a deadlock victim would surface as one) is
+    not. At least one patch must succeed, so a run drained by refusals cannot pass."""
     ids = [add_member("admin") for _ in range(4)] + [add_member("member") for _ in range(4)]
     engine = create_async_engine(app_db.ASYNC_DB_URL, pool_size=10)
 
@@ -558,11 +551,9 @@ def test_many_concurrent_patches_through_the_handler_never_deadlock():
 
 
 def test_why_the_lock_is_one_statement_two_statement_locking_deadlocks():
-    """A "why" test: it documents the Postgres hazard the single ordered statement
-    avoids and exercises no app code (raw SQL on the sync engine, two connections,
-    the two queries in the order the first design ran them). t1 locks the admin set
-    {a}; N is promoted and committed; t2 locks the new set {N, a}, waits on a;
-    t1 then locks N."""
+    """A "why" test: documents the Postgres hazard the single ordered statement avoids, with no
+    app code (raw SQL, two connections, the first design's query order): t1 locks admin set {a};
+    N is promoted and committed; t2 locks {N, a}, waits on a; t1 then locks N."""
     n = add_member("member")  # the lower id
     a = add_member("admin")
     admins = "SELECT id FROM members WHERE role = 'admin' AND is_active ORDER BY id FOR UPDATE"

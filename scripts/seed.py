@@ -1,37 +1,6 @@
-"""Seeds the basil, lettuce, strawberry, tomato, cucumber, sweet pepper and kale corpora,
-pinned to the crop-climate-advisor registry.
-
-A **script, not a migration**: `get_crops` in `app/router/crop.py` is
-GET-only (crops come from the advisor's ECOCROP data, not authored here),
-and there is no author endpoint for crops at all -- so this writes
-directly through the ORM, using the synchronous engine
-`app/db/migrate_db.py` already exposes.
-
-The ECOCROP `optimal-temperature` documents' `source` field (and each crop's
-`ecocrop_id`) is a **pinned literal**, copied by hand from
-`crop_advisor/claims.py` (this module never imports `crop_advisor`). Pinning
-means a future edit to the advisor's registry cannot silently change what
-this CMS claims about a crop; `tests/test_seed.py` has drift tests, one per
-crop, that catch the two diverging when the suite runs. (`reference`/`condition`/`via`/`url` are mostly, not
-always, exact copies, and are not drift-tested.)
-
-Idempotent for unchanged content: re-running updates the rows this script
-already wrote instead of duplicating them, keyed on (crop, title, source)
-for documents and on slug for the category scaffold and crop. Each crop gets
-its own main category with a "documents" sub-category (`_seed_crop`).
-
-`source` is part of the key so the script cannot adopt someone else's
-document that shares a title -- but that widens the key, and there is no
-delete path. Editing a `title` or `source` inserts a new row and leaves
-the old one behind; fix this by removing the superseded row by hand, or by
-re-seeding a fresh database.
-
-This matters for already-seeded databases: basil's eight "RHS Grow Your Own: Herbs"
-documents were replaced by CC BY journal documents, and the folklore document's source
-was renamed (it was "Old Farmer's Almanac (folklore)"). A database seeded before that
-keeps those superseded rows until they are removed by hand; a fresh
-database has none. Reseed a fresh database, or delete the superseded rows yourself.
-"""
+"""Seeds the crop corpora via the ORM (a script, not a migration: crops have no author endpoint).
+ECOCROP `source`/`ecocrop_id` are pinned literals; tests/test_seed.py drift tests catch divergence.
+Idempotent, keyed on (crop, title, source); title/source edits and stale basil rows need hand removal."""
 from sqlalchemy.orm import Session
 
 from app.db.migrate_db import engine as sync_engine
@@ -44,32 +13,25 @@ CROP = {
     "ecocrop_id": 1547,
 }
 
-# The topic field, not the category tree, is what groups documents for
-# retrieval (see Item's docstring in app/model/model.py: "retrieval returns
-# every document sharing a `topic`..."). One flat sub-category is enough here.
+# the topic field, not the category tree, groups documents for retrieval (see Item in model.py);
+# one flat sub-category is enough here.
 MAIN_CATEGORY = {"slug": "basil-content", "name": "Basil content"}
 SUB_CATEGORY = {"slug": "documents", "name": "Documents"}
 
 TOPIC_OPTIMAL_TEMPERATURE = "optimal-temperature"
 
-# Distinctive marker so tests can find the draft by its body text, kept as
-# a constant so nothing has to hand-copy the string.
+# marker so tests can find the draft by its body text, without hand-copying the string.
 DRAFT_BODY_MARKER = "INTERNAL-DRAFT-DO-NOT-PUBLISH-BASIL-PROPAGATION-NOTE"
 
-# Deliberately absent from the advisor's registry, for tests that check
-# registry membership.
+# deliberately absent from the advisor's registry, for registry-membership tests.
 OFF_REGISTRY_SOURCE = "Folklore (no citable source)"
 
-# --- documents ---------------------------------------------------------------
-# Each dict is passed straight to Item(**...); "topic", "published",
-# "read_directly" default below where every document in a group agrees.
+# --- documents ---
+# each dict goes straight to Item(**...); "topic", "published", "read_directly" default below.
 
-# FAO's general web-content terms (https://www.fao.org/contact-us/terms/en/, read
-# 2026-10-03) permit copying "for private study, research and teaching purposes, and
-# for use in non-commercial products or services, provided that appropriate
-# acknowledgement of FAO as the source and copyright holder is given and that FAO's
-# endorsement of users' views, products or services is not stated or implied in any
-# way". One shared note for every ECOCROP document.
+# FAO's general web-content terms (https://www.fao.org/contact-us/terms/en/, read 2026-10-03):
+# copying allowed with acknowledgement of FAO and no implied endorsement. One shared note for
+# every ECOCROP document.
 _FAO_LICENCE_NOTE = (
     "(c) FAO. Source: FAO ECOCROP (https://ecocrop.apps.fao.org/). Reused under the "
     "FAO Terms and Conditions (https://www.fao.org/contact-us/terms/en/), which permit "
@@ -78,8 +40,7 @@ _FAO_LICENCE_NOTE = (
     "here non-commercially. FAO's endorsement is not stated or implied."
 )
 
-# Shared by every journal document (all crops): the papers are CC BY 4.0, read in full
-# (read_directly=True, via=None). The ECOCROP documents keep _FAO_LICENCE_NOTE instead.
+# shared by every journal document: CC BY 4.0, read in full (read_directly=True, via=None).
 _CC_BY = dict(
     read_directly=True,
     via=None,
@@ -89,9 +50,8 @@ _CC_BY = dict(
     ),
 )
 
-# The two basil temperature papers (Chang et al. 2005, Walters & Currey 2019) are not read
-# directly: their figures were read in Walters, Tarr & Lopez (2023), which is CC BY 4.0
-# (c) 2023 Walters et al. One shared note for both; their via/url/read_directly stay as is.
+# the two basil temperature papers are not read directly: their figures were read in Walters, Tarr
+# & Lopez (2023), CC BY 4.0. One shared note for both.
 _CC_BY_VIA_NOTE = (
     "Read through Walters, Tarr & Lopez (2023), CC BY 4.0 "
     "(https://creativecommons.org/licenses/by/4.0/). Figure summarised from that "
@@ -283,7 +243,7 @@ _PEST_DOCS = [
         **_CC_BY,
     ),
     dict(
-        # Deliberately not a registry source -- see OFF_REGISTRY_SOURCE above.
+        # not a registry source -- see OFF_REGISTRY_SOURCE above.
         title="Folk remedy: basil planted beside tomatoes repels pests",
         body=(
             "Traditional companion-planting lore holds that basil grown beside "
@@ -293,8 +253,7 @@ _PEST_DOCS = [
         ),
         source=OFF_REGISTRY_SOURCE,
         reference="Traditional companion-planting lore, as commonly repeated in gardening guides",
-        # ItemBase.url has min_length=1 (app/schema/item.py) -- there being
-        # no single citable source is exactly what "folklore" means here.
+        # ItemBase.url has min_length=1; "folklore" means there is no single citable source.
         url="(no single citable source -- oral/traditional)",
     ),
 ]
@@ -321,8 +280,7 @@ _PROPAGATION_DOCS = [
         **_CC_BY,
     ),
     dict(
-        # Unpublished draft fixture: published stays False, body carries
-        # DRAFT_BODY_MARKER for draft-leak tests to find.
+        # unpublished draft fixture; DRAFT_BODY_MARKER lets draft-leak tests find it.
         title="DRAFT -- basil propagation, needs a second opinion before publishing",
         body=(
             f"{DRAFT_BODY_MARKER}: rooting hormone gel may speed root formation "
@@ -345,13 +303,9 @@ _TOPIC_GROUPS = [
     ("propagation", _PROPAGATION_DOCS),
 ]
 
-# --- the other crops ----------------------------------------------------------
-# Gaps stay absent: a topic with no verified source is not seeded for the crop
-# (neither crop has a soil-ph topic). `watering-needs` holds documents about how much, how
-# often or when water is supplied, or plant water use; documents about solution composition
-# or strength, salinity, ions, additives or hydroponic system type are `nutrient-solution`. Every journal document below was read in
-# full (read_directly=True, via=None); the ECOCROP document keeps its own FAO
-# licence_note.
+# --- the other crops ---
+# gaps stay absent: a topic with no verified source is not seeded. `watering-needs` is about
+# how much/often/when water is supplied; composition, salinity or system type is `nutrient-solution`.
 
 LETTUCE = {
     "slug": "lettuce",
@@ -699,13 +653,11 @@ _STRAWBERRY_TOPIC_GROUPS = [
     ("propagation", _STRAWBERRY_PROPAGATION_DOCS),
 ]
 
-# --- tomato, cucumber, sweet pepper and kale ----------------------------------
-# Same rules as above: gaps stay absent (none of these crops has a soil-ph topic, and a
-# topic with no verified source is not seeded), journal documents are read_directly=True
-# via=None under _CC_BY, and the ECOCROP document carries _FAO_LICENCE_NOTE.
+# --- tomato, cucumber, sweet pepper and kale ---
+# same rules as above: no soil-ph topic, journal documents read_directly=True via=None under
+# _CC_BY, and the ECOCROP document carries _FAO_LICENCE_NOTE.
 
-# ECOCROP datasheet id 1379 is titled with the synonym "Lycopersicon esculentum"; the
-# accepted name "Solanum lycopersicum" is used here (the pin is the id, not the name).
+# ECOCROP id 1379 is titled "Lycopersicon esculentum"; the accepted name is used here (the pin is the id).
 TOMATO = {
     "slug": "tomato",
     "common_name": "tomato",
@@ -1371,7 +1323,7 @@ def _get_or_create(session: Session, model, defaults: dict, **lookup):
         return instance
     instance = model(**lookup, **defaults)
     session.add(instance)
-    session.flush()  # populate instance.id for callers that need it below
+    session.flush()  # populate instance.id
     return instance
 
 
@@ -1400,10 +1352,8 @@ def _seed_crop(session: Session, crop_spec: dict, category_spec: dict, topic_gro
             title = fields.pop("title")
             source = fields.pop("source")
             fields["sub_category_id"] = sub_category.id
-            # `source` is part of the key, not just a field to overwrite:
-            # nothing makes (crop, title) unique, so without it this script
-            # would treat somebody else's document with the same title as
-            # its own and overwrite it.
+            # `source` is part of the key: nothing makes (crop, title) unique, so without it
+            # we would overwrite somebody else's document with the same title.
             _get_or_create(
                 session,
                 Item,

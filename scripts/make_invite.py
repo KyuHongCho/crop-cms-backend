@@ -4,10 +4,8 @@ admin yet to ask the API), or any time the API is not to hand.
     docker compose exec -T cms python -m scripts.make_invite
     docker compose exec -T cms python -m scripts.make_invite --role editor --days 3 --email grower@example.com
 
-Writes straight to the database through the synchronous engine, like
-`scripts/seed.py`. Only the code's SHA-256 is stored, so the printed code cannot
-be shown again. Unlike the API route this writes no audit row: the audit trail
-records an acting member and the operator is not one.
+Only the code's SHA-256 is stored, so it cannot be shown again. Unlike the API route this writes
+no audit row: the audit trail records an acting member and the operator is not one.
 """
 import argparse
 

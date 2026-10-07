@@ -1,11 +1,7 @@
 """Deactivating and reactivating a member (PATCH is_active), effective at once.
 
-An inactive member's token is refused on the next request (get_current_member
-reads is_active per request, so every guarded route is covered) and works again
-on reactivation; login with the right password gives the same 401 as a wrong one.
-An admin cannot deactivate themselves and the last active admin cannot be
-deactivated (409, no audit row). Authorised clients come from client_with_role;
-the tests that need a real login use signup_member.
+An inactive member's token is refused on the next request and works again on reactivation; login
+gives the same 401 as a wrong password. Self and last-admin cannot be deactivated.
 """
 import asyncio
 
@@ -42,8 +38,8 @@ def bearer(token):
 
 @pytest.fixture
 def real_member(client, client_with_role):
-    """(admin client, the member's id, a real token for the member): the member signed up
-    and logged in for real, so a password hash argon2 can verify exists."""
+    """(admin client, member id, real token): signed up and logged in for real, so an
+    argon2-verifiable hash exists."""
     admin = client_with_role("admin")  # also sets SECRET_KEY
     member_id = signup_member(client).json()["id"]
     token = login(client).json()["access_token"]
@@ -323,9 +319,8 @@ def test_deactivating_an_inactive_admin_is_a_no_op_not_a_last_admin_refusal(clie
 
 
 def test_two_admins_deactivating_each_other_through_the_handler_leave_one_active_admin(monkeypatch):
-    """The overlap through the real update_member: the first request is held after
-    its audit helper runs (change flushed, locks held, not committed); the second
-    must wait on the locks, then find its actor deactivated and answer 403."""
+    """The overlap through the real update_member: the first request is held after its audit helper
+    (change flushed, locks held); the second waits, then finds its actor deactivated: 403."""
     a, b = add_member("admin"), add_member("admin")
     engine = create_async_engine(app_db.ASYNC_DB_URL)
     real_record = audit_crud.record_member_update

@@ -1,9 +1,7 @@
 """Vector topic selection (app/chat/retrieval.py).
 
-FakeEmbedder vectors are near-orthogonal, so they cannot express "similar".
-Every ranking test here inserts hand-built vectors straight into item_chunks:
-unit axis `e(i)` is the query direction when i == 0, and `mix(c)` is a unit
-vector whose cosine similarity with it is exactly c.
+FakeEmbedder vectors are near-orthogonal and cannot express "similar", so ranking tests insert
+hand-built vectors into item_chunks: e(0) is the query direction, mix(c) has cosine exactly c.
 """
 import io
 import math
@@ -278,9 +276,8 @@ def _seeded_corpus_with_temperature_near_the_query():
     seed.main()
     reindex(sync_engine, FakeEmbedder(), out=lambda *_: None)
     with sync_engine.begin() as c:
-        # Put the three temperature chunks near the query at three distinct similarities
-        # (illustrative values, not a measurement), so a per-document floor between them
-        # would keep some documents and drop others.
+        # three temperature chunks at three distinct similarities (illustrative, not measured), so a
+        # per-document floor between them would keep some documents and drop others.
         ids = [r[0] for r in c.execute(text(
             "SELECT c.id FROM item_chunks c JOIN items i ON i.id = c.item_id "
             "JOIN crops cr ON cr.id = i.crop_id "

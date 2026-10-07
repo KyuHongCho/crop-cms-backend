@@ -3,17 +3,8 @@
     docker compose exec -T cms python -m scripts.ask "how hot should basil be?"
     docker compose exec -T cms python -m scripts.ask --crop basil "how hot should it be?"
 
-`--crop SLUG` limits scoring to that crop; without it every crop competes, so with more than
-one crop a question can select another crop's topic. Without it, each header and each
-"dropped for the context budget" line is labelled `[<slug>]` with its crop; with it, they are not.
-
-`EMBEDDER` selects the provider (app/chat/embeddings.py): `openai` by default,
-which needs OPENAI_API_KEY. With `EMBEDDER=fake` it runs offline, but the fake
-vectors carry no meaning, so the topics chosen are arbitrary -- use it to
-check the plumbing, not the ranking.
-
-Prints every document of each selected topic with its provenance, and names
-anything dropped for the context budget or the abstention (Rule 0).
+`--crop SLUG` limits scoring to one crop; without it every crop competes and headers carry `[<slug>]`.
+EMBEDDER=fake runs offline but its vectors are meaningless: check the plumbing, not the ranking.
 """
 import argparse
 import sys

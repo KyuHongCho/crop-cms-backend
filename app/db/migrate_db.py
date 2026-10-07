@@ -1,36 +1,25 @@
 from sqlalchemy import create_engine, text
 
-# db.py owns the connection settings and the single Base. Import them; never
-# redefine Base here, or create_all() would act on an empty second registry.
+# db.py owns the connection settings and the single Base; never redefine it here, or
+# create_all() would act on an empty second registry.
 from app.db.db import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME, Base
 
-# app.model.model is imported twice below: this bare import for its
-# registration side effect (it puts Crop/MainCategory/SubCategory/Item/ItemChunk
-# on Base.metadata), the `from ... import` further down for the id constants.
-# Either import alone would trigger the registration -- Python fully executes
-# a module on its first import regardless of import form -- so this line
-# documents the dependency explicitly rather than being the only thing
-# providing it.
+# imported twice: this bare import documents the registration side effect (puts the models on
+# Base.metadata), the `from` import below supplies the id constants.
 import app.model.model  # noqa: F401
 from app.model.model import (
     UNCATEGORISED_MAIN_CATEGORY_ID,
     UNCATEGORISED_SUB_CATEGORY_ID,
 )
 
-# Synchronous counterpart of db.py's async URL, from the same psycopg 3 package.
+# synchronous counterpart of db.py's async URL (same psycopg 3 package).
 DB_URL = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 engine = create_engine(DB_URL, echo=True)
 
-# --- the "Uncategorised" bucket -------------------------------------------
-#
-# Where a deleted sub-category's documents are refiled to. See the
-# constants' comment in model.py for why this id is duplicated here and in
-# the trigger body below, rather than read from Python.
-#
-# Inserting an explicit id does not move the table's id counter along, so both
-# are reset with setval afterwards. Skip that and the next INSERT collides with
-# the bucket's own id.
+# --- the "Uncategorised" bucket ---
+# refile target of a deleted sub-category (id duplicated in the trigger, see model.py). An explicit
+# id does not advance the id counter, hence setval; else the next INSERT collides.
 SEED_BUCKET_SQL = f"""
 INSERT INTO main_categories (id, slug, name, position)
      VALUES ({UNCATEGORISED_MAIN_CATEGORY_ID}, 'uncategorised', 'Uncategorised', 0);
@@ -41,13 +30,9 @@ SELECT setval('main_categories_id_seq', (SELECT max(id) FROM main_categories));
 SELECT setval('sub_categories_id_seq',  (SELECT max(id) FROM sub_categories));
 """
 
-# CREATE OR REPLACE because drop_all() removes the tables and the trigger with
-# them, but a function is not a table and survives every rebuild.
-#
-# BEFORE DELETE, so the documents have moved by the time RESTRICT is checked.
-# It lives in the database, not the router, because psql and raw SQL bypass
-# Python entirely. The RAISE reaches Python as error code P0001, which
-# app/router/category.py turns into an HTTP 409.
+# CREATE OR REPLACE: drop_all() removes the tables and their triggers but not functions.
+# BEFORE DELETE so documents move before RESTRICT is checked; in the database because psql and
+# raw SQL bypass Python. The RAISE arrives as P0001, which category.py turns into a 409.
 CREATE_REFILE_TRIGGER_SQL = f"""
 CREATE OR REPLACE FUNCTION refile_items_to_uncategorised() RETURNS trigger AS $$
 BEGIN
@@ -69,18 +54,9 @@ CREATE TRIGGER refile_items_before_sub_category_delete
 
 
 def reset_database():
-    # Once a database has an `alembic_version` table, Alembic owns its schema
-    # history. drop_all() here would leave that table standing -- it belongs
-    # to Alembic's own metadata, not to Base.metadata -- so the rebuild would
-    # be a schema Alembic never produced, sitting behind a version row that
-    # still claims head. The next `alembic upgrade head` then finds nothing to
-    # run and exits 0, so the divergence is silent. (DuplicateTable is the
-    # other case: upgrading a create_all()-built database that was never
-    # stamped -- see the README's Migrations section.) The two are mutually
-    # exclusive by design, not merely by convention, so this refuses rather
-    # than warns. Kept only as a guarded pre-Alembic learning artifact -- the
-    # only automated caller is tests/test_migrate_db_guard.py, which asserts
-    # the refusal.
+    # with an `alembic_version` table Alembic owns the schema: drop_all() would leave that table and
+    # rebuild a schema behind a version row still claiming head, silently. Refuse, not warn.
+    # Only tests/test_migrate_db_guard.py calls this. DuplicateTable = pre-Alembic DB: README "Migrations".
     with engine.begin() as connection:
         managed = connection.execute(
             text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
@@ -92,8 +68,7 @@ def reset_database():
             "instead of migrate_db.py (see the README's Migrations section)."
         )
 
-    # drop_all() destroys every mapped table and its rows. Fine while the schema
-    # is still changing; never run it against real content.
+    # drop_all() destroys every mapped table and its rows; never run it against real content.
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:

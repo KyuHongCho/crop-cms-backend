@@ -1,9 +1,7 @@
 """Routing plumbing against a STUBBED classifier driven by the question set.
 
-The stub answers each question from tests/routing_questions.py, so these tests prove
-the router honours a tool result: out_of_scope declines without touching retrieval, a
-lookup runs retrieval, and a named crop scopes it. They say NOTHING about how well a real
-model routes: that is measured by hand with scripts/live_chat_eval.py.
+The stub answers from tests/routing_questions.py: this proves the router honours a tool result, NOT
+how well a real model routes (scripts/live_chat_eval.py measures that).
 """
 import pytest
 

@@ -1,8 +1,4 @@
-"""The embedder seam and scripts/reindex.py.
-
-Every test here runs offline: FakeEmbedder is passed in explicitly, or
-selected by name, and no test needs OPENAI_API_KEY.
-"""
+"""The embedder seam and scripts/reindex.py. Every test runs offline (FakeEmbedder), no OPENAI_API_KEY."""
 import math
 import sys
 

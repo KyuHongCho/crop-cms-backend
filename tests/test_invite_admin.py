@@ -1,7 +1,6 @@
 """Invites, admin side: GET /members/invites and DELETE /members/invites/{id}.
 
-Role matrix with client_with_role; rows are read back and aged by SQL. Creating an
-invite is test_invites.py, claiming one at signup is test_signup_invites.py.
+Role matrix with client_with_role; rows are read back and aged by SQL (creating is test_invites.py).
 """
 import asyncio
 import hashlib

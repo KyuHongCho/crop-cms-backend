@@ -2,23 +2,10 @@
 
     docker compose exec -T cms python -m scripts.calibrate_floor
 
-Needs a corpus embedded with the real embedder (OPENAI_API_KEY, `scripts.reindex`).
-Under EMBEDDER=fake the scores are noise and the output means nothing.
-
-For each labelled question below, scores the topics of the crop it names (Rule 1: best
-chunk) and splits the scores into the topic the question is about (on-topic) and the
-rest (off-topic). Scoring is per crop, as POST /chat will do, so another crop's topic
-with the same name is never counted as on-topic. A good floor sits between the highest off-topic score and the
-lowest on-topic score; if the ranges overlap, no floor separates them and that
-is itself the finding.
-
-Edit QUESTIONS to match the corpus. The recorded output belongs in
-docs/design-notes.md, beside the constant.
-
-score_topics keeps only the best k topics per question, dropping the lowest scores first, and
-the gap below is derived from those scores. The script asks for TOPIC_CAP + 1: getting the extra
-topic back proves some were dropped, and it stops instead of printing a gap it cannot trust.
-Raise TOPIC_CAP if that happens.
+Needs a corpus embedded with the real embedder; under EMBEDDER=fake the scores are noise.
+Scoring is per crop (as POST /chat will), so another crop's same-named topic is never on-topic.
+A good floor sits between the highest off-topic and lowest on-topic score; overlap is itself the finding.
+Edit QUESTIONS, then record the output in docs/design-notes.md.
 """
 import statistics
 import sys

@@ -1,10 +1,6 @@
-"""Data access and the budget policy for topic-set retrieval.
+"""Data access and the budget policy (Rule 3) for topic-set retrieval.
 
-Retrieval never picks a winner among documents that disagree on the same topic:
-a selected topic comes back complete, never as a top-k slice.
-
-Rules 0-2 (the floor, best-chunk scoring, top k) live in app/chat/retrieval.py.
-Rule 3 -- fit the kept topics into the context budget -- is built and tested below.
+A selected topic comes back complete, never as a top-k slice. Rules 0-2 live in app/chat/retrieval.py.
 """
 import os
 from dataclasses import dataclass
@@ -14,22 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.model.model import Crop, Item
 
-# --- Rule 2: keep the top k topics --------------------------------------------
-#
-# Fixed and tested now so the number is not invented later, once topic
-# selection uses it. Override with the TOPIC_SELECTION_K env var.
+# --- Rule 2: keep the top k topics ---
+# fixed and tested now so the number is not invented later; override with TOPIC_SELECTION_K.
 TOPIC_SELECTION_K = int(os.environ.get("TOPIC_SELECTION_K", "3"))
 
-# --- Rule 3: the context budget, measured in characters -----------------------
-#
-# Characters, not tokens: a real tokeniser is provider-specific regardless
-# of choice, so this counts characters instead, using 4 characters per token
-# as a common rule of thumb for English prose. It is an estimate, not a
-# guarantee -- see document_context_chars below for what it does not count.
+# --- Rule 3: the context budget, in characters ---
+# not tokens: a real tokeniser is provider-specific, so estimate at 4 chars/token.
+# See document_context_chars for what it does not count.
 CHARS_PER_TOKEN = 4.0
 
-# A conservative default budget in tokens, converted to characters below.
-# Override with the CONTEXT_TOKEN_BUDGET env var.
+# conservative default, in tokens; override with CONTEXT_TOKEN_BUDGET.
 CONTEXT_TOKEN_BUDGET = int(os.environ.get("CONTEXT_TOKEN_BUDGET", "8000"))
 CONTEXT_CHAR_BUDGET = int(CONTEXT_TOKEN_BUDGET * CHARS_PER_TOKEN)
 
@@ -37,17 +27,14 @@ CONTEXT_CHAR_BUDGET = int(CONTEXT_TOKEN_BUDGET * CHARS_PER_TOKEN)
 def topic_set_statement(crop_id: int, topic: str) -> Select:
     """Every published document for one crop and one topic.
 
-    No LIMIT, and ordered by id only so the order is stable. tests/test_retrieval.py
-    checks for LIMIT in both the compiled statement and the SQL actually executed.
+    No LIMIT (tests/test_retrieval.py checks the compiled and executed SQL); ordered by id for stability.
     """
     return (
         select(Item)
         .where(
             Item.crop_id == crop_id,
-            # Normalise the input, not the column: wrapping Item.topic in
-            # lower()/trim() would stop PostgreSQL using the
-            # ix_items_crop_id_topic index for it. Topics written through the
-            # ORM are already normalised (Item._normalize_topic in model.py).
+            # normalise the input, not the column: lower()/trim() on Item.topic would stop
+            # PostgreSQL using ix_items_crop_id_topic.
             Item.topic == topic.strip().lower(),
             Item.published.is_(True),
         )
@@ -72,12 +59,8 @@ async def get_crop_slugs(db: AsyncSession, crop_ids: set[int]) -> dict[int, str]
 def document_context_chars(documents: list[Item]) -> int:
     """Character count of one topic's context: titles and bodies only.
 
-    Provenance (source, reference, URL, ...) is not counted, on the assumption
-    it will be attached as citation metadata rather than put into the prompt.
-    If provenance (including each document's licence_note) does go into the
-    prompt instead, this undercounts by roughly 2x on the seed corpus (about 3x
-    for the one-document ECOCROP topics) and must be revisited. Worst case for
-    k=3 topics that is about 40% of the budget, so the budget still holds.
+    Provenance is assumed to ride as citation metadata. If it goes into the prompt this
+    undercounts ~2x (~3x for one-document ECOCROP topics); worst case at k=3 is ~40% of budget.
     """
     return sum(len(document.title) + len(document.body) for document in documents)
 
@@ -86,8 +69,7 @@ def document_context_chars(documents: list[Item]) -> int:
 class TopicCandidate:
     """One topic's complete document set plus its selection score.
 
-    The score is only compared here, never computed, so Rule 3 can be tested
-    now with made-up scores and reused unchanged once real scores (Rule 1) exist.
+    The score is only compared here, so Rule 3 is testable with made-up scores.
     """
 
     topic: str
@@ -105,8 +87,7 @@ class TopicCandidate:
 
 
 class TopicBudgetExceeded(Exception):
-    """Rule 3: the one topic left, after any dropping, still exceeds the
-    budget on its own, so the request is refused rather than truncated."""
+    """Rule 3: the one topic left still exceeds the budget alone; refuse, never truncate."""
 
     def __init__(self, topic: str, document_count: int, context_chars: int, budget: int):
         self.topic = topic
@@ -123,17 +104,10 @@ def assemble_within_budget(
     candidates: list[TopicCandidate],
     budget: int = CONTEXT_CHAR_BUDGET,
 ) -> tuple[list[TopicCandidate], list[TopicCandidate]]:
-    """Rule 3: drop whole topics to fit the budget; refuse only as a last resort.
+    """Rule 3: drop whole topics (lowest score first) while over budget and more than one
+    remains; raise TopicBudgetExceeded if the last one alone still exceeds it.
 
-    1. While the kept topics exceed the budget and more than one is left, drop
-       the lowest-scoring topic -- whole, never part of it. Dropped topics are
-       returned so the response can name them.
-    2. If the one topic left still exceeds the budget on its own, raise
-       TopicBudgetExceeded naming it. When other topics remain, an oversized
-       lowest-scoring topic is dropped by step 1 rather than refused.
-
-    Returns (kept, dropped): kept highest score first, dropped in the order
-    they were removed (lowest score first).
+    Returns (kept, dropped): kept highest score first, dropped in removal order.
     """
     ordered = sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
 
@@ -141,7 +115,7 @@ def assemble_within_budget(
     dropped: list[TopicCandidate] = []
     total = sum(candidate.context_chars for candidate in kept)
     while total > budget and len(kept) > 1:
-        loser = kept.pop()  # ordered highest-first -- the last entry scores lowest
+        loser = kept.pop()  # ordered highest-first: the last scores lowest
         dropped.append(loser)
         total -= loser.context_chars
 

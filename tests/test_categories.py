@@ -1,9 +1,5 @@
-"""HTTP-level tests for the category endpoints, through TestClient.
-
-Exercises the HTTP boundary: FastAPI's TestClient against app.main.app --
-HTTP requests and JSON responses, never SQLAlchemy internals or ORM objects
-directly.
-"""
+"""HTTP-level tests for the category endpoints, through TestClient against app.main.app
+(never SQLAlchemy internals or ORM objects)."""
 import os
 
 from sqlalchemy import text
@@ -13,11 +9,9 @@ from tests.conftest import truncate_and_reseed
 
 
 def test_suite_talks_to_the_test_database_never_dev():
-    """A safety check: every other test here TRUNCATEs tables between runs
-    (conftest.py's autouse `_clean_database`). If this suite were ever
-    pointed at `db`/`cms` it would wipe the dev database, not just fail
-    loudly. `docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test` is
-    what makes this true; a bare `docker compose exec` would fail this.
+    """A safety check: every other test TRUNCATEs tables (conftest's autouse `_clean_database`), so
+    pointing at `db`/`cms` would wipe the dev database. The `-e DB_HOST=db-test -e DB_NAME=cms_test`
+    exec is what makes this true; a bare `docker compose exec` fails it.
     """
     assert os.environ.get("DB_HOST") == "db-test"
     assert os.environ.get("DB_NAME") == "cms_test"
@@ -36,16 +30,12 @@ def test_duplicate_slug_on_main_categories_returns_409(editor_client):
 
 
 def test_desynced_sequence_is_not_reported_as_duplicate_slug(editor_client):
-    """A pkey collision from a desynced sequence must name the pkey
-    constraint, not the slug constraint -- a blanket `IntegrityError -> 409`
-    would report this as "a category with that slug already exists" even
-    though no slug was ever duplicated.
+    """A pkey collision from a desynced sequence must name the pkey constraint, not the slug one
+    (a blanket `IntegrityError -> 409` would report a duplicate slug that never existed).
     """
     with sync_engine.begin() as connection:
-        # is_called=false with value=1 makes the next nextval() return 1
-        # itself -- colliding with the existing bucket row's id, a
-        # UniqueViolation with nothing to do with any slug. (Sequences start
-        # at 1; setval(..., 0, false) is out of range.)
+        # is_called=false, value=1 makes the next nextval() return 1, colliding with the bucket
+        # row's id (sequences start at 1; setval(..., 0, false) is out of range).
         connection.execute(text("SELECT setval('main_categories_id_seq', 1, false)"))
 
     response = editor_client.post(
@@ -58,10 +48,8 @@ def test_desynced_sequence_is_not_reported_as_duplicate_slug(editor_client):
 
 
 def test_duplicate_slug_on_sub_categories_same_parent_returns_409(editor_client):
-    """Mirrors test_duplicate_slug_on_main_categories_returns_409, but through
-    a composite constraint (SubCategory.__table_args__) rather than a
-    single-column one -- the two paths are not equivalent and neither is
-    exercised by the other's test.
+    """Mirrors test_duplicate_slug_on_main_categories_returns_409 but through a composite
+    constraint (SubCategory.__table_args__): neither path is exercised by the other's test.
     """
     mc = editor_client.post(
         "/main-categories", json={"slug": "research-literature", "name": "RL"}
@@ -78,14 +66,8 @@ def test_duplicate_slug_on_sub_categories_same_parent_returns_409(editor_client)
 
 
 def test_same_slug_under_different_parents_both_return_201(editor_client):
-    """"Unique per parent, not globally" (README.md, API table): the same slug
-    under two different main categories must both succeed, because
-    SubCategory's uniqueness is scoped to (main_category_id, slug), not slug
-    alone.
-
-    Verified this can fail: temporarily adding a global UNIQUE(slug)
-    constraint to sub_categories made this test fail; dropping it made it
-    pass again.
+    """"Unique per parent, not globally" (README API table): the same slug under two main
+    categories must succeed. Verified it can fail: a temporary global UNIQUE(slug) broke it.
     """
     mc1 = editor_client.post(
         "/main-categories", json={"slug": "research-literature", "name": "RL"}
@@ -107,12 +89,8 @@ def test_same_slug_under_different_parents_both_return_201(editor_client):
 
 
 def test_bucket_survives_truncate_and_reseed(editor_client, client_with_role):
-    """The per-test TRUNCATE fixture must reseed the "Uncategorised" bucket,
-    or every test after the first one that touches it breaks.
-
-    Runs the exact fixture mechanism (truncate_and_reseed) a second time
-    mid-test, simulating the boundary between two tests, then asserts the
-    bucket -- and only the bucket -- is still there.
+    """The per-test TRUNCATE fixture must reseed the "Uncategorised" bucket, or every later test
+    touching it breaks. Runs truncate_and_reseed mid-test, then asserts only the bucket remains.
     """
     main = editor_client.post("/main-categories", json={"slug": "temp", "name": "Temp"})
     editor_client.post(

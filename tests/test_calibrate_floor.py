@@ -1,9 +1,7 @@
 """scripts/calibrate_floor.py: the gap it prints, and the guard against a silently truncated run.
 
-score_topics keeps only the best k topics, dropping the lowest scores first, so a corpus larger
-than the cap could make `min(on_topic)` look higher than it is. The script asks for one topic
-more than the cap: getting it back proves topics were dropped, and it must stop instead of
-printing a gap it cannot trust. A corpus of exactly the cap is complete and must not stop.
+A corpus over the cap could make `min(on_topic)` look too high (score_topics keeps only k topics), so the
+script asks for cap + 1: getting the extra one back proves topics were dropped, and it must stop.
 """
 import pytest
 

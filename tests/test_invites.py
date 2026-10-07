@@ -1,7 +1,6 @@
 """Invites, creation side: POST /members/invites and scripts/make_invite.py.
 
-Role matrix with client_with_role. The stored table is read back by SQL: only a
-SHA-256 of the code may be there. Claiming an invite at signup is test_signup_invites.py.
+Role matrix with client_with_role; the stored table is read back by SQL (only a SHA-256 may be there).
 """
 import hashlib
 import os
