@@ -66,6 +66,25 @@ async def lock_member_and_active_admins(
     return next((row for row in rows if row.id == member_id), None), admin_ids
 
 
+async def actor_is_active_admin(db: AsyncSession, actor_id: int) -> bool:
+    """Whether the actor is, right now, an active admin, read from the database
+    with a FOR SHARE lock held to the end of the transaction: a concurrent demotion
+    or deactivation (an UPDATE of that row) waits for the caller's commit. For
+    handlers that touch no member row, so the whole-admin-set lock of
+    lock_member_and_active_admins would be more than they need."""
+    result = await db.execute(
+        select(model.Member.id)
+        .where(
+            model.Member.id == actor_id,
+            model.Member.role == "admin",
+            model.Member.is_active.is_(True),
+        )
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def list_members(
     db: AsyncSession,
     limit: int,
@@ -83,12 +102,17 @@ async def list_members(
 
 
 async def create_member(
-    db: AsyncSession, email: str, password_hash: str, display_name: str | None
+    db: AsyncSession,
+    email: str,
+    password_hash: str,
+    display_name: str | None,
+    role: str = "member",
 ) -> model.Member:
     member = model.Member(
         email=email,
         password_hash=password_hash,
         display_name=display_name,
+        role=role,
         tokens_budget_daily=TOKENS_BUDGET_DAILY,
     )
     db.add(member)

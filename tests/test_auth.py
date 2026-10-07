@@ -109,14 +109,17 @@ def test_only_the_expected_routes_require_a_token():
     )
     assert guarded == [
         "DELETE /main-categories/{main_category_id}",
+        "DELETE /members/invites/{invite_id}",
         "DELETE /members/{member_id}",
         "DELETE /sub-categories/{sub_category_id}",
         "GET /members",
+        "GET /members/invites",
         "GET /members/me",
         "PATCH /members/{member_id}",
         "POST /chat",
         "POST /items",
         "POST /main-categories",
+        "POST /members/invites",
         "POST /sub-categories",
     ]
 

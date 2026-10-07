@@ -137,7 +137,7 @@ jobs:
               WHERE schemaname = 'public' AND tablename <> 'alembic_version';" \
             | tr -d '[:space:]')
           echo "content tables created: $tables"
-          test "$tables" = "crops,item_chunks,items,main_categories,member_audit_events,members,sub_categories"
+          test "$tables" = "crops,item_chunks,items,main_categories,member_audit_events,member_invites,members,sub_categories"
           # A view is invisible to pg_tables and to `alembic check`, so the
           # published filter the chat layer reads is asserted on its own.
           views=$(docker compose exec -T db psql -U "$DB_USER" -d cms -tAc \
@@ -157,18 +157,19 @@ jobs:
       - name: An editor exists, and later steps hold its token
         # The CMS write routes need an editor or admin token (README, "Members and
         # the token budget"). This is the one place CI creates that member, so a
-        # change to how members are created is a one-step edit. Signup works here
-        # because the CI stack's `cms` database is fresh (the downgrade/upgrade
-        # round trip above runs on `cms_test`, not `cms`). Signup always makes a
-        # plain member; the role is granted with SQL, the way an operator does.
+        # change to how members are created is a one-step edit. Signup needs an
+        # invite, so the operator's script makes one for the editor role (the way
+        # an operator makes the first one; no admin exists yet to ask the API).
+        # The CI stack's `cms` database is fresh (the downgrade/upgrade round trip
+        # above runs on `cms_test`, not `cms`).
         run: |
           api="http://localhost:8000"
           email="ci-editor@example.com"
           password="ci-throwaway-password"
+          code=$(docker compose exec -T cms python -m scripts.make_invite --role editor)
+          echo "::add-mask::$code"
           curl -fsS -o /dev/null -X POST "$api/members/signup" -H 'content-type: application/json' \
-            -d "{\"email\":\"$email\",\"password\":\"$password\"}"
-          docker compose exec -T db psql -U "$DB_USER" -d cms -v ON_ERROR_STOP=1 -qc \
-            "UPDATE members SET role = 'editor' WHERE email = '$email';"
+            -d "{\"email\":\"$email\",\"password\":\"$password\",\"invite_code\":\"$code\"}"
           token=$(curl -fsS -X POST "$api/members/login" -H 'content-type: application/json' \
             -d "{\"email\":\"$email\",\"password\":\"$password\"}" \
             | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")

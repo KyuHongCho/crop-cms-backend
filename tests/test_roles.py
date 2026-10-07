@@ -1,7 +1,8 @@
 """Roles: who may write to the CMS (members.role, require_editor / require_admin).
 
 Content writes (add and delete) are for editors and admins. A bearer token alone
-is not enough: signup is open, so "has a token" only means "signed up".
+is not enough: anyone holding an invite can sign up, so "has a token" only means
+"signed up".
 """
 import importlib
 import pkgutil
@@ -16,6 +17,7 @@ from app.db.migrate_db import engine as sync_engine
 from app.main import app
 from app.model import model
 from app.model.model import UNCATEGORISED_MAIN_CATEGORY_ID, UNCATEGORISED_SUB_CATEGORY_ID
+from tests.conftest import signup_member
 
 PASSWORD = "correct horse battery"
 
@@ -31,7 +33,14 @@ WRITE_ROUTES = [
 ]
 EDITOR_ROLES = ("editor", "admin")
 # The routes only an admin may call (member management).
-ADMIN_ROUTES = ["GET /members", "PATCH /members/{member_id}", "DELETE /members/{member_id}"]
+ADMIN_ROUTES = [
+    "GET /members",
+    "GET /members/invites",
+    "DELETE /members/invites/{invite_id}",
+    "POST /members/invites",
+    "PATCH /members/{member_id}",
+    "DELETE /members/{member_id}",
+]
 ADMIN_ROLES = ("admin",)
 
 
@@ -261,17 +270,14 @@ def test_reads_stay_open_to_every_role(client, client_with_role, path):
 
 def test_signup_cannot_set_a_role(client, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "k" * 64)
-    response = client.post(
-        "/members/signup",
-        json={"email": "sneaky@example.com", "password": PASSWORD, "role": "admin"},
-    )
+    response = signup_member(client, email="sneaky@example.com", password=PASSWORD, role="admin")
     assert response.status_code == 201
     assert sql("SELECT role FROM members WHERE email = 'sneaky@example.com'").scalar_one() == "member"
 
 
 def test_a_new_member_defaults_to_member(client, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "k" * 64)
-    client.post("/members/signup", json={"email": "plain@example.com", "password": PASSWORD})
+    signup_member(client, email="plain@example.com", password=PASSWORD)
     token = client.post(
         "/members/login", json={"email": "plain@example.com", "password": PASSWORD}
     ).json()["access_token"]
@@ -317,7 +323,7 @@ def test_the_token_carries_no_role_claim(client, monkeypatch):
     import jwt
 
     monkeypatch.setenv("SECRET_KEY", "k" * 64)
-    client.post("/members/signup", json={"email": "claims@example.com", "password": PASSWORD})
+    signup_member(client, email="claims@example.com", password=PASSWORD)
     sql("UPDATE members SET role = 'admin' WHERE email = 'claims@example.com'")
     response = client.post(
         "/members/login", json={"email": "claims@example.com", "password": PASSWORD}
@@ -330,9 +336,7 @@ def test_the_token_carries_no_role_claim(client, monkeypatch):
 def test_signup_promote_login_then_write_and_a_promotion_reaches_an_issued_token(client, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "k" * 64)
     email = "promoted@example.com"
-    assert client.post(
-        "/members/signup", json={"email": email, "password": PASSWORD}
-    ).status_code == 201
+    assert signup_member(client, email=email, password=PASSWORD).status_code == 201
     old_token = client.post(
         "/members/login", json={"email": email, "password": PASSWORD}
     ).json()["access_token"]

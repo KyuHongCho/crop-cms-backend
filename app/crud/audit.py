@@ -27,3 +27,32 @@ async def record_member_delete(db: AsyncSession, actor_id: int, target_id: int, 
             actor_id=actor_id, action="delete", target_id=target_id, detail={"role": role}
         )
     )
+
+
+async def record_invite_create(
+    db: AsyncSession, actor_id: int, invite_id: int, role: str, expires_at
+) -> None:
+    """Add one 'invite_create' row; the caller's commit writes it with the invite.
+    The detail is the role and the expiry only: never the code, its hash or the
+    invited email."""
+    db.add(
+        model.MemberAuditEvent(
+            actor_id=actor_id,
+            action="invite_create",
+            target_id=invite_id,
+            detail={"role": role, "expires_at": expires_at.isoformat()},
+        )
+    )
+
+
+async def record_invite_revoke(db: AsyncSession, actor_id: int, invite_id: int, role: str) -> None:
+    """Add one 'invite_revoke' row; the caller's commit writes it with the deletion.
+    The detail is the role only: never the code, its hash or the invited email."""
+    db.add(
+        model.MemberAuditEvent(
+            actor_id=actor_id,
+            action="invite_revoke",
+            target_id=invite_id,
+            detail={"role": role},
+        )
+    )
