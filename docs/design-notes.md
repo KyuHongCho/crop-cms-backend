@@ -76,8 +76,8 @@ candidates in `tests/test_retrieval.py`, ready to call unchanged once that lands
 
 `GET /items` is published-only by default, so an anonymous caller never sees a draft.
 `published` defaults to false server-side, so a freshly created document is invisible there;
-`?status=all` lists drafts too and needs an editor or admin token (no token or a plain member is
-`403`). The default path ignores any token, so an expired one cannot end a session on a public read.
+`?status=all` lists drafts too and needs an editor or admin token (no token or a bad one is
+`401`, a plain member `403`). The default path ignores any token, so an expired one cannot end a session on a public read.
 
 ## Data model and integrity
 

@@ -238,8 +238,8 @@ manages. A test asserts that refusal.
 
 **`GET /items`.** Published documents only, ordered by id, paged by `limit` (1-500, default 500) and
 `offset` (>= 0); anything out of range is `422`. `?status=all` (default `published`; any other value is
-`422`) adds drafts and needs an editor or admin token: `403` without a token or for a plain `member`,
-`401` for a bad one. A new document is a draft, so it appears only under `status=all`. The default path
+`422`) adds drafts and needs an editor or admin token: `401` without a token or with a bad one,
+`403` for a plain `member`. A new document is a draft, so it appears only under `status=all`. The default path
 ignores any token, but Swagger shows a lock on this route because the `status=all` path takes one.
 
 ## Members and the token budget

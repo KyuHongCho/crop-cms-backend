@@ -73,13 +73,14 @@ def test_status_all_shows_drafts_to_editors_and_admins(client_with_role, role):
     assert _ids(staff.get("/items")) == [published]
 
 
-def test_status_all_without_a_token_is_403_not_a_list(client):
+def test_status_all_without_a_token_is_401_not_a_list(client):
     _seed_published_and_draft()
 
     response = client.get("/items?status=all")
 
-    assert response.status_code == 403
-    assert response.json() == {"detail": "Not enough permissions"}
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.json() == {"detail": "Not authenticated"}
 
 
 def test_status_all_for_a_plain_member_is_403(client_with_role):

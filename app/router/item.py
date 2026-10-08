@@ -29,8 +29,6 @@ async def get_items(
     would end the session."""
     if status_filter == "published":
         return await item_crud.get_items(db, limit=limit, offset=offset)
-    if credentials is None:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
     member = await get_current_member(credentials, db)
     await require_editor(member)
     return await item_crud.get_items(db, include_unpublished=True, limit=limit, offset=offset)
