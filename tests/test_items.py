@@ -134,3 +134,11 @@ def test_delete_with_an_id_outside_int4_is_422_not_500(editor_client, item_id):
 def test_delete_with_an_id_at_the_int4_edge_is_404(editor_client, item_id):
     response = editor_client.delete(f"/items/{item_id}")
     assert (response.status_code, response.json()) == (404, {"detail": "Item not found"})
+
+
+@pytest.mark.parametrize("item_id", [99999999999, 0, -5])
+def test_a_refused_caller_with_an_out_of_range_or_unknown_id_is_401_or_403_not_422_or_404(
+    client, client_with_role, item_id
+):
+    assert client.delete(f"/items/{item_id}").status_code == 401
+    assert client_with_role("member").delete(f"/items/{item_id}").status_code == 403

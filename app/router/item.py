@@ -41,8 +41,8 @@ async def create_item(
     response_model=item_schema.ItemResponse,
 )
 async def delete_item(
-    # the lower bound is MIN_INT4, not 1: 0 and negatives are a plain 404, only ids Postgres
-    # cannot compare (outside int4) are 422.
+    # not ge=1: an unknown id is a plain 404 here as on the category routes, 0 and negatives
+    # included. Only ids outside int4, which Postgres cannot compare, are a 422.
     item_id: int = Path(ge=item_schema.MIN_INT4, le=item_schema.MAX_INT4),
     db: AsyncSession = Depends(get_db),
 ):
