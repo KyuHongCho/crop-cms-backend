@@ -7,7 +7,7 @@ import app.schema.item as item_schema
 
 
 async def get_items(
-    db: AsyncSession, include_unpublished: bool = False, limit: int = 500, offset: int = 0
+    db: AsyncSession, include_unpublished: bool = False, *, limit: int, offset: int = 0
 ) -> list[model.Item]:
     """A page of published documents, or of all when `include_unpublished` (the caller gates it).
 

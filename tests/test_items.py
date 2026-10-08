@@ -92,7 +92,8 @@ def test_status_all_for_a_plain_member_is_403(client_with_role):
     assert response.json() == {"detail": "Not enough permissions"}
 
 
-def test_a_garbage_token_is_401_on_status_all_and_ignored_on_the_default(client):
+def test_a_garbage_token_is_401_on_status_all_and_ignored_on_the_default(client, monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "x" * 40)
     published, _ = _seed_published_and_draft()
     headers = {"Authorization": "Bearer not-a-token"}
 
@@ -152,7 +153,7 @@ def test_paging_composes_with_status(client, editor_client):
     assert _ids(editor_client.get("/items?status=all&limit=2&offset=1")) == [draft, p2]
 
 
-def test_the_default_returns_every_published_item(client):
+def test_a_small_published_set_comes_back_whole_by_default(client):
     ids = _seed_published(5)
 
     assert _ids(client.get("/items")) == ids
