@@ -26,6 +26,7 @@ WRITE_ROUTES = [
     "POST /main-categories",
     "POST /sub-categories",
     "POST /items",
+    "DELETE /items/{item_id}",
     "DELETE /sub-categories/{sub_category_id}",
     "DELETE /main-categories/{main_category_id}",
 ]
@@ -79,8 +80,8 @@ def _all_route_guards() -> dict[str, set[tuple[str, ...]]]:
     return guarded
 
 
-def test_exactly_the_five_cms_write_routes_are_guarded_by_require_editor_and_the_member_routes_by_require_admin():
-    """Fails if a guard is removed from one of the five routes or from the member-management
+def test_exactly_the_cms_write_routes_are_guarded_by_require_editor_and_the_member_routes_by_require_admin():
+    """Fails if a guard is removed from one of the write routes or from the member-management
     routes, or added to (or missing on) any other route."""
     guarded = _all_route_guards()
 
@@ -111,7 +112,7 @@ def test_require_roles_refuses_a_role_that_does_not_exist():
 # --- role-by-route matrix ----------------------------------------------------
 
 def _run_write_routes(client) -> list[int]:
-    """Call the five write routes in dependency order and return their statuses (for a caller
+    """Call the write routes in dependency order and return their statuses (for a caller
     allowed to write: later calls use ids from earlier responses)."""
     main = client.post("/main-categories", json={"slug": "m", "name": "M"})
     sub = client.post(
@@ -139,13 +140,14 @@ def _run_write_routes(client) -> list[int]:
             "read_directly": True,
         },
     )
+    del_item = client.delete(f"/items/{item.json().get('id', 0)}")
     del_sub = client.delete(f"/sub-categories/{sub.json().get('id', 0)}")
     del_main = client.delete(f"/main-categories/{main.json().get('id', 0)}")
-    return [r.status_code for r in (main, sub, item, del_sub, del_main)]
+    return [r.status_code for r in (main, sub, item, del_item, del_sub, del_main)]
 
 
 def _requests_for_member_without_setup(client) -> list[int]:
-    """The five calls with throwaway ids: a guard must answer before any lookup, so a refused
+    """The write calls with throwaway ids: a guard must answer before any lookup, so a refused
     caller sees 403 whether or not the row exists."""
     return [
         client.post("/main-categories", json={"slug": "m", "name": "M"}).status_code,
@@ -159,28 +161,31 @@ def _requests_for_member_without_setup(client) -> list[int]:
                 "source": "s", "reference": "r", "url": "u", "read_directly": True,
             },
         ).status_code,
+        client.delete("/items/2").status_code,
         client.delete("/sub-categories/2").status_code,
         client.delete("/main-categories/2").status_code,
     ]
 
 
-def test_no_token_is_401_on_all_five_write_routes(client):
-    assert _requests_for_member_without_setup(client) == [401] * 5
+def test_no_token_is_401_on_all_write_routes(client):
+    statuses = _requests_for_member_without_setup(client)
+    assert len(statuses) == len(WRITE_ROUTES)
+    assert statuses == [401] * len(WRITE_ROUTES)
 
 
 def test_an_invalid_body_without_a_token_is_still_401_not_422(client):
     assert client.post("/main-categories", json={}).status_code == 401
 
 
-def test_a_garbage_token_is_401_on_all_five_write_routes(client, client_with_role):
+def test_a_garbage_token_is_401_on_all_write_routes(client, client_with_role):
     client_with_role("editor")  # sets SECRET_KEY
     client.headers["Authorization"] = "Bearer not.a.jwt"
-    assert _requests_for_member_without_setup(client) == [401] * 5
+    assert _requests_for_member_without_setup(client) == [401] * len(WRITE_ROUTES)
 
 
-def test_member_is_403_on_all_five_write_routes(client_with_role):
+def test_member_is_403_on_all_write_routes(client_with_role):
     member = client_with_role("member")
-    assert _requests_for_member_without_setup(member) == [403] * 5
+    assert _requests_for_member_without_setup(member) == [403] * len(WRITE_ROUTES)
 
 
 def test_a_member_with_an_invalid_body_is_403_not_422(client_with_role):
@@ -188,7 +193,7 @@ def test_a_member_with_an_invalid_body_is_403_not_422(client_with_role):
 
 
 def _seed_rows() -> dict[str, int]:
-    """A real crop, main category and sub-category, ids taken from RETURNING."""
+    """A real crop, main category, sub-category and item, ids taken from RETURNING."""
     with sync_engine.begin() as connection:
         crop = connection.execute(text(
             "INSERT INTO crops (slug, common_name, scientific_name) "
@@ -204,11 +209,19 @@ def _seed_rows() -> dict[str, int]:
             ),
             {"main": main},
         ).scalar_one()
-    return {"crop": crop, "main": main, "sub": sub}
+        item = connection.execute(
+            text(
+                "INSERT INTO items (sub_category_id, crop_id, title, body, source, reference, url, "
+                "read_directly) VALUES (:sub, :crop, 'seeded-item', 'b', 's', 'r', 'u', false) "
+                "RETURNING id"
+            ),
+            {"sub": sub, "crop": crop},
+        ).scalar_one()
+    return {"crop": crop, "main": main, "sub": sub, "item": item}
 
 
 def _calls_that_would_change_rows(client, ids) -> list[int]:
-    """The five write calls with REAL ids and distinct slugs, ordered so nothing cancels: POSTs
+    """The write calls with REAL ids and distinct slugs, ordered so nothing cancels: POSTs
     first (an unguarded one really inserts), then DELETEs. For a caller who must be refused."""
     return [
         client.post("/main-categories", json={"slug": "new-main", "name": "New"}).status_code,
@@ -223,9 +236,14 @@ def _calls_that_would_change_rows(client, ids) -> list[int]:
                 "body": "b", "source": "s", "reference": "r", "url": "u", "read_directly": True,
             },
         ).status_code,
+        client.delete(f"/items/{ids['item']}").status_code,
         client.delete(f"/sub-categories/{ids['sub']}").status_code,
         client.delete(f"/main-categories/{ids['main']}").status_code,
     ]
+
+
+def _item_row(item_id):
+    return sql("SELECT * FROM items WHERE id = :id", id=item_id).mappings().one()
 
 
 def test_a_refused_member_changes_nothing(client_with_role):
@@ -237,20 +255,23 @@ def test_a_refused_member_changes_nothing(client_with_role):
     }
     assert before["main_categories"] == [UNCATEGORISED_MAIN_CATEGORY_ID, ids["main"]]
     assert before["sub_categories"] == [UNCATEGORISED_SUB_CATEGORY_ID, ids["sub"]]
+    assert before["items"] == [ids["item"]]
+    item_before = _item_row(ids["item"])
 
     statuses = _calls_that_would_change_rows(member, ids)
 
     # Rows first: this test's claim is about the data, not the status codes.
     for table, rows in before.items():
         assert sql(f"SELECT id FROM {table} ORDER BY id").scalars().all() == rows, table
-    assert sql("SELECT count(*) FROM items").scalar_one() == 0
-    assert statuses == [403] * 5
+    assert _item_row(ids["item"]) == item_before
+    assert statuses == [403] * len(WRITE_ROUTES)
 
 
 @pytest.mark.parametrize("role", EDITOR_ROLES)
-def test_editor_and_admin_clear_all_five_write_routes(client_with_role, role):
-    # 201 x3 for the creates, 200 for the sub-category delete (a count), 204 for the main-category delete.
-    assert _run_write_routes(client_with_role(role)) == [201, 201, 201, 200, 204]
+def test_editor_and_admin_clear_all_write_routes(client_with_role, role):
+    # 201 x3 for the creates, 200 for the item delete (the row), 200 for the sub-category delete
+    # (a count), 204 for the main-category delete.
+    assert _run_write_routes(client_with_role(role)) == [201, 201, 201, 200, 200, 204]
 
 
 @pytest.mark.parametrize("path", ["/", "/main-categories", "/sub-categories", "/crops", "/items"])

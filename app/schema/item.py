@@ -5,6 +5,10 @@ Length bounds mirror model.py columns, so an over-long value is a 422, not a Dat
 """
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# int4 bounds: a path id outside them makes Postgres raise DataError (a 500), so the router 422s it.
+MIN_INT4 = -(2**31)
+MAX_INT4 = 2**31 - 1
+
 
 class ItemBase(BaseModel):
     """Fields only, no cross-field rule.

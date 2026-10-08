@@ -105,6 +105,7 @@ def test_only_the_expected_routes_require_a_token():
         if operation.get("security")
     )
     assert guarded == [
+        "DELETE /items/{item_id}",
         "DELETE /main-categories/{main_category_id}",
         "DELETE /members/invites/{invite_id}",
         "DELETE /members/{member_id}",

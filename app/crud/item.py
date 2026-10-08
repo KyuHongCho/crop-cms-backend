@@ -1,5 +1,5 @@
 """Data access for narrative documents."""
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.model.model as model
@@ -21,4 +21,17 @@ async def create_item(db: AsyncSession, body: item_schema.ItemCreate) -> model.I
     db.add(item)
     await db.commit()
     # no refresh: ItemResponse reads only columns, which expire_on_commit=False leaves populated.
+    return item
+
+
+async def delete_item(db: AsyncSession, item_id: int) -> model.Item | None:
+    """Hard-delete one document and return it, or None if there is no such id.
+
+    The row is returned because there is no backup, so the caller must keep it.
+    """
+    result = await db.execute(
+        delete(model.Item).where(model.Item.id == item_id).returning(model.Item)
+    )
+    item = result.scalar_one_or_none()
+    await db.commit()
     return item

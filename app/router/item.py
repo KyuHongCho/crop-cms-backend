@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.crud.item as item_crud
@@ -33,3 +33,22 @@ async def create_item(
     if not await db.get(model.Crop, body.crop_id):
         raise HTTPException(status_code=404, detail="Crop not found")
     return await item_crud.create_item(db, body)
+
+
+@router.delete(
+    "/items/{item_id}",
+    dependencies=[Depends(require_editor)],
+    response_model=item_schema.ItemResponse,
+)
+async def delete_item(
+    # not ge=1: an unknown id is a plain 404 here as on the category routes, 0 and negatives
+    # included. Only ids outside int4, which Postgres cannot compare, are a 422.
+    item_id: int = Path(ge=item_schema.MIN_INT4, le=item_schema.MAX_INT4),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hard-delete a document and its chunks; 200 returns the deleted row, since there is no
+    backup or audit record to recover it from."""
+    item = await item_crud.delete_item(db, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
