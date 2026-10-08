@@ -368,7 +368,7 @@ jobs:
           body=$(curl -fsS -X DELETE -H "Authorization: Bearer $CMS_TOKEN" "$api/sub-categories/$sc")
           echo "DELETE /sub-categories/$sc -> $body"
           test "$body" = '{"documents_refiled":3,"refiled_to":1}'
-          filed=$(curl -fsS "$api/items" | python3 -c \
+          filed=$(curl -fsS -H "Authorization: Bearer $CMS_TOKEN" "$api/items?status=all" | python3 -c \
             "import json,sys; d=json.load(sys.stdin); print(len(d), sorted({i['sub_category_id'] for i in d}))")
           echo "GET /items -> $filed"
           test "$filed" = "3 [1]"

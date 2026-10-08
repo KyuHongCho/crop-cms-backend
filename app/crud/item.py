@@ -6,13 +6,16 @@ import app.model.model as model
 import app.schema.item as item_schema
 
 
-async def get_items(db: AsyncSession) -> list[model.Item]:
-    """Every document, unfiltered.
+async def get_items(
+    db: AsyncSession, include_unpublished: bool = False, limit: int = 500, offset: int = 0
+) -> list[model.Item]:
+    """A page of published documents, or of all when `include_unpublished` (the caller gates it).
 
-    Not published-only: Item.published defaults to false, so that filter would hide a new
-    document from the CMS that just created it. Published retrieval is a separate endpoint.
-    """
-    result = await db.execute(select(model.Item).order_by(model.Item.id))
+    Item.published defaults to false, so a new document is a draft until published."""
+    query = select(model.Item).order_by(model.Item.id)
+    if not include_unpublished:
+        query = query.where(model.Item.published.is_(True))
+    result = await db.execute(query.limit(limit).offset(offset))
     return list(result.scalars().all())
 
 

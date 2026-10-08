@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # int4 bounds: a path id outside them makes Postgres raise DataError (a 500), so the router 422s it.
 MIN_INT4 = -(2**31)
 MAX_INT4 = 2**31 - 1
+MAX_OFFSET = 2**63 - 1  # the ?offset query parameter; OFFSET is a PostgreSQL bigint
 
 
 class ItemBase(BaseModel):

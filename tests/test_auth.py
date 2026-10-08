@@ -110,6 +110,7 @@ def test_only_the_expected_routes_require_a_token():
         "DELETE /members/invites/{invite_id}",
         "DELETE /members/{member_id}",
         "DELETE /sub-categories/{sub_category_id}",
+        "GET /items",
         "GET /members",
         "GET /members/invites",
         "GET /members/me",
