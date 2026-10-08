@@ -27,12 +27,13 @@ source that disagrees reaches the answer.
 | Works today | Not built yet |
 |---|---|
 | Document store — 5 content tables (8 with `members`, `member_audit_events` and `member_invites`), sources recorded per document | |
-| Members: invite-only signup, login (JWT), `/members/me`; daily token budget, enforced by `/chat` | Editing (`PATCH`) and deleting documents |
+| Members: invite-only signup, login (JWT), `/members/me`; daily token budget, enforced by `/chat` | Editing (`PATCH`) documents |
 | Embeddings for every document, offline-testable (`scripts/reindex.py`) | Frontend and deployment |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
 | `POST /chat`: classify, select topics, generate a cited answer. Off-topic questions are declined and questions with no relevant topic abstain, both `200` with `abstained` set and no generation call. Needs both `ANTHROPIC_API_KEY` (classifier, generator) and `OPENAI_API_KEY` (query embedding); a missing key or a provider error (usage limit, rate limit, outage) from either is a plain `503`, after the budget `429` check (the cause is logged, not returned). Models are `CHAT_MODEL_CLASSIFY` and `CHAT_MODEL_GENERATE` (both default to `claude-haiku-4-5`, set in `app/chat/llm.py`). The response carries `truncated` (`true` when the answer was cut at the generator's `max_tokens` and may be incomplete; the answer then also ends with a blank line and a fixed notice, but a frontend should read `truncated` rather than string-match the notice; a declined or abstained response is always `false` and carries no notice). The SDK's default retries stay on, so a `429` or `5xx` is called up to 3 times, with backoff, before the `503`. Answers are not word-for-word repeatable: no sampling parameters are set. `anthropic` is in `requirements.txt`: run `docker compose build` so the image has it (the tests in `tests/test_chat.py` that use the real client fail with ImportError otherwise) | |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them | |
+| Deleting documents (`DELETE /items/{id}`) | |
 | Database migrations (Alembic), exercised for real in CI | |
 | `POST /chat` crop labels when no crop is fixed; the routing question set and manual live-eval script (run live twice; results under "Live eval") | |
 | Test suite on an isolated database, run in CI | |
@@ -222,6 +223,7 @@ manages. A test asserts that refusal.
 | `DELETE` | `/main-categories/{id}` | Editor or admin. `409` while it still has sub-categories |
 | `DELETE` | `/sub-categories/{id}` | Editor or admin. Refiles its documents to "Uncategorised" and returns the count |
 | `GET` `POST` | `/items` | A document and its sources. `POST` needs editor or admin |
+| `DELETE` | `/items/{id}` | Editor or admin. `200` with the deleted row (`ItemResponse`), because a hard delete leaves no backup or audit trail and the response is the only recovery; its chunks go with it. `404` for an unknown id, so a repeat is `404`; `422` for an id outside the 32-bit integer range |
 | `POST` | `/members/signup` | Needs an `invite_code` in the body (`422` without one). `201`; the new member takes the invite's role and a `role` in the body is ignored. `400 "Invalid or expired invite"` for an unknown, used, expired or wrong-email code (one message for all four); `400` on a duplicate email, which leaves the invite unused. Argon2id hash, run in the threadpool |
 | `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email, a wrong password and a deactivated member. `429` with `Retry-After` once an account has used its counted attempts (see Login throttling); `422` for an email over 255 characters or containing NUL, or a password over 128 |
 | `GET` | `/members/me` | Needs `Authorization: Bearer <token>`; `401` otherwise |
@@ -238,7 +240,7 @@ manages. A test asserts that refusal.
 
 Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`); signing a token without it fails loudly. Tokens
 last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is implemented** -- log in
-again. Every CMS read is open. **Who may write:** the five CMS write routes (`POST /items`, `POST /main-categories`,
+again. Every CMS read is open. **Who may write:** the CMS write routes (`POST /items`, `DELETE /items/{id}`, `POST /main-categories`,
 `POST /sub-categories`, `DELETE /main-categories/{id}`, `DELETE /sub-categories/{id}`) need a token from a member whose
 `members.role` is `editor` or `admin` (`401` without a token, `403` for a plain `member`). Signup needs an invite and the member takes
 the invite's role (`member` or `editor`, never `admin`); the body cannot set one. The role is read from the member's row on every request, not from the token, so a

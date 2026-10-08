@@ -99,6 +99,10 @@ mirrors `crop_advisor/claims.py` in the sibling repo. Application-level validati
 so the client gets a `422` naming the rule rather than a `500`, but the database is what
 actually guarantees it.
 
+**Deleting a document is hard, and the response is the backup.** `DELETE /items/{id}` removes
+the row and its `item_chunks` (ON DELETE CASCADE) and answers `200` with the deleted row; there is
+no audit table or backup, so a mistaken delete is recovered by re-posting what the caller kept.
+
 **Deleting a category never destroys documents, and that rule lives in the schema.** A
 sub-category *classifies* its documents rather than owning them. Every foreign key is
 `ON DELETE RESTRICT`, and a `BEFORE DELETE` trigger on `sub_categories` refiles the documents to
