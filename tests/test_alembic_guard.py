@@ -16,11 +16,14 @@ def alembic(args, database, **extra):
     return subprocess.run(["alembic", *args], env=env, capture_output=True, text=True, cwd=str(REPO_ROOT))
 
 
-def test_a_downgrade_is_refused_on_a_database_that_is_not_a_test_database():
-    result = alembic(DOWNGRADE, "cms")
+def assert_refused(result):
     assert result.returncode != 0
     assert "ALEMBIC_ALLOW_DESTRUCTIVE" in result.stderr + result.stdout
     assert "DROP TABLE" not in result.stdout
+
+
+def test_a_downgrade_is_refused_on_a_database_that_is_not_a_test_database():
+    assert_refused(alembic(DOWNGRADE, "cms"))
 
 
 def test_the_opt_in_lets_a_downgrade_through():
@@ -36,12 +39,6 @@ def test_a_downgrade_on_a_test_database_needs_no_opt_in():
 def test_an_upgrade_is_never_blocked():
     result = alembic(["upgrade", "02e1a03214cf:c5e8a2f41d70", "--sql"], "cms")
     assert result.returncode == 0, result.stderr
-
-
-def assert_refused(result):
-    assert result.returncode != 0
-    assert "ALEMBIC_ALLOW_DESTRUCTIVE" in result.stderr + result.stdout
-    assert "DROP TABLE" not in result.stdout
 
 
 @pytest.mark.parametrize("database", ["cms_testing", "testing_cms", "cmstest", "test"])

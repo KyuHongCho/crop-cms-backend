@@ -134,8 +134,7 @@ docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms python -m pytest 
 ```
 
 Always pass both `-e` overrides, because the `cms` container's default environment is the DEV database.
-The test suite refuses to run without them, and `alembic downgrade` refuses on any database not named
-`*_test` without `ALEMBIC_ALLOW_DESTRUCTIVE=1`, but `alembic upgrade` and the `scripts/` commands do not
+The test suite refuses to run without them, but `alembic upgrade` and the `scripts/` commands do not
 check, so look at `DB_HOST` and `DB_NAME` before running them.
 
 The seed tests need [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor)
@@ -187,7 +186,7 @@ template needs and SQLAlchemy does not install on every platform (Apple Silicon,
 
 ```bash
 docker compose exec cms alembic upgrade head    # apply every migration not yet run
-docker compose exec -e ALEMBIC_ALLOW_DESTRUCTIVE=1 cms alembic downgrade base  # undo them all -- DROPS every table, all data with it
+docker compose exec cms alembic downgrade base  # undo them all -- DROPS every table, all data with it; refused unless you add -e ALEMBIC_ALLOW_DESTRUCTIVE=1
 ```
 
 Alembic refuses a downgrade on any database whose name does not end in `_test` unless
@@ -321,8 +320,8 @@ Expired rows are pruned by later logins (up to 20 per attempt). To sweep them by
 
 The throttle table must exist before the new code runs: if it is missing every login fails with a `500`
 (the throttle fails closed). Run `alembic upgrade head` first. To roll back, revert the code, then
-`ALEMBIC_ALLOW_DESTRUCTIVE=1 alembic downgrade -1` (alembic refuses a downgrade on a database not named
-`*_test` without that variable), which loses only the throttle's counts.
+`docker compose exec cms alembic downgrade -1`, which loses only the throttle's counts. Alembic refuses it
+on a database not named `*_test` unless you deliberately add `-e ALEMBIC_ALLOW_DESTRUCTIVE=1`.
 
 ## Live eval (manual)
 
