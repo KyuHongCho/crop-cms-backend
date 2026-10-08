@@ -95,7 +95,8 @@ def test_exactly_the_cms_write_routes_are_guarded_by_require_editor_and_the_memb
 
     assert {key for key, roles in guarded.items() if roles == {EDITOR_ROLES}} == set(WRITE_ROUTES)
     assert {key for key, roles in guarded.items() if roles == {ADMIN_ROLES}} == set(ADMIN_ROUTES)
-    # And nothing else carries any role guard at all.
+    # And nothing else carries a Depends-level role guard. GET /items checks the role in its body
+    # (status=all); tests/test_items.py pins that.
     assert {key for key, roles in guarded.items() if roles} == set(WRITE_ROUTES) | set(ADMIN_ROUTES)
 
 

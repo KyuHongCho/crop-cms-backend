@@ -16,6 +16,7 @@ from app.auth.auth import DUMMY_HASH, create_access_token, hash_password, verify
 from app.auth.dependency import get_current_member, require_admin
 from app.auth.invite import normalise_email
 from app.db.db import get_db
+from app.schema.item import MAX_OFFSET
 
 router = APIRouter(prefix="/members")
 logger = logging.getLogger(__name__)
@@ -26,7 +27,6 @@ _BAD_LOGIN = "Incorrect email or password"
 # path ids above these would overflow the column (500): members.id and member_invites.id are 32-bit.
 MAX_MEMBER_ID = 2**31 - 1
 MAX_INVITE_ID = 2**31 - 1
-MAX_OFFSET = 2**63 - 1  # the ?offset query parameter; OFFSET is a PostgreSQL bigint
 
 
 # declared before "/{member_id}", whose path parameter would shadow static routes.

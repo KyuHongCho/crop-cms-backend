@@ -74,9 +74,10 @@ multi-topic selection, once it lands, populates it without a response-shape chan
 drop-whole-topics machinery (step 1) itself is built and tested against constructed topic
 candidates in `tests/test_retrieval.py`, ready to call unchanged once that lands.
 
-`GET /items`, by contrast, returns **everything, unfiltered**. `published` defaults to false
-server-side, so a published-only filter would make every freshly created document invisible to
-the CMS that just created it. Published-only reads go through `/retrieval` instead.
+`GET /items` is published-only by default, so an anonymous caller never sees a draft.
+`published` defaults to false server-side, so a freshly created document is invisible there;
+`?status=all` lists drafts too and needs an editor or admin token (no token or a bad one is
+`401`, a plain member `403`). The default path ignores any token, so an expired one cannot end a session on a public read.
 
 ## Data model and integrity
 

@@ -222,7 +222,7 @@ manages. A test asserts that refusal.
 | `GET` `POST` | `/sub-categories` | `POST` needs editor or admin. Unique per parent, not globally; `409` on a duplicate `slug` under the same parent |
 | `DELETE` | `/main-categories/{id}` | Editor or admin. `409` while it still has sub-categories |
 | `DELETE` | `/sub-categories/{id}` | Editor or admin. Refiles its documents to "Uncategorised" and returns the count |
-| `GET` `POST` | `/items` | A document and its sources. `POST` needs editor or admin |
+| `GET` `POST` | `/items` | A document and its sources. `POST` needs editor or admin; `GET` is published-only unless `status=all` (see the note below the table) |
 | `DELETE` | `/items/{id}` | Editor or admin. `200` with the deleted row (`ItemResponse`), because a hard delete leaves no backup or audit trail and the response is the only recovery; its chunks go with it. `404` for an unknown id, so a repeat is `404`; `422` for an id outside the 32-bit integer range |
 | `POST` | `/members/signup` | Needs an `invite_code` in the body (`422` without one). `201`; the new member takes the invite's role and a `role` in the body is ignored. `400 "Invalid or expired invite"` for an unknown, used, expired or wrong-email code (one message for all four); `400` on a duplicate email, which leaves the invite unused. Argon2id hash, run in the threadpool |
 | `POST` | `/members/login` | `{"access_token": ...}`; the same `401` for an unknown email, a wrong password and a deactivated member. `429` with `Retry-After` once an account has used its counted attempts (see Login throttling); `422` for an email over 255 characters or containing NUL, or a password over 128 |
@@ -236,11 +236,17 @@ manages. A test asserts that refusal.
 | `POST` | `/members/{id}/unlock` | Admin only (`401` without a token, `403` otherwise). Clears that account's login throttle (`204`; idempotent: nothing to clear is still `204`); an unknown id is `404`; `403` if the acting admin was deactivated or demoted while the request was in flight. Every successful call writes an `unlock` audit row (`{"cleared": 0 or 1}`, the member id as target, never the email). The delete and the audit row commit together |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
 
+**`GET /items`.** Published documents only, ordered by id, paged by `limit` (1-500, default 500) and
+`offset` (>= 0); anything out of range is `422`. `?status=all` (default `published`; any other value is
+`422`) adds drafts and needs an editor or admin token: `401` without a token or with a bad one,
+`403` for a plain `member`. A new document is a draft, so it appears only under `status=all`. The default path
+ignores any token, but Swagger shows a lock on this route because the `status=all` path takes one.
+
 ## Members and the token budget
 
 Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`); signing a token without it fails loudly. Tokens
 last 30 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`) and **no refresh-token flow is implemented** -- log in
-again. Every CMS read is open. **Who may write:** the CMS write routes (`POST /items`, `DELETE /items/{id}`, `POST /main-categories`,
+again. Every CMS read is open except `GET /items?status=all` (drafts: editor or admin). **Who may write:** the CMS write routes (`POST /items`, `DELETE /items/{id}`, `POST /main-categories`,
 `POST /sub-categories`, `DELETE /main-categories/{id}`, `DELETE /sub-categories/{id}`) need a token from a member whose
 `members.role` is `editor` or `admin` (`401` without a token, `403` for a plain `member`). Signup needs an invite and the member takes
 the invite's role (`member` or `editor`, never `admin`); the body cannot set one. The role is read from the member's row on every request, not from the token, so a
