@@ -133,6 +133,10 @@ docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms alembic upgrade h
 docker compose exec -e DB_HOST=db-test -e DB_NAME=cms_test cms python -m pytest -q
 ```
 
+Always pass both `-e` overrides, because the `cms` container's default environment is the DEV database.
+The test suite refuses to run without them, but `alembic upgrade` and the `scripts/` commands do not
+check, so look at `DB_HOST` and `DB_NAME` before running them.
+
 The seed tests need [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor)
 checked out next to this repo; without it they skip. CI checks the sibling out and fails the build
 if those tests would skip.
@@ -182,8 +186,11 @@ template needs and SQLAlchemy does not install on every platform (Apple Silicon,
 
 ```bash
 docker compose exec cms alembic upgrade head    # apply every migration not yet run
-docker compose exec cms alembic downgrade base  # undo them all -- DROPS every table, all data with it
+docker compose exec cms alembic downgrade base  # undo them all -- DROPS every table, all data with it; refused unless you add -e ALEMBIC_ALLOW_DESTRUCTIVE=1
 ```
+
+Alembic refuses a downgrade on any database whose name does not end in `_test` unless
+`ALEMBIC_ALLOW_DESTRUCTIVE=1` is set (CI and the Testing commands already target `cms_test`).
 
 The exception is a `pg-data` volume that predates Alembic: it already has the tables (built by the
 retired `python -m app.db.migrate_db`), so applying the baseline migration to it fails with
@@ -313,7 +320,8 @@ Expired rows are pruned by later logins (up to 20 per attempt). To sweep them by
 
 The throttle table must exist before the new code runs: if it is missing every login fails with a `500`
 (the throttle fails closed). Run `alembic upgrade head` first. To roll back, revert the code, then
-`alembic downgrade -1`, which loses only the throttle's counts.
+`docker compose exec cms alembic downgrade -1`, which loses only the throttle's counts. Alembic refuses it
+on a database not named `*_test` unless you deliberately add `-e ALEMBIC_ALLOW_DESTRUCTIVE=1`.
 
 ## Live eval (manual)
 

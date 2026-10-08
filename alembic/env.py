@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -13,7 +14,7 @@ from alembic import context
 # app.model.model is for its registration side effect -- see the identical
 # comment in app/db/migrate_db.py.
 import app.model.model  # noqa: F401
-from app.db.db import ASYNC_DB_URL, Base
+from app.db.db import ASYNC_DB_URL, DB_NAME, Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -38,6 +39,26 @@ target_metadata = Base.metadata
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+
+# A downgrade drops tables, so it needs a test database or an explicit opt-in.
+_DESTRUCTIVE = {"downgrade"}
+
+
+def _refuse_destructive_on_non_test_db() -> None:
+    cmd = getattr(config.cmd_opts, "cmd", None)
+    name = cmd[0].__name__ if cmd else None
+    if name not in _DESTRUCTIVE:
+        return
+    if DB_NAME.endswith("_test") or os.environ.get("ALEMBIC_ALLOW_DESTRUCTIVE") == "1":
+        return
+    raise SystemExit(
+        f"alembic {name} refused: {DB_NAME!r} is not a test database. "
+        "Set ALEMBIC_ALLOW_DESTRUCTIVE=1 to run it on purpose."
+    )
+
+
+_refuse_destructive_on_non_test_db()
 
 
 def run_migrations_offline() -> None:

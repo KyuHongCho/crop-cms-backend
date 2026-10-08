@@ -228,6 +228,16 @@ touching the dev database. That fixture also reseeds the "Uncategorised" bucket 
 TRUNCATE (`RESTART IDENTITY CASCADE` would otherwise remove it, breaking every test after the
 first one that touches it).
 
+The `alembic/env.py` guard covers `downgrade` only: every `drop_*` / `DROP` in `alembic/versions/`
+sits in a `downgrade()`, and a downgrade was the step that removed tables in the 2026-10-07 incident.
+`upgrade`, `stamp` and `scripts/` are left unguarded as a deliberately narrow net.
+
+The guard tests `DB_NAME` alone, the only connection setting `env.py` imports for it. Why not
+`DB_HOST` as well, although `tests/conftest.py` requires both, is not recorded anywhere.
+
+The opt-in is an env var (`alembic/env.py:53`). Alembic's `-x` flag would have worked too, and the
+choice between them is not recorded.
+
 Dev tooling: `pytest==9.1.1`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
 `TestClient` raises `RuntimeError` naming `httpx2` rather than merely warning), both in
 `requirements-dev.txt` and installed into the same image as `requirements.txt`.
