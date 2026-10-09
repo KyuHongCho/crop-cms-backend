@@ -93,6 +93,7 @@ def test_status_all_for_a_plain_member_is_403(client_with_role):
 
 
 def test_a_garbage_token_is_401_on_status_all_and_ignored_on_the_default(client, monkeypatch):
+    # the client fixture sets no key, and decoding the garbage token without one would be a 500.
     monkeypatch.setenv("SECRET_KEY", "x" * 40)
     published, _ = _seed_published_and_draft()
     headers = {"Authorization": "Bearer not-a-token"}
