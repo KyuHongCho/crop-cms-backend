@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Without a bound, a black-holed database host hangs the probe for the pool's 30 s.
+# Without a bound, a black-holed or hung database blocks in connect: no connect_timeout
+# is set, and the pool's 30 s covers only waiting for a free slot.
 READY_TIMEOUT_SECONDS = 3
 
 

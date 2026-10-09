@@ -53,12 +53,9 @@ jobs:
         run: docker compose build
 
       - name: Stack starts, and Postgres is actually ready
-        # --wait blocks on the db and cms healthchecks, so reaching the next step means
-        # Postgres accepted a connection and the app answered /health -- not merely
-        # that a container exists.
-        # --profile test also starts db-test: an ephemeral second Postgres
-        # server, invisible to a plain `docker compose up`, that the suite
-        # below runs against -- never the dev db/cms.
+        # --wait blocks on the db and cms healthchecks, so reaching the next step
+        # means Postgres accepted a connection and the app answered /health.
+        # --profile test also starts db-test, which the suite uses instead of dev.
         run: docker compose --profile test up -d --wait
 
       - name: API answers over HTTP
