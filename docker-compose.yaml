@@ -49,6 +49,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      # Probes /health, never /health/ready: echo=True would log a SELECT 1 every
+      # 10 s. Python, not curl, so a slimmer image still has it. Any production
+      # compose file must carry this same block.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
   db:
     image: pgvector/pgvector:pg17
     restart: unless-stopped

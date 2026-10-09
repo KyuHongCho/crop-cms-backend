@@ -4,7 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import JSONResponse
 
-from app.router import category, chat, crop, item, member, retrieval
+from app.router import category, chat, crop, health, item, member, retrieval
 
 app = FastAPI()
 
@@ -23,6 +23,7 @@ async def _validation_error(request: Request, exc: RequestValidationError):
 app.include_router(category.router, tags=["category"])
 app.include_router(chat.router, tags=["chat"])
 app.include_router(crop.router, tags=["crop"])
+app.include_router(health.router, tags=["health"])
 app.include_router(item.router, tags=["item"])
 app.include_router(member.router, tags=["member"])
 app.include_router(retrieval.router, tags=["retrieval"])
