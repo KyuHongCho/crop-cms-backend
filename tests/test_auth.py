@@ -110,7 +110,7 @@ def test_only_the_expected_routes_require_a_token():
         "DELETE /members/invites/{invite_id}",
         "DELETE /members/{member_id}",
         "DELETE /sub-categories/{sub_category_id}",
-        "GET /items",  # declares bearer_scheme for Swagger; only status=all needs a token
+        "GET /items",  # takes the scheme for status=all; only that path needs a token
         "GET /members",
         "GET /members/invites",
         "GET /members/me",
