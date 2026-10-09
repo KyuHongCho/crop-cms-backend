@@ -35,6 +35,7 @@ source that disagrees reaches the answer.
 | Category delete that refiles documents instead of deleting them | |
 | Deleting documents (`DELETE /items/{id}`) | |
 | Database migrations (Alembic), exercised for real in CI | |
+| Health endpoints — `GET /health` (liveness) and `GET /health/ready` (database check, `503` when it fails); the `cms` container healthcheck probes `/health` every 10 s, so the uvicorn access log shows it | |
 | `POST /chat` crop labels when no crop is fixed; the routing question set and manual live-eval script (run live twice; results under "Live eval") | |
 | Test suite on an isolated database, run in CI | |
 | AI code review on pull requests (advisory) | |
@@ -235,6 +236,8 @@ manages. A test asserts that refusal.
 | `DELETE` | `/members/{id}` | Admin only. `204`, a hard delete of the member row; their token gets `401` on the next request and login with their email is the usual `401`. `404` for an unknown id (so a second delete is `404`); `403` if the acting admin was deactivated or demoted while the request was in flight; `409` if an admin deletes themselves (the only way to reach the last active admin, so that is the message a client sees; a separate last-admin refusal sits behind it as defence in depth). Each delete writes one `member_audit_events` row (`action` `delete`, `detail` `{"role": ...}` only, no email) in the same transaction; the row outlives the member (no foreign key). Refusals delete nothing and write no row |
 | `POST` | `/members/{id}/unlock` | Admin only (`401` without a token, `403` otherwise). Clears that account's login throttle (`204`; idempotent: nothing to clear is still `204`); an unknown id is `404`; `403` if the acting admin was deactivated or demoted while the request was in flight. Every successful call writes an `unlock` audit row (`{"cleared": 0 or 1}`, the member id as target, never the email). The delete and the audit row commit together |
 | `GET` | `/retrieval/{crop_slug}/{topic}` | Every published document on a topic; `413` if the topic exceeds the budget |
+| `GET` | `/health` | Liveness probe: `200 {"status": "ok"}` with `Cache-Control: no-store`. Open, no token, never touches the database |
+| `GET` | `/health/ready` | Readiness probe: runs `SELECT 1`. `200 {"status": "ok"}`, or `503 {"status": "unavailable"}` when the database is unreachable, errors, or takes over 3 s; the body never carries the cause (it is logged as an exception class name). Open, `Cache-Control: no-store` on both |
 
 **`GET /items`.** Published documents only, ordered by id, paged by `limit` (1-500, default 500) and
 `offset` (>= 0); anything out of range is `422`. `?status=all` (default `published`; any other value is

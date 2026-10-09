@@ -53,19 +53,19 @@ jobs:
         run: docker compose build
 
       - name: Stack starts, and Postgres is actually ready
-        # --wait blocks on the db healthcheck, so reaching the next step means
-        # Postgres accepted a connection -- not merely that a container exists.
+        # --wait blocks on the db and cms healthchecks, so reaching the next step means
+        # Postgres accepted a connection and the app answered /health -- not merely
+        # that a container exists.
         # --profile test also starts db-test: an ephemeral second Postgres
         # server, invisible to a plain `docker compose up`, that the suite
         # below runs against -- never the dev db/cms.
         run: docker compose --profile test up -d --wait
 
       - name: API answers over HTTP
-        # `docker ps` reporting "Up" proves only that PID 1 is alive. Under
-        # --reload the application can be dead inside a container that still
-        # reports healthy. Only a real response over the published port
-        # proves the app works.
-        run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/
+        # The cms healthcheck runs inside the container, so it does not prove the
+        # published port works. Only a real response over that port does, and
+        # /health/ready also proves the app reaches the database.
+        run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/health/ready
 
       - name: The seed tests really collect (they must not silently skip)
         # tests/test_seed.py guards its advisor imports with pytest.importorskip,
