@@ -206,6 +206,185 @@ database on the port a scanner tries first. If you already run PostgreSQL on the
 the published port in `docker-compose.yaml`; only host tools are affected, since the app reaches
 the database over the Docker network (`DB_HOST: db`), never the published port.
 
+## How the browser reaches the API
+
+The browser reaches the API through one **same-origin reverse proxy**, not through CORS. The
+`proxy` compose service (`nginx:1.29.8-alpine`, started only by `--profile proxy`, published on
+`127.0.0.1:8080`) serves a static site at `/` and forwards `/api/*` to `cms:8000` with the `/api`
+prefix stripped, which is what the frontend's Vite dev proxy does today.
+[`proxy/conf.d/default.conf`](../proxy/conf.d/default.conf) holds the config and
+[`proxy/check.sh`](../proxy/check.sh) asserts its routing; CI runs the script after the stack is up.
+The service is a testable stand-in: the host, TLS and public ports are not chosen yet (see
+[Deferred](#deferred-to-the-production-setup)).
+
+### Why same-origin, and the CORS fallback
+
+The frontend calls `${window.location.origin}/api` (`crop-cms-frontend/src/api/client.ts:13`), sends
+its token as an `Authorization: Bearer` header from `sessionStorage`, and uses no cookies or
+credentialed fetch. Served from the same origin as the API, none of that is a cross-origin request:
+there is no preflight and no origin allowlist to keep correct, and `app/main.py` needs no
+`CORSMiddleware`; the app has none.
+
+CORS is documented as a fallback only, for the case that the frontend is ever hosted on a different
+origin from the API. If so, the shape is: an explicit `CORS_ALLOW_ORIGINS` list (never `*`),
+`allow_credentials=False` (the token travels in a header, not a cookie), and a test that a request
+from an unlisted origin gets no `Access-Control-Allow-Origin`. Nothing of this is implemented.
+
+### Why nginx
+
+The project uses nginx for its familiarity and ubiquity. Behaviours of nginx that shape this config:
+
+- nginx limits a request body to 1m by default; the config raises it to 10m. Items are under 1 KB
+  today and the API has no body limit of its own on items (`app/schema/item.py:26`), so the proxy is
+  the only bound. A body over 10m gets `413` from nginx.
+- A bare nginx passes a client-sent `X-Forwarded-For` through unchanged, and the common
+  `$proxy_add_x_forwarded_for` form appends to it. The config sets `X-Forwarded-For $remote_addr`,
+  which overwrites it, so a spoofed value never reaches the API.
+- nginx does not touch a client-sent `X-Forwarded-Host`; the config overwrites it.
+- nginx resolves an upstream name once, at start. See the DNS trap below.
+- nginx normalises the request path before matching locations, which makes the readiness deny hard
+  to bypass.
+- TLS here needs a certbot-style setup or the host's own TLS.
+
+### Traps
+
+- **Upstream DNS is resolved at start.** With a plain `proxy_pass http://cms:8000/;`, nginx resolves
+  `cms` once, so a replaced upstream on a different IP returns `502` until `nginx -s reload`, and
+  nginx refuses to start if the name does not resolve at start. The config therefore uses the
+  variable form (`set $cms http://cms:8000;` with `resolver 127.0.0.11 valid=10s`), which
+  re-resolves about every 10 s and starts even when the name does not resolve yet. The cost: with a
+  variable, `proxy_pass` no longer strips the prefix, so an explicit `rewrite ^/api/(.*)$ /$1 break;`
+  does it, and **`nginx -t` accepts a wrong upstream name in this form** (exit 0). Only `check.sh`
+  catches that. `127.0.0.11` is Docker's embedded DNS; it was run on a user-defined network and on the
+  compose default network in CI.
+- **`absolute_redirect off` matters.** Without it, nginx's redirect from `/api` to `/api/` carries
+  `Location: http://127.0.0.1/api/`, which drops the published port. With it the `Location` is the
+  relative `/api/`.
+- **The readiness deny needs `^~`.** `location ^~ /api/health/ready { return 404; }` keeps `/health/ready`
+  from being reachable through the proxy (orchestrator and CI probes go to `cms` directly). The
+  modifier stops nginx from consulting regex locations for that prefix: without it, a regex
+  `location ~ ^/api/ { ... }` wins and the request reaches the API. The prefix
+  also 404s `/api/health/readyx` and `/api/health/ready/`, an intended over-match.
+- **A reload of an invalid config keeps the old one.** `nginx -s reload` exits 1, prints `[emerg]`
+  and the previous config keeps serving, so a typo can look like a passing check on the old config.
+  Check the exit code. `nginx -t` rejects a misspelt directive, a missing semicolon, a bad value,
+  and a missing or extra brace.
+- **A change that makes `/` non-2xx makes the proxy unhealthy.** The healthcheck requests `/`, so
+  a broken `root` or catch-all turns the proxy `unhealthy` after about 9 s, which breaks
+  `up -d --wait`. Apply such an edit to a running proxy by reload.
+- **`Host $http_host` means a request with an empty `Host`, or an HTTP/1.0 request without one, to
+  `/api/*` gets `400`.** For HTTP/1.1 with an empty `Host:`, nginx itself answers (an HTML
+  `400 Bad Request`, `Server: nginx`) and the request never reaches the API. An HTTP/1.0 request
+  with no `Host` is forwarded, and uvicorn rejects it (`Invalid HTTP request received.`).
+  `$host` would avoid that but drops the port, and the API builds redirects from `Host`. Browsers
+  always send `Host`, so the config keeps `$http_host`.
+
+### Behaviour at the edges
+
+- **`/api` and `/api/`.** The prefix location ends in a slash, so `/api` gets a `301` to `/api/`,
+  and `/api/` is the API root (`{"Hello":"World"}`). `/apix` falls through to the SPA. The frontend
+  calls none of these.
+- **The SPA fallback hides a missing asset.** `try_files $uri /index.html` returns `200` with the
+  page for `/assets/missing.js`. That is standard, and it can mask a bad deploy; it never applies to
+  `/api/*`.
+- **The path the API receives is nginx's normalised path.** `//` is merged (`merge_slashes`),
+  `/./` is resolved, and `%2F` is decoded to `/` (`/api/retrieval/basil/a%2Fb` reaches the API as
+  `/retrieval/basil/a/b`); `%20`, `%25` and `%C3%A9` stay encoded and the query string is passed
+  byte for byte. What nginx matched is what the API receives. Whether the API alone would route
+  `%2F` was reasoned from uvicorn decoding, not run.
+- **The API's trailing-slash redirect loses `/api` on the dev stack.** FastAPI redirects
+  `/items/` to `/items`. The dev `cms` command runs without `--root-path`, so through the proxy the
+  `Location` is `http://<host>:<port>/items`: host and port are kept (the `Host` header is
+  forwarded) but `/api` is dropped. With `--root-path /api`, as the production setup should set,
+  the prefix is kept (`/api/items`). The frontend never emits a trailing slash, so nothing in the
+  app triggers it. A `TestClient` shows no prefix in either case; that is an artifact of the
+  ASGI-level `root_path`, not what real uvicorn does.
+- **`/chat` is plain JSON.** The frontend has no `EventSource`, stream reader or
+  `StreamingResponse`, and `app/` has none, so no buffering or streaming config is needed.
+  `--proxy-headers` on uvicorn is not needed either: nothing in `app/` reads a client address or
+  an `X-Forwarded-*` header, and the login throttle is keyed on the email hash.
+- **Forwarded headers.** `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` are
+  overwritten, not appended: a spoofed `X-Forwarded-For: 6.6.6.6`, `X-Forwarded-Proto: https` and
+  `X-Forwarded-Host: evil` did not reach the API. `Authorization`, `Content-Type`, `DELETE`, `PATCH`
+  and the query string pass through unchanged, and an `OPTIONS` request is forwarded like any other
+  (nginx adds no `Access-Control-*` header). Client-sent `X-Original-URL`, `X-Rewrite-URL` and
+  `X-Forwarded-Prefix` did not change routing.
+- **Timeouts.** The app sets no deadline of its own on a model call, so the Anthropic SDK's
+  defaults apply (reported as a 600 s read timeout and 2 retries; not re-derived from the
+  installed SDK). `proxy_read_timeout 120s` is what bounds the browser's wait on a hung
+  `/chat`; `proxy_connect_timeout 5s` only bounds a black-holed address.
+  A `2s` copy of the setting returned `504` after 2.004 s against a 4 s upstream sleep, so the
+  directive works. **The 120 s value itself was not exercised.** A slow model call gives the browser
+  a `504` even though the backend may finish and spend tokens.
+
+### What the readiness deny was tested against
+
+None of the bypass variants tried reached the API's `/health/ready`: encoded characters
+(`%72eady`, `%68ealth`, `%2f`), dot segments, doubled slashes, a trailing `;x`, `.`, `%20` or `%00`
+(a `400`), and a path with a different case (the API's own `404`, or the SPA for `/API/...`). About
+50 further variants also did not leak (double encodings, backslash and `%5c`,
+overlong UTF-8, a 9000-character path, HTTP/1.0, an absolute-URI request line, a duplicated
+`Host`, a conflicting `Transfer-Encoding` and `Content-Length`). `check.sh` pins the main set and
+requires a healthy upstream: it does not accept a `502` as a pass.
+
+### Docs exposure
+
+`/api/docs`, `/api/redoc` and `/api/openapi.json` are forwarded. **They work through the proxy
+only once production starts uvicorn with `--root-path /api`.** The dev `cms` command is unchanged,
+so through the dev proxy the docs page asks for `/openapi.json`, gets the site's `index.html`, and
+fails: by design, and why the README says `/docs` works on `:8000` directly. With `--root-path /api`
+behind a stripping proxy, `/api/openapi.json` was `200` JSON and `/api/docs` and `/api/redoc` were
+`200` embedding `/api/openapi.json`; whether Swagger UI renders in a browser was not verified.
+
+- **Every content-writing route needs an editor or admin token.** `tests/test_roles.py` pins it:
+  no token is `401` on every write route (`:171-174`), a garbage token is `401` (`:181-184`), a
+  `member` is `403` (`:187-189`), and the guarded-route inventory is pinned (`:83`).
+- **Swagger's "Try it out" adds no permissions.** It sends the same requests `curl` would. A visitor
+  logged in as a `member` can use `/chat`, bounded by the daily token budget, and can try login and
+  invite-only signup.
+- **The real risk is a person pasting an editor or admin token into a public docs page.** Deletes
+  are hard deletes and there are no backups yet.
+- **Blocking the docs is a small change to the nginx config that is not made here.** Add these
+  above `location /api/`:
+
+  ```nginx
+  location ^~ /api/docs { return 404; }
+  location ^~ /api/redoc { return 404; }
+  location ^~ /api/openapi.json { return 404; }
+  ```
+
+  Use `^~` for `openapi.json`, not `=`: with `=`, `/api/openapi.json/` is not blocked and reaches the
+  API's `307`, which on the dev stack lands outside `/api` (the site) and under `--root-path` lands
+  on the blocked path. That is not a leak, but `^~` is cleaner. These
+  rules return nginx's `404` for the plain path, the trailing-slash form, `/docs/`,
+  `/docs/oauth2-redirect`, `%6fpenapi.json`, the `..` forms and `?x`. None of them blocks a path
+  the frontend uses (`/api/crops`, `/api/items`, `/api/retrieval/...`, `/api/members/me`,
+  `/api/health`). The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not
+  routes of the app (harmless, intended). The block need not sit above the readiness deny: they do
+  not overlap.
+
+### Deferred to the production setup
+
+- TLS (certbot on a plain VM, or the host's own TLS) and public ports 80/443, with only the proxy
+  public.
+- `--root-path /api` in the production command, which makes the docs work through the proxy and
+  removes the trailing-slash limit above.
+- `--forwarded-allow-ips` for uvicorn (not needed today). `*` would be safe only if the API is
+  unreachable except through the proxy; the scheme of a redirect under `--proxy-headers` was not
+  verified.
+- `X-Forwarded-Proto` from the host, if TLS terminates in front of nginx: the config sets
+  `$scheme`, which is correct only when nginx terminates TLS itself.
+- Carrying the proxy healthcheck into the production compose file.
+
+### Not verified
+
+- TLS and certificates; Swagger UI in a browser; whether `dist/` is current.
+- Editing `conf.d` in place on Linux: the directory mount (chosen over a single-file mount, which
+  can leave a container on the old inode when an editor replaces the file) picked up an in-place
+  edit and reload on arm64 macOS Docker Desktop; CI shows only that the mount is read and served on
+  Linux amd64.
+- The 120 s read timeout under load; `--forwarded-allow-ips` effects.
+
 ## Testing details
 
 The suite never runs against the dev database. `docker-compose.yaml` has a second,
@@ -297,4 +476,5 @@ scripts/calibrate_floor.py  on-topic vs off-topic score distributions, for TOPIC
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI
 docs/                design notes (this file)
+proxy/               nginx config and routing check (compose profile `proxy`)
 ```
