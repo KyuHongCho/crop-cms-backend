@@ -435,6 +435,9 @@ Relabel the first when that intent ships.
 
 - [crop-climate-advisor](https://github.com/KyuHongCho/crop-climate-advisor) — crop suitability from
   NASA POWER climate data and FAO ECOCROP requirements; the structured half of the planned chat.
+- [crop-cms-frontend](https://github.com/KyuHongCho/crop-cms-frontend) — the React app that consumes
+  this API: log in, sign up with an invite code, and ask crop questions that come back with cited
+  sources.
 - [agentic-workflow](https://github.com/KyuHongCho/agentic-workflow) — the plan → build → review
   workflow with adversarial auditors, used to build this repo; its review stage runs when a pull
   request is opened here.
