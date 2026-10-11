@@ -385,7 +385,8 @@ also to `--out PATH` (never overwritten); do not commit it as a fixture.
 
 ### Measured results
 
-These results were measured with claude-haiku-4-5; the default is now claude-haiku-5-5 and they have not been re-measured with it.
+The default is now claude-haiku-5-5; these results have not been re-measured with it.
+
 Two live runs against the dev database (claude-haiku-4-5, text-embedding-3-small, 17 questions x 3
 repeats, 51 classifier calls, no refusals for the context budget). These describe this question set only:
 it is also the set the wording and slug fixes below were tuned against (no held-out set), and 3 repeats per
