@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 # same default for both: the split is for configurability, not cost.
-DEFAULT_MODEL = "claude-haiku-4-5"
+DEFAULT_MODEL = "claude-haiku-5-5"
 
 
 def _model_from_env(name: str) -> str:
