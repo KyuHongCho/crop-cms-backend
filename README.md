@@ -22,13 +22,13 @@ source that disagrees reaches the answer.
 
 ## Status
 
-**Early and in progress.** Nothing consumes this API yet.
+**Early and in progress.** A React frontend, [crop-cms-frontend](https://github.com/KyuHongCho/crop-cms-frontend), now consumes this API; nothing is deployed yet.
 
 | Works today | Not built yet |
 |---|---|
 | Document store — 5 content tables (8 with `members`, `member_audit_events` and `member_invites`), sources recorded per document | |
 | Members: invite-only signup, login (JWT), `/members/me`; daily token budget, enforced by `/chat` | Editing (`PATCH`) documents |
-| Embeddings for every document, offline-testable (`scripts/reindex.py`) | Frontend and deployment |
+| Embeddings for every document, offline-testable (`scripts/reindex.py`) | Deployment |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
 | `POST /chat`: classify, select topics, generate a cited answer. Off-topic questions are declined and questions with no relevant topic abstain, both `200` with `abstained` set and no generation call. Needs both `ANTHROPIC_API_KEY` (classifier, generator) and `OPENAI_API_KEY` (query embedding); a missing key or a provider error (usage limit, rate limit, outage) from either is a plain `503`, after the budget `429` check (the cause is logged, not returned). Models are `CHAT_MODEL_CLASSIFY` and `CHAT_MODEL_GENERATE` (both default to `claude-haiku-5-5`, set in `app/chat/llm.py`). The response carries `truncated` (`true` when the answer was cut at the generator's `max_tokens` and may be incomplete; the answer then also ends with a blank line and a fixed notice, but a frontend should read `truncated` rather than string-match the notice; a declined or abstained response is always `false` and carries no notice). The SDK's default retries stay on, so a `429` or `5xx` is called up to 3 times, with backoff, before the `503`. Answers are not word-for-word repeatable: no sampling parameters are set. `anthropic` is in `requirements.txt`: run `docker compose build` so the image has it (the tests in `tests/test_chat.py` that use the real client fail with ImportError otherwise) | |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
