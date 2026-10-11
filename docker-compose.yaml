@@ -120,5 +120,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  # Same-origin front door: serves the static site at / and forwards /api/*
+  # to cms with the prefix stripped.
+  proxy:
+    image: nginx:1.29.8-alpine
+    profiles: ["proxy"]
+    depends_on:
+      cms:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./proxy/conf.d:/etc/nginx/conf.d:ro
+      - ${SITE_DIR:-./proxy/site}:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
 volumes:
   pg-data:
