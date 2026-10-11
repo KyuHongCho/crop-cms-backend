@@ -255,8 +255,8 @@ The project uses nginx for its familiarity and ubiquity. Behaviours of nginx tha
   re-resolves about every 10 s and starts even when the name does not resolve yet. The cost: with a
   variable, `proxy_pass` no longer strips the prefix, so an explicit `rewrite ^/api/(.*)$ /$1 break;`
   does it, and **`nginx -t` accepts a wrong upstream name in this form** (exit 0). Only `check.sh`
-  catches that. `127.0.0.11` is Docker's embedded DNS; it was run on a user-defined network, and
-  that the compose default network behaves the same is reasoned, not run.
+  catches that. `127.0.0.11` is Docker's embedded DNS; it was run on a user-defined network and on the
+  compose default network in CI.
 - **`absolute_redirect off` matters.** Without it, nginx's redirect from `/api` to `/api/` carries
   `Location: http://127.0.0.1/api/`, which drops the published port. With it the `Location` is the
   relative `/api/`.
@@ -379,11 +379,11 @@ behind a stripping proxy, `/api/openapi.json` was `200` JSON and `/api/docs` and
 ### Not verified
 
 - TLS and certificates; Swagger UI in a browser; whether `dist/` is current.
-- Linux and amd64 behaviour: the runs were on arm64 macOS Docker Desktop. The directory mount of
-  `conf.d` (chosen over a single-file mount, which can leave a container on the old inode when an
-  editor replaces the file) picked up an in-place edit and reload there; the Linux behaviour that
-  motivates it is untested.
-- `127.0.0.11` inside the compose default network; port 8080 on the CI runner; the 120 s read timeout under load; `--forwarded-allow-ips` effects.
+- Editing `conf.d` in place on Linux: the directory mount (chosen over a single-file mount, which
+  can leave a container on the old inode when an editor replaces the file) picked up an in-place
+  edit and reload on arm64 macOS Docker Desktop; CI shows only that the mount is read and served on
+  Linux amd64.
+- The 120 s read timeout under load; `--forwarded-allow-ips` effects.
 
 ## Testing details
 
