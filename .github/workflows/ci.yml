@@ -64,6 +64,13 @@ jobs:
         # /health/ready also proves the app reaches the database.
         run: curl -fsS --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8000/health/ready
 
+      - name: Same-origin proxy forwards /api and serves the site
+        # Through the published port, as a browser would reach it: the proxy's
+        # healthcheck runs inside the container and would not catch a bad mapping.
+        run: |
+          docker compose --profile proxy up -d --wait proxy
+          bash proxy/check.sh
+
       - name: The seed tests really collect (they must not silently skip)
         # tests/test_seed.py guards its advisor imports with pytest.importorskip,
         # so a missing sibling degrades to a clean skip -- correct for local dev,
