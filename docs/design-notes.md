@@ -234,9 +234,9 @@ from an unlisted origin gets no `Access-Control-Allow-Origin`. Nothing of this i
 
 The project uses nginx for its familiarity and ubiquity. Behaviours of nginx that shape this config:
 
-- nginx limits a request body to 1m by default; the config sets `client_max_body_size 0` because the
-  API has no body limit on items (`app/schema/item.py:26`). A 2 MB POST gets `413` without it and
-  `200` with it.
+- nginx limits a request body to 1m by default; the config raises it to 10m. Items are under 1 KB
+  today and the API has no body limit of its own on items (`app/schema/item.py:26`), so the proxy is
+  the only bound. A body over 10m gets `413` from nginx.
 - A bare nginx passes a client-sent `X-Forwarded-For` through unchanged, and the common
   `$proxy_add_x_forwarded_for` form appends to it. The config sets `X-Forwarded-For $remote_addr`,
   which overwrites it, so a spoofed value never reaches the API.
@@ -357,8 +357,8 @@ behind a stripping proxy, `/api/openapi.json` was `200` JSON and `/api/docs` and
   API's `307`, which on the dev stack lands outside `/api` (the site) and under `--root-path` lands
   on the blocked path. That is not a leak, but `^~` is cleaner. These
   rules return nginx's `404` for the plain path, the trailing-slash form, `/docs/`,
-  `/docs/oauth2-redirect`, `%6fpenapi.json`, the `..` forms and `?x`, and that none of them blocks
-  a path the frontend uses (`/api/crops`, `/api/items`, `/api/retrieval/...`, `/api/members/me`,
+  `/docs/oauth2-redirect`, `%6fpenapi.json`, the `..` forms and `?x`. None of them blocks a path
+  the frontend uses (`/api/crops`, `/api/items`, `/api/retrieval/...`, `/api/members/me`,
   `/api/health`). The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not
   routes of the app (harmless, intended). The block need not sit above the readiness deny: they do
   not overlap.
