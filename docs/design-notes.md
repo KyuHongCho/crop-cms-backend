@@ -275,8 +275,9 @@ Caddy that shape this config:
   answers every request with a `308` to HTTPS, so a `wget` of it fails the TLS handshake and the
   proxy would go `unhealthy`. The check therefore asks `http://:8081/healthz`, an unpublished
   listener (it binds all interfaces inside the container, so a production compose file must never
-  publish port 8081) that works in both modes (shown with `SITE_ADDRESS=example.test`: it answered while
-  `wget` of port 80 failed). It proves Caddy is running, not that the site root is served; `check.sh`
+  publish port 8081) that works in both modes (shown through compose with
+  `SITE_ADDRESS=localhost`, which uses Caddy's own certificate: it answered while `wget` of
+  port 80 failed). It proves Caddy is running, not that the site root is served; `check.sh`
   covers the root.
 
 ### Behaviour at the edges
