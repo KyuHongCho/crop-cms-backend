@@ -38,7 +38,7 @@ source that disagrees reaches the answer.
 | Health endpoints — `GET /health` (liveness) and `GET /health/ready` (database check, `503` when it fails); the `cms` container healthcheck probes `/health` every 10 s, so the uvicorn access log shows it | |
 | `POST /chat` crop labels when no crop is fixed; the routing question set and manual live-eval script (run live twice; results under "Live eval") | |
 | Test suite on an isolated database, run in CI | |
-| Same-origin nginx proxy (optional compose profile `proxy`) serving a static site at `/` and forwarding `/api/*` to the API; its routing is asserted by `proxy/check.sh` in CI — [why](docs/design-notes.md#how-the-browser-reaches-the-api) | TLS, public ports, a production deployment |
+| Same-origin Caddy proxy (optional compose profile `proxy`) serving a static site at `/` and forwarding `/api/*` to the API; its routing is asserted by `proxy/check.sh` in CI — [why](docs/design-notes.md#how-the-browser-reaches-the-api) | TLS, public ports, a production deployment |
 | AI code review on pull requests (advisory) | |
 
 Remaining work in the build plan: advisor tools
@@ -127,8 +127,8 @@ curl -X POST localhost:8000/members/login -H 'content-type: application/json' \
 
 API on `localhost:8000` and PostgreSQL on `5432`; both ports are bound to
 `127.0.0.1` only, so other machines on your network can't reach them (Docker 28 or newer).
-Interactive docs are at `/docs` on `localhost:8000` directly only: through the proxy below they do not
-work until the API is started with `--root-path /api`.
+Interactive docs are at `/docs` on `localhost:8000` directly only: the proxy below blocks
+`/api/docs`, `/api/redoc` and `/api/openapi.json` with a 404.
 
 ## Run behind the proxy
 
@@ -142,15 +142,16 @@ curl localhost:8080/api/health               # the API, through the proxy: {"sta
 ```
 
 It serves a placeholder page at `http://127.0.0.1:8080/` and forwards `/api/*` to the API with the
-prefix stripped. To serve the real frontend build instead, point `SITE_DIR` at it and recreate the proxy
-(`../crop-cms-frontend/dist` is the sibling repo's build output):
+prefix stripped. `proxy/Caddyfile` is the config; its site address comes from `SITE_ADDRESS`
+(default `http://:80`, plain HTTP). To serve the real frontend build instead, point `SITE_DIR` at
+it and recreate the proxy (`../crop-cms-frontend/dist` is the sibling repo's build output):
 
 ```bash
 SITE_DIR=../crop-cms-frontend/dist docker compose --profile proxy up -d --wait proxy
 ```
 
 `proxy/check.sh` fails against the real `dist/` by design: it asserts the placeholder's marker string.
-Why same-origin, the nginx traps and what is not decided yet (TLS, public ports):
+Why same-origin, the Caddy behaviours that shape the config and what is not decided yet:
 [design notes](docs/design-notes.md#how-the-browser-reaches-the-api).
 
 ## Testing

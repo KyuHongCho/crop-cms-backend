@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Asserts the same-origin proxy's routing. --path-as-is stops curl from
-# normalising dot segments before nginx sees them.
+# normalising dot segments before Caddy sees them.
 set -u
 BASE="${PROXY_URL:-http://127.0.0.1:8080}"
 MARKER="crop-cms-proxy-placeholder-marker"
@@ -46,26 +46,35 @@ code=$(status_of /nope)
 b=1; [ "$code" = 200 ] && grep -q "$MARKER" "$BODY" && b=0
 check "/api/nope is the API's 404; /nope is the placeholder" $((a + b))
 
+code=$(status_of /api/health)
+! grep -qi '^server:' "$HDRS"
+check "responses carry no Server header" $?
+
 code=$(status_of /api/members/me)
 [ "$code" = 401 ] && grep -qi '^www-authenticate: *Bearer' "$HDRS" \
   && [ "$(cat "$BODY")" = '{"detail":"Not authenticated"}' ]
 check "/api/members/me is 401 with WWW-Authenticate: Bearer" $?
 
 okReady=0
-for p in /api/health/ready /api/health/ready/ /api/health/%72eady /api/%68ealth/ready \
-  /api/health%2fready /api%2fhealth/ready /api/health/ready%2f //api/health/ready \
-  /api//health/ready /api/./health/ready /api/x/../health/ready /api/health/ready\;x \
-  /api/health/ready. /api/health/ready%20 /%61pi/health/ready /api/health/ready%00 \
-  /api/health/READY /API/health/ready; do
+for p in /api/health/ready /api/health/ready/ /api/health/readyx \
+  /api/health/ready\;x /api/health/ready. /api/health/ready%20 /api/health/ready%00 \
+  /api/health/ready%2f /api/health/%72eady /api/%68ealth/ready /api/health%2fready \
+  //api/health/ready /api//health/ready /api///health/ready /api/./health/ready \
+  /api/x/../health/ready /api/%2e%2e/api/health/ready /API/health/ready \
+  /api/health/READY '/api/health/ready?x=1'; do
   code=$(status_of "$p")
-  if [ "$code" = 404 ] || [ "$code" = 400 ] || { [ "$code" = 200 ] && grep -q "$MARKER" "$BODY"; }; then :
-  else echo "     $p -> $code"; okReady=1; fi
+  # The proxy's own 404 has an empty body; the API's 404 carries JSON.
+  { [ "$code" = 404 ] && [ ! -s "$BODY" ]; } || { echo "     $p -> $code, $(wc -c <"$BODY" | tr -d ' ') body bytes (want 404, empty)"; okReady=1; }
 done
-for p in /api/health/ready /api/health/ready/ /api/health/%72eady /api/x/../health/ready; do
+check "readiness is always the proxy's own empty 404, never the API or the placeholder" $okReady
+
+okDocs=0
+for p in /api/docs /api/docs/ /api/docs/oauth2-redirect /api/redoc /api/redoc/ \
+  /api/openapi.json /api/openapi.json/ /api/%6fpenapi.json /API/DOCS '/api/docs?x=1'; do
   code=$(status_of "$p")
-  { [ "$code" = 404 ] && grep -q '<title>404' "$BODY"; } || { echo "     $p not nginx's 404 ($code)"; okReady=1; }
+  { [ "$code" = 404 ] && [ ! -s "$BODY" ]; } || { echo "     $p -> $code (want 404, empty)"; okDocs=1; }
 done
-check "readiness is never reachable through the proxy" $okReady
+check "docs, redoc and openapi.json are blocked with 404" $okDocs
 
 okHealth=0
 for p in /api/health '/api/health?x=1'; do
@@ -74,33 +83,60 @@ for p in /api/health '/api/health?x=1'; do
 done
 check "/api/health (with and without a query) is 200 ok" $okHealth
 
-code=$(status_of /api/health/readyx)
-[ "$code" = 404 ] && grep -q '<title>404' "$BODY"
-check "/api/health/readyx is nginx's own 404" $?
-
 code=$(status_of /api)
-a=1; [ "$code" = 301 ] && grep -qi '^location: /api/\s*$' "$HDRS" && a=0
+a=1; [ "$code" = 200 ] && grep -q "$MARKER" "$BODY" && a=0
 code=$(status_of /api/)
 b=1; [ "$code" = 200 ] && [ "$(cat "$BODY")" = '{"Hello":"World"}' ] && b=0
 code=$(status_of /apix)
 c=1; [ "$code" = 200 ] && grep -q "$MARKER" "$BODY" && c=0
-check "/api is 301 to /api/; /api/ is the API root; /apix is the placeholder" $((a + b + c))
+check "/api and /apix are the placeholder; /api/ is the API root" $((a + b + c))
 
 code=$(status_of /assets/missing.js)
 [ "$code" = 200 ] && grep -q "$MARKER" "$BODY"
 check "a missing asset falls back to the placeholder" $?
 
-# nginx -t can only inspect the local compose container, not whatever PROXY_URL points at.
+# validate and the header probe run inside the compose container, so they apply
+# only to the default local proxy, not whatever PROXY_URL points at.
 case "${BASE%/}" in http://127.0.0.1:8080 | http://localhost:8080) local_proxy=1 ;; *) local_proxy=0 ;; esac
 if [ "$local_proxy" = 1 ]; then
-  if out=$(cd "$(dirname "$0")/.." && docker compose exec -T proxy nginx -t 2>&1); then
-    ok "nginx -t accepts the config"
+  cd "$(dirname "$0")/.." || exit 1
+  if out=$(docker compose exec -T proxy caddy validate --config /etc/caddy/Caddyfile 2>&1); then
+    ok "caddy validate accepts the config"
   else
-    fail "nginx -t accepts the config"
+    fail "caddy validate accepts the config"
     echo "$out" | sed 's/^/     /'
   fi
+
+  # A unique query string, so lines from an earlier run cannot satisfy the grep.
+  tag="logprobe$RANDOM$$"
+  status_of "/api/health?$tag" >/dev/null
+  sleep 1
+  docker compose logs proxy --since 30s 2>&1 | grep 'http.log.access' | grep -q "$tag"
+  check "requests appear in the proxy's access log" $?
+
+  docker compose exec -T proxy wget -q -O /dev/null http://127.0.0.1:8081/healthz
+  check "internal liveness endpoint answers" $?
+
+  # The API echoes no headers, so run a copy of the real Caddyfile inside the
+  # container with the upstream swapped for a site that prints what it receives.
+  probe=$(docker compose exec -T proxy sh -c '
+    { printf "{\n\tadmin off\n}\nhttp://:8092 {\n\trespond \"xff={http.request.header.X-Forwarded-For} xfp={http.request.header.X-Forwarded-Proto} xfh={http.request.header.X-Forwarded-Host}\"\n}\n"
+      sed -e "s#^{\$SITE_ADDRESS:http://:80}#http://:8091#" -e "s#cms:8000#127.0.0.1:8092#" -e "/^# Internal liveness/,\$d" /etc/caddy/Caddyfile
+    } > /tmp/probe.Caddyfile
+    caddy run --config /tmp/probe.Caddyfile --adapter caddyfile >/dev/null 2>&1 &
+    pid=$!
+    i=0; while [ $i -lt 20 ] && ! wget -q -O /dev/null http://127.0.0.1:8091/ 2>/dev/null; do sleep 0.25; i=$((i+1)); done
+    wget -q -O - --header "X-Forwarded-For: 6.6.6.6" --header "X-Forwarded-Proto: https" \
+      --header "X-Forwarded-Host: evil.test" http://127.0.0.1:8091/api/anything 2>&1
+    kill $pid; rm -f /tmp/probe.Caddyfile' 2>&1)
+  if [ "$probe" = "xff=127.0.0.1 xfp=http xfh=127.0.0.1:8091" ]; then
+    ok "spoofed X-Forwarded-* headers are overwritten before the API"
+  else
+    fail "spoofed X-Forwarded-* headers are overwritten before the API"
+    echo "     got: $probe"
+  fi
 else
-  echo "skip nginx -t accepts the config (PROXY_URL is not the default local proxy URL)"
+  echo "skip caddy validate and the forwarded-header probe (PROXY_URL is not the default local proxy URL)"
   skipped=$((skipped + 1))
 fi
 

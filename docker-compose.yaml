@@ -123,7 +123,7 @@ services:
   # Same-origin front door: serves the static site at / and forwards /api/*
   # to cms with the prefix stripped.
   proxy:
-    image: nginx:1.29.8-alpine
+    image: caddy:2.11.7-alpine
     profiles: ["proxy"]
     depends_on:
       cms:
@@ -131,10 +131,10 @@ services:
     ports:
       - "127.0.0.1:8080:80"
     volumes:
-      - ./proxy/conf.d:/etc/nginx/conf.d:ro
-      - ${SITE_DIR:-./proxy/site}:/usr/share/nginx/html:ro
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${SITE_DIR:-./proxy/site}:/srv:ro
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
       interval: 5s
       timeout: 3s
       retries: 3
