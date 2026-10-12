@@ -209,10 +209,10 @@ the database over the Docker network (`DB_HOST: db`), never the published port.
 ## How the browser reaches the API
 
 The browser reaches the API through one **same-origin reverse proxy**, not through CORS. The
-`proxy` compose service (`nginx:1.29.8-alpine`, started only by `--profile proxy`, published on
+`proxy` compose service (`caddy:2.11.7-alpine`, started only by `--profile proxy`, published on
 `127.0.0.1:8080`) serves a static site at `/` and forwards `/api/*` to `cms:8000` with the `/api`
 prefix stripped, which is what the frontend's Vite dev proxy does today.
-[`proxy/conf.d/default.conf`](../proxy/conf.d/default.conf) holds the config and
+[`proxy/Caddyfile`](../proxy/Caddyfile) holds the config and
 [`proxy/check.sh`](../proxy/check.sh) asserts its routing; CI runs the script after the stack is up.
 The service is a testable stand-in: the host, TLS and public ports are not chosen yet (see
 [Deferred](#deferred-to-the-production-setup)).
@@ -230,68 +230,67 @@ origin from the API. If so, the shape is: an explicit `CORS_ALLOW_ORIGINS` list 
 `allow_credentials=False` (the token travels in a header, not a cookie), and a test that a request
 from an unlisted origin gets no `Access-Control-Allow-Origin`. Nothing of this is implemented.
 
-### Why nginx
+### Why Caddy
 
-The project uses nginx for its familiarity and ubiquity. Behaviours of nginx that shape this config:
+Caddy serves the static site, forwards `/api`, and can obtain certificates by itself once the site
+address is a domain, so one config file covers local HTTP and a public HTTPS host. Behaviours of
+Caddy that shape this config:
 
-- nginx limits a request body to 1m by default; the config raises it to 10m. Items are under 1 KB
-  today and the API has no body limit of its own on items (`app/schema/item.py:26`), so the proxy is
-  the only bound. A body over 10m gets `413` from nginx.
-- A bare nginx passes a client-sent `X-Forwarded-For` through unchanged, and the common
-  `$proxy_add_x_forwarded_for` form appends to it. The config sets `X-Forwarded-For $remote_addr`,
-  which overwrites it, so a spoofed value never reaches the API.
-- nginx does not touch a client-sent `X-Forwarded-Host`; the config overwrites it.
-- nginx resolves an upstream name once, at start. See the DNS trap below.
-- nginx normalises the request path before matching locations, which makes the readiness deny hard
-  to bypass.
-- TLS here needs a certbot-style setup or the host's own TLS.
+- The request body is capped by `request_body { max_size 10MB }`. Items are under 1 KB today and the
+  API has no body limit of its own on items (`app/schema/item.py:26`), so the proxy is the only
+  bound. A body over 10MB gets `413` (an 11 MB POST did).
+- `reverse_proxy` overwrites a client-sent `X-Forwarded-For`, `-Proto` and `-Host` unless the client
+  is a trusted proxy, so a spoofed value never reaches the API. `check.sh` runs a copy of the
+  Caddyfile with the upstream swapped for a site that prints the headers it receives.
+- Caddy resolves the upstream name `cms` when it dials, so a recreated `cms` container should be
+  picked up without a reload and Caddy should start before `cms` resolves; neither was exercised.
+- Caddy logs no requests unless asked. The Caddyfile has a `log` block with `output stdout`, so
+  every request appears in `docker compose logs proxy` (`check.sh` asserts it). The `Server` header
+  is removed (`header -Server`). The log records the query string, so never put a secret in a query
+  parameter. Only the `Authorization`, `Cookie` and `Proxy-Authorization` headers are redacted;
+  a custom credential header such as `X-Api-Key` would be logged in clear text.
+- The site address is `{$SITE_ADDRESS:http://:80}`. Compose passes the host's `SITE_ADDRESS` into
+  the container (`${SITE_ADDRESS:-http://:80}`), so unset or empty it is plain HTTP on port 80.
+  A domain value turns on Caddy's automatic HTTPS, which needs ports 80/443 reachable and DNS
+  pointing at the host; that mode was not run with a real certificate. `check.sh` asserts the
+  value reaches the container through compose, using a plain-HTTP address on another port.
 
 ### Traps
 
-- **Upstream DNS is resolved at start.** With a plain `proxy_pass http://cms:8000/;`, nginx resolves
-  `cms` once, so a replaced upstream on a different IP returns `502` until `nginx -s reload`, and
-  nginx refuses to start if the name does not resolve at start. The config therefore uses the
-  variable form (`set $cms http://cms:8000;` with `resolver 127.0.0.11 valid=10s`), which
-  re-resolves about every 10 s and starts even when the name does not resolve yet. The cost: with a
-  variable, `proxy_pass` no longer strips the prefix, so an explicit `rewrite ^/api/(.*)$ /$1 break;`
-  does it, and **`nginx -t` accepts a wrong upstream name in this form** (exit 0). Only `check.sh`
-  catches that. `127.0.0.11` is Docker's embedded DNS; it was run on a user-defined network and on the
-  compose default network in CI.
-- **`absolute_redirect off` matters.** Without it, nginx's redirect from `/api` to `/api/` carries
-  `Location: http://127.0.0.1/api/`, which drops the published port. With it the `Location` is the
-  relative `/api/`.
-- **The readiness deny needs `^~`.** `location ^~ /api/health/ready { return 404; }` keeps `/health/ready`
-  from being reachable through the proxy (orchestrator and CI probes go to `cms` directly). The
-  modifier stops nginx from consulting regex locations for that prefix: without it, a regex
-  `location ~ ^/api/ { ... }` wins and the request reaches the API. The prefix
-  also 404s `/api/health/readyx` and `/api/health/ready/`, an intended over-match.
-- **A reload of an invalid config keeps the old one.** `nginx -s reload` exits 1, prints `[emerg]`
-  and the previous config keeps serving, so a typo can look like a passing check on the old config.
-  Check the exit code. `nginx -t` rejects a misspelt directive, a missing semicolon, a bad value,
-  and a missing or extra brace.
-- **A change that makes `/` non-2xx makes the proxy unhealthy.** The healthcheck requests `/`, so
-  a broken `root` or catch-all turns the proxy `unhealthy` after about 9 s, which breaks
-  `up -d --wait`. Apply such an edit to a running proxy by reload.
-- **`Host $http_host` means a request with an empty `Host`, or an HTTP/1.0 request without one, to
-  `/api/*` gets `400`.** For HTTP/1.1 with an empty `Host:`, nginx itself answers (an HTML
-  `400 Bad Request`, `Server: nginx`) and the request never reaches the API. An HTTP/1.0 request
-  with no `Host` is forwarded, and uvicorn rejects it (`Invalid HTTP request received.`).
-  `$host` would avoid that but drops the port, and the API builds redirects from `Host`. Browsers
-  always send `Host`, so the config keeps `$http_host`.
+- **Path matchers are case-insensitive and match the decoded path.** `handle /api/health/ready*`
+  with the trailing `*` is required. An exact `/api/health/ready` lets `ready/` and `ready%2f`
+  through to the API (a `307` to `/health/ready`), and `ready;x`, `ready.`, `ready%20` and
+  `ready%00` reach the API's own `404`. `check.sh` therefore asserts the proxy's own empty `404`,
+  not just the status. The `handle` blocks are mutually exclusive and the longer path matcher is
+  tried first, so the readiness and docs blocks win over `handle_path /api/*`.
+- **`handle_path` strips the prefix; plain `handle` does not.** The API receives `/health`, not
+  `/api/health`.
+- **A reload of an invalid config keeps the old one.** `caddy reload` exits non-zero and the previous
+  config keeps serving, so check the exit code. `caddy validate` (run by `check.sh`) rejects a
+  malformed file but does not tell you the upstream name is wrong; only the routing checks do.
+- **A single-file mount can go stale.** `./proxy/Caddyfile` is mounted as one file. An editor or
+  `sed -i` that replaces the file leaves the container on the old inode; edit in place or recreate
+  the proxy (`docker compose --profile proxy up -d --force-recreate proxy`).
+- **The healthcheck uses a separate internal listener.** With a domain as `SITE_ADDRESS`, port 80
+  answers every request with a `308` to HTTPS, so a `wget` of it fails the TLS handshake and the
+  proxy would go `unhealthy`. The check therefore asks `http://:8081/healthz`, an unpublished
+  listener (it binds all interfaces inside the container, so a production compose file must never
+  publish port 8081) that works in both modes (shown through compose with
+  `SITE_ADDRESS=localhost`, which uses Caddy's own certificate: it answered while `wget` of
+  port 80 failed). It proves Caddy is running, not that the site root is served; `check.sh`
+  covers the root.
 
 ### Behaviour at the edges
 
-- **`/api` and `/api/`.** The prefix location ends in a slash, so `/api` gets a `301` to `/api/`,
-  and `/api/` is the API root (`{"Hello":"World"}`). `/apix` falls through to the SPA. The frontend
-  calls none of these.
-- **The SPA fallback hides a missing asset.** `try_files $uri /index.html` returns `200` with the
+- **`/api` and `/api/`.** `handle_path /api/*` needs the slash, so `/api` and `/apix` fall through to
+  the SPA (`200`, no redirect) and `/api/` is the API root (`{"Hello":"World"}`). The frontend calls
+  none of these.
+- **The SPA fallback hides a missing asset.** `try_files {path} /index.html` returns `200` with the
   page for `/assets/missing.js`. That is standard, and it can mask a bad deploy; it never applies to
   `/api/*`.
-- **The path the API receives is nginx's normalised path.** `//` is merged (`merge_slashes`),
-  `/./` is resolved, and `%2F` is decoded to `/` (`/api/retrieval/basil/a%2Fb` reaches the API as
-  `/retrieval/basil/a/b`); `%20`, `%25` and `%C3%A9` stay encoded and the query string is passed
-  byte for byte. What nginx matched is what the API receives. Whether the API alone would route
-  `%2F` was reasoned from uvicorn decoding, not run.
+- **The path the API receives is the one Caddy matched.** Not measured for Caddy
+  (whether `//` is merged, `/./` resolved or `%2F` decoded before the upstream). What `check.sh`
+  pins is that none of those forms reaches readiness or the docs.
 - **The API's trailing-slash redirect loses `/api` on the dev stack.** FastAPI redirects
   `/items/` to `/items`. The dev `cms` command runs without `--root-path`, so through the proxy the
   `Location` is `http://<host>:<port>/items`: host and port are kept (the `Host` header is
@@ -305,36 +304,28 @@ The project uses nginx for its familiarity and ubiquity. Behaviours of nginx tha
   an `X-Forwarded-*` header, and the login throttle is keyed on the email hash.
 - **Forwarded headers.** `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` are
   overwritten, not appended: a spoofed `X-Forwarded-For: 6.6.6.6`, `X-Forwarded-Proto: https` and
-  `X-Forwarded-Host: evil` did not reach the API. `Authorization`, `Content-Type`, `DELETE`, `PATCH`
-  and the query string pass through unchanged, and an `OPTIONS` request is forwarded like any other
-  (nginx adds no `Access-Control-*` header). Client-sent `X-Original-URL`, `X-Rewrite-URL` and
-  `X-Forwarded-Prefix` did not change routing.
+  `X-Forwarded-Host: evil.test` do not reach the API (`check.sh` asserts it). The `Host` header is
+  forwarded unchanged.
 - **Timeouts.** The app sets no deadline of its own on a model call, so the Anthropic SDK's
   defaults apply (reported as a 600 s read timeout and 2 retries; not re-derived from the
-  installed SDK). `proxy_read_timeout 120s` is what bounds the browser's wait on a hung
-  `/chat`; `proxy_connect_timeout 5s` only bounds a black-holed address.
-  A `2s` copy of the setting returned `504` after 2.004 s against a 4 s upstream sleep, so the
-  directive works. **The 120 s value itself was not exercised.** A slow model call gives the browser
+  installed SDK). `response_header_timeout 120s` is what bounds the browser's wait on a hung
+  `/chat`; `dial_timeout 5s` only bounds a black-holed address.
+  **Neither value was exercised.** A slow model call gives the browser
   a `504` even though the backend may finish and spend tokens.
 
-### What the readiness deny was tested against
+### What the readiness deny is tested against
 
-None of the bypass variants tried reached the API's `/health/ready`: encoded characters
-(`%72eady`, `%68ealth`, `%2f`), dot segments, doubled slashes, a trailing `;x`, `.`, `%20` or `%00`
-(a `400`), and a path with a different case (the API's own `404`, or the SPA for `/API/...`). About
-50 further variants also did not leak (double encodings, backslash and `%5c`,
-overlong UTF-8, a 9000-character path, HTTP/1.0, an absolute-URI request line, a duplicated
-`Host`, a conflicting `Transfer-Encoding` and `Content-Length`). `check.sh` pins the main set and
-requires a healthy upstream: it does not accept a `502` as a pass.
+`check.sh` requests each variant in its readiness loop and requires the proxy's own empty `404` for each: the plain path,
+`ready/`, `readyx`, a trailing `;x`, `.`, `%20`, `%00` and `%2f`, encoded characters (`%72eady`,
+`%68ealth`, `%2f` in place of the slash), doubled and tripled slashes, dot segments, a path with a
+different case and a query string. It requires a healthy upstream: a `502` is not accepted.
 
 ### Docs exposure
 
-`/api/docs`, `/api/redoc` and `/api/openapi.json` are forwarded. **They work through the proxy
-only once production starts uvicorn with `--root-path /api`.** The dev `cms` command is unchanged,
-so through the dev proxy the docs page asks for `/openapi.json`, gets the site's `index.html`, and
-fails: by design, and why the README says `/docs` works on `:8000` directly. With `--root-path /api`
-behind a stripping proxy, `/api/openapi.json` was `200` JSON and `/api/docs` and `/api/redoc` were
-`200` embedding `/api/openapi.json`; whether Swagger UI renders in a browser was not verified.
+`/api/docs`, `/api/redoc` and `/api/openapi.json` are **blocked by default**: the Caddyfile answers
+`404` for each, with a trailing `*` so `/api/docs/oauth2-redirect`, `/api/docs/`, `%6fpenapi.json`
+and a differently-cased path are covered. `check.sh` asserts it. Direct access on `localhost:8000`
+still serves them.
 
 - **Every content-writing route needs an editor or admin token.** `tests/test_roles.py` pins it:
   no token is `401` on every write route (`:171-174`), a garbage token is `401` (`:181-184`), a
@@ -343,47 +334,32 @@ behind a stripping proxy, `/api/openapi.json` was `200` JSON and `/api/docs` and
   logged in as a `member` can use `/chat`, bounded by the daily token budget, and can try login and
   invite-only signup.
 - **The real risk is a person pasting an editor or admin token into a public docs page.** Deletes
-  are hard deletes and there are no backups yet.
-- **Blocking the docs is a small change to the nginx config that is not made here.** Add these
-  above `location /api/`:
-
-  ```nginx
-  location ^~ /api/docs { return 404; }
-  location ^~ /api/redoc { return 404; }
-  location ^~ /api/openapi.json { return 404; }
-  ```
-
-  Use `^~` for `openapi.json`, not `=`: with `=`, `/api/openapi.json/` is not blocked and reaches the
-  API's `307`, which on the dev stack lands outside `/api` (the site) and under `--root-path` lands
-  on the blocked path. That is not a leak, but `^~` is cleaner. These
-  rules return nginx's `404` for the plain path, the trailing-slash form, `/docs/`,
-  `/docs/oauth2-redirect`, `%6fpenapi.json`, the `..` forms and `?x`. None of them blocks a path
-  the frontend uses (`/api/crops`, `/api/items`, `/api/retrieval/...`, `/api/members/me`,
-  `/api/health`). The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not
-  routes of the app (harmless, intended). The block need not sit above the readiness deny: they do
-  not overlap.
+  are hard deletes and there are no backups yet. That, and exposing the schema, is why the default
+  is closed. To expose the docs, delete the three `handle` blocks and start uvicorn with
+  `--root-path /api`; without it the docs page asks for `/openapi.json` and gets the site's
+  `index.html`.
+- The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not routes of the app
+  (harmless, intended). None of the blocked paths is one the frontend uses.
 
 ### Deferred to the production setup
 
-- TLS (certbot on a plain VM, or the host's own TLS) and public ports 80/443, with only the proxy
-  public.
-- `--root-path /api` in the production command, which makes the docs work through the proxy and
-  removes the trailing-slash limit above.
+- Public ports 80/443 with only the proxy public, DNS for the domain, and that domain as
+  `SITE_ADDRESS` so Caddy obtains the certificate (not tried with a real certificate); the
+  plain-HTTP default here is for local use.
+- `--root-path /api` in the production command, which removes the trailing-slash limit above. It
+  makes the docs work through the proxy only together with deleting the three `handle` blocks in
+  `proxy/Caddyfile` that answer `404` for `/api/docs*`, `/api/redoc*` and `/api/openapi.json*`.
 - `--forwarded-allow-ips` for uvicorn (not needed today). `*` would be safe only if the API is
   unreachable except through the proxy; the scheme of a redirect under `--proxy-headers` was not
   verified.
-- `X-Forwarded-Proto` from the host, if TLS terminates in front of nginx: the config sets
-  `$scheme`, which is correct only when nginx terminates TLS itself.
 - Carrying the proxy healthcheck into the production compose file.
 
 ### Not verified
 
 - TLS and certificates; Swagger UI in a browser; whether `dist/` is current.
-- Editing `conf.d` in place on Linux: the directory mount (chosen over a single-file mount, which
-  can leave a container on the old inode when an editor replaces the file) picked up an in-place
-  edit and reload on arm64 macOS Docker Desktop; CI shows only that the mount is read and served on
-  Linux amd64.
-- The 120 s read timeout under load; `--forwarded-allow-ips` effects.
+- Editing `Caddyfile` in place on Linux: an in-place edit plus `caddy reload` was picked up on
+  arm64 macOS Docker Desktop; CI shows only that the mount is read and served on Linux amd64.
+- The 120 s response timeout under load; `--forwarded-allow-ips` effects.
 
 ## Testing details
 
@@ -476,5 +452,5 @@ scripts/calibrate_floor.py  on-topic vs off-topic score distributions, for TOPIC
 initdb/01-init.sh    creates the pgvector extension and the least-privilege app role
 .github/workflows/   CI
 docs/                design notes (this file)
-proxy/               nginx config and routing check (compose profile `proxy`)
+proxy/               Caddyfile and routing check (compose profile `proxy`)
 ```

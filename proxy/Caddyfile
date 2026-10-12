@@ -1,0 +1,50 @@
+{$SITE_ADDRESS:http://:80} {
+	root * /srv
+	header -Server
+
+	# Caddy logs no requests by default; this is the only request trail.
+	log {
+		output stdout
+	}
+
+	request_body {
+		max_size 10MB
+	}
+
+	# Readiness is for orchestrator probes that go to cms directly. The trailing *
+	# is required: an exact path lets ready/, ready;x, ready. and ready%2f through.
+	handle /api/health/ready* {
+		respond 404
+	}
+
+	# Docs stay off the public site; * also covers /api/docs/oauth2-redirect.
+	handle /api/docs* {
+		respond 404
+	}
+	handle /api/redoc* {
+		respond 404
+	}
+	handle /api/openapi.json* {
+		respond 404
+	}
+
+	handle_path /api/* {
+		reverse_proxy cms:8000 {
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 120s
+			}
+		}
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Internal liveness endpoint: the site address above may be a domain, where
+# port 80 only redirects to HTTPS and a probe of it would fail.
+http://:8081 {
+	respond /healthz 200
+}
