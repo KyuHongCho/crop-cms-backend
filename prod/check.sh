@@ -16,6 +16,8 @@ docker compose --profile proxy -f docker-compose.yaml config --format json >"$TM
   || { echo "FAIL dev compose does not render"; cat "$TMP/dev.err"; exit 1; }
 # Docker keeps the command in the image, so the Dockerfile's prod stage is what is checked.
 awk '/^FROM .* AS prod$/{p=1;next} /^FROM /{p=0} p' Dockerfile >"$TMP/prod-stage"
+# `build: .` uses the last stage, so it must stay dev.
+awk '/^FROM /{n=$NF} END{print n}' Dockerfile >"$TMP/last-stage"
 
 python3 - "$TMP" "$PWD" <<'PY'
 import json, sys
@@ -23,6 +25,7 @@ tmp, repo = sys.argv[1:3]
 prod = json.load(open(f"{tmp}/prod.json"))["services"]
 dev = json.load(open(f"{tmp}/dev.json"))["services"]
 stage = open(f"{tmp}/prod-stage").read()
+last_stage = open(f"{tmp}/last-stage").read().strip()
 fails = 0
 
 def check(name, cond):
@@ -32,6 +35,7 @@ def check(name, cond):
 
 cms, caddy = prod["cms"], prod["caddy"]
 check("cms builds the prod target", (cms.get("build") or {}).get("target") == "prod")
+check("dev is the last Dockerfile stage (what build: . uses)", last_stage == "dev")
 def is_root(user):
     return user.split(":")[0] in ("root", "0")
 

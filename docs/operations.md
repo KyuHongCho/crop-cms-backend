@@ -182,7 +182,7 @@ a plain `restart` does not re-read the environment.
 | `SITE_ADDRESS` | `http://:80` (dev compose); required in `docker-compose.prod.yaml` | `proxy/Caddyfile`, via the compose files | The proxy's site address; unset or empty is plain HTTP in dev, a domain turns on HTTPS |
 | `SITE_DIR` | `./proxy/site` (dev compose), `/opt/cms/site` (prod compose) | the compose files | Directory the proxy serves at `/` |
 | `DB_USER` | `cms_app` | `app/db/db.py` | Application database role; compose requires it in `.env` |
-| `DB_PASSWORD` | none | `app/db/db.py` | Application role's password; the app does not start without it, and compose requires it in `.env`. Use hex or alphanumeric characters: it goes into the database URL unescaped, so a `%` is silently decoded and changes the password |
+| `DB_PASSWORD` | none | `app/db/db.py` | Application role's password; the app does not start without it, and compose requires it in `.env`. Use hex or alphanumeric characters: it goes into the database URL unescaped, so an `@` misparses it and a `%41`-style escape is silently decoded, which changes the password |
 | `DB_HOST` | `db` | `app/db/db.py` | Database host; the dev compose sets `db` for `cms`, the prod compose requires it from the environment |
 | `DB_PORT` | `5432` | `app/db/db.py` | Database port; compose sets `5432` for `cms` |
 | `DB_NAME` | `cms` | `app/db/db.py` | Database name; compose sets `cms` for `cms` (the tests override it with `cms_test`) |

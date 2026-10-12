@@ -11,7 +11,8 @@ RUN pip install -r requirements.txt -r requirements-dev.txt
 
 COPY . .
 
-# One worker: the login throttle lives in the database, so more workers add nothing.
+# One worker: nothing has shown it is not enough, and the login throttle lives in the
+# database, not in process, so adding workers later would not weaken it.
 # "*" for forwarded-allow-ips is safe only while cms has no published port.
 FROM base AS prod
 ENV PYTHONDONTWRITEBYTECODE=1

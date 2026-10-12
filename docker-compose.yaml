@@ -52,9 +52,9 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      # Probes /health, never /health/ready: echo=True would log a SELECT 1 every
-      # 10 s. Python, not curl, so a slimmer image still has it. Any production
-      # compose file must carry this same block.
+      # Probes /health, never /health/ready: SQL_ECHO=1 (dev) would log a SELECT 1 every
+      # 10 s. Python, not curl, so a slimmer image still has it. Any production compose
+      # file must carry this same block.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
       timeout: 5s

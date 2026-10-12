@@ -60,8 +60,6 @@ services:
       - caddy_config:/config
       - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ${SITE_DIR:-/opt/cms/site}:/srv:ro
-      # Room for the advisor later:
-      # - ${ADVISOR_HOST_PATH:-../crop-climate-advisor}:/advisor:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
       interval: 5s

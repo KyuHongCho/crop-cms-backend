@@ -56,6 +56,10 @@ jobs:
       - name: Image builds
         run: docker compose build
 
+      - name: Production image builds, runs unprivileged and keeps /api and https in a redirect
+        # No database needed: the redirect is answered before any query.
+        run: bash prod/smoke.sh
+
       - name: Stack starts, and Postgres is actually ready
         # --wait blocks on the db and cms healthchecks, so reaching the next step
         # means Postgres accepted a connection and the app answered /health.

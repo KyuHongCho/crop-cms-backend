@@ -215,7 +215,7 @@ prefix stripped, which is what the frontend's Vite dev proxy does today.
 [`proxy/Caddyfile`](../proxy/Caddyfile) holds the config and
 [`proxy/check.sh`](../proxy/check.sh) asserts its routing; CI runs the script after the stack is up.
 The service is a testable stand-in: the host, TLS and public ports are not chosen yet (see
-[Deferred](#deferred-to-the-production-setup)).
+[Production setup](#production-setup-done-and-still-open)).
 
 ### Why same-origin, and the CORS fallback
 
@@ -341,7 +341,7 @@ still serves them.
 - The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not routes of the app
   (harmless, intended). None of the blocked paths is one the frontend uses.
 
-### Deferred to the production setup
+### Production setup: done and still open
 
 - Public ports 80/443 with only the proxy public, DNS for the domain, and that domain as
   `SITE_ADDRESS` so Caddy obtains the certificate (not tried with a real certificate); the
@@ -353,8 +353,9 @@ still serves them.
   `docker-compose.prod.yaml`; `prod/check.sh` fails if that changes.
 - Done in `docker-compose.prod.yaml`: the proxy healthcheck on the unpublished `:8081` listener, which
   `prod/check.sh` also keeps unpublished.
-- Still open: the redirect scheme was checked with a forwarded `X-Forwarded-Proto: https` header on
-  plain HTTP, not behind a real certificate.
+- Checked in CI by `prod/smoke.sh`: the `prod` stage builds, runs as a non-root user, and a
+  trailing-slash redirect keeps `/api` and the scheme of a forwarded `X-Forwarded-Proto: https`
+  header. Still open: the same behind a real certificate.
 
 ### Not verified
 
