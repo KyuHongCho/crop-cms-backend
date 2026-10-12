@@ -92,7 +92,7 @@ jobs:
         # upgrade head` builds the schema fresh in cms_test first -- db-test
         # is tmpfs-backed and starts empty every run, so this always starts
         # from base, never needing `alembic stamp` (that is only for a database
-        # `create_all()` already built -- see the README's Migrations section).
+        # `create_all()` already built -- see docs/operations.md, Migrations).
         # migrate_db.py's reset_database() runs in CI only inside
         # tests/test_migrate_db_guard.py, which asserts it refuses once
         # `alembic_version` exists.
@@ -159,8 +159,8 @@ jobs:
           docker compose exec -T cms alembic check
 
       - name: An editor exists, and later steps hold its token
-        # The CMS write routes need an editor or admin token (README, "Members and
-        # the token budget"). This is the one place CI creates that member, so a
+        # The CMS write routes need an editor or admin token (docs/operations.md, section
+        # "Members and the token budget"). This is the one place CI creates that member, so a
         # change to how members are created is a one-step edit. Signup needs an
         # invite, so the operator's script makes one for the editor role (the way
         # an operator makes the first one; no admin exists yet to ask the API).
