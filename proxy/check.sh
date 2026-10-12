@@ -117,6 +117,8 @@ if [ "$local_proxy" = 1 ]; then
   docker compose exec -T proxy wget -q -O /dev/null http://127.0.0.1:8081/healthz
   check "internal liveness endpoint answers" $?
 
+  # Compose prints unset-variable warnings on stderr (always, without a .env), so
+  # stderr stays out of the compared stdout and is shown only on failure.
   # The API echoes no headers, so run a copy of the real Caddyfile inside the
   # container with the upstream swapped for a site that prints what it receives.
   probe=$(docker compose exec -T proxy sh -c '
@@ -128,12 +130,13 @@ if [ "$local_proxy" = 1 ]; then
     i=0; while [ $i -lt 20 ] && ! wget -q -O /dev/null http://127.0.0.1:8091/ 2>/dev/null; do sleep 0.25; i=$((i+1)); done
     wget -q -O - --header "X-Forwarded-For: 6.6.6.6" --header "X-Forwarded-Proto: https" \
       --header "X-Forwarded-Host: evil.test" http://127.0.0.1:8091/api/anything 2>&1
-    kill $pid; rm -f /tmp/probe.Caddyfile' 2>&1)
+    kill $pid; rm -f /tmp/probe.Caddyfile' 2>"$TMP/probe.err")
   if [ "$probe" = "xff=127.0.0.1 xfp=http xfh=127.0.0.1:8091" ]; then
     ok "spoofed X-Forwarded-* headers are overwritten before the API"
   else
     fail "spoofed X-Forwarded-* headers are overwritten before the API"
     echo "     got: $probe"
+    sed 's/^/     stderr: /' "$TMP/probe.err"
   fi
 else
   echo "skip caddy validate and the forwarded-header probe (PROXY_URL is not the default local proxy URL)"
