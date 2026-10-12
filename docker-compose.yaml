@@ -133,6 +133,10 @@ services:
     volumes:
       - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ${SITE_DIR:-./proxy/site}:/srv:ro
+    # The Caddyfile reads SITE_ADDRESS from the container's environment, so a host
+    # value reaches it only through here. Empty or unset gives plain HTTP on :80.
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-http://:80}
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
       interval: 5s

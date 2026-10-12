@@ -107,6 +107,13 @@ if [ "$local_proxy" = 1 ]; then
     echo "$out" | sed 's/^/     /'
   fi
 
+  # A one-off container (no ports, no deps) adapts the real Caddyfile with the
+  # variable set on the host the way a user would; the listener must follow it.
+  adapted=$(SITE_ADDRESS=http://:8093 docker compose --profile proxy run --rm --no-deps -T proxy \
+    caddy adapt --config /etc/caddy/Caddyfile 2>/dev/null)
+  [[ "$adapted" == *'":8093"'* ]] && [[ "$adapted" != *'":80"'* ]]
+  check "SITE_ADDRESS set on the host reaches the proxy container" $?
+
   # A unique query string, so lines from an earlier run cannot satisfy the grep.
   tag="logprobe$RANDOM$$"
   status_of "/api/health?$tag" >/dev/null

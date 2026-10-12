@@ -142,9 +142,11 @@ curl localhost:8080/api/health               # the API, through the proxy: {"sta
 ```
 
 It serves a placeholder page at `http://127.0.0.1:8080/` and forwards `/api/*` to the API with the
-prefix stripped. `proxy/Caddyfile` is the config; its site address comes from `SITE_ADDRESS`
-(default `http://:80`, plain HTTP). To serve the real frontend build instead, point `SITE_DIR` at
-it and recreate the proxy (`../crop-cms-frontend/dist` is the sibling repo's build output):
+prefix stripped. `proxy/Caddyfile` is the config; its site address comes from the host's
+`SITE_ADDRESS` (unset or empty: `http://:80`, plain HTTP; a domain turns on HTTPS and needs ports
+80/443 and DNS, which this repo has not exercised with a real certificate). To serve the real
+frontend build instead, point `SITE_DIR` at it and recreate the proxy
+(`../crop-cms-frontend/dist` is the sibling repo's build output):
 
 ```bash
 SITE_DIR=../crop-cms-frontend/dist docker compose --profile proxy up -d --wait proxy

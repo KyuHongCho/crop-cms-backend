@@ -249,8 +249,11 @@ Caddy that shape this config:
   is removed (`header -Server`). The log records the query string, so never put a secret in a query
   parameter. Only the `Authorization`, `Cookie` and `Proxy-Authorization` headers are redacted;
   a custom credential header such as `X-Api-Key` would be logged in clear text.
-- The site address is `{$SITE_ADDRESS:http://:80}`: unset, it is plain HTTP on port 80; a domain
-  turns on automatic HTTPS.
+- The site address is `{$SITE_ADDRESS:http://:80}`. Compose passes the host's `SITE_ADDRESS` into
+  the container (`${SITE_ADDRESS:-http://:80}`), so unset or empty it is plain HTTP on port 80.
+  A domain value turns on Caddy's automatic HTTPS, which needs ports 80/443 reachable and DNS
+  pointing at the host; that mode was not run with a real certificate. `check.sh` asserts the
+  value reaches the container through compose, using a plain-HTTP address on another port.
 
 ### Traps
 
@@ -311,7 +314,7 @@ Caddy that shape this config:
 
 ### What the readiness deny is tested against
 
-`check.sh` requests 19 variants and requires the proxy's own empty `404` for each: the plain path,
+`check.sh` requests each variant in its readiness loop and requires the proxy's own empty `404` for each: the plain path,
 `ready/`, `readyx`, a trailing `;x`, `.`, `%20`, `%00` and `%2f`, encoded characters (`%72eady`,
 `%68ealth`, `%2f` in place of the slash), doubled and tripled slashes, dot segments, a path with a
 different case and a query string. It requires a healthy upstream: a `502` is not accepted.
@@ -339,10 +342,12 @@ still serves them.
 
 ### Deferred to the production setup
 
-- Public ports 80/443 with only the proxy public, and a domain as `SITE_ADDRESS` so Caddy obtains
-  the certificate; the plain-HTTP default here is for local use.
-- `--root-path /api` in the production command, which makes the docs work through the proxy and
-  removes the trailing-slash limit above.
+- Public ports 80/443 with only the proxy public, DNS for the domain, and that domain as
+  `SITE_ADDRESS` so Caddy obtains the certificate (not tried with a real certificate); the
+  plain-HTTP default here is for local use.
+- `--root-path /api` in the production command, which removes the trailing-slash limit above. It
+  makes the docs work through the proxy only together with deleting the three `handle` blocks in
+  `proxy/Caddyfile` that answer `404` for `/api/docs*`, `/api/redoc*` and `/api/openapi.json*`.
 - `--forwarded-allow-ips` for uvicorn (not needed today). `*` would be safe only if the API is
   unreachable except through the proxy; the scheme of a redirect under `--proxy-headers` was not
   verified.
