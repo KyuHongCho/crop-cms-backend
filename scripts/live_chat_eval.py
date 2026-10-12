@@ -226,7 +226,7 @@ async def run(args, emit) -> int:
         emit_open()
     emit(f"target: db {args.db_name} on {args.db_host} ({count} published documents)")
     emit(f"repeats: {args.repeats}; embedder: {embedder.model}; "
-         "estimate: each question costs a few thousand tokens (see README; unmeasured until this run)")
+         "estimate: each question costs a few thousand tokens (see docs/live-eval.md; unmeasured until this run)")
 
     seen = {}  # filled by the wrappers for the call in flight
     real_classify = dispatch.classify

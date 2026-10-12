@@ -66,7 +66,7 @@ def test_duplicate_slug_on_sub_categories_same_parent_returns_409(editor_client)
 
 
 def test_same_slug_under_different_parents_both_return_201(editor_client):
-    """"Unique per parent, not globally" (README API table): the same slug under two main
+    """"Unique per parent, not globally" (docs/api.md API table): the same slug under two main
     categories must succeed. Verified it can fail: a temporary global UNIQUE(slug) broke it.
     """
     mc1 = editor_client.post(
