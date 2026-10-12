@@ -30,7 +30,7 @@ about, then hands each one over as a complete set.
 | Works today | Not built yet |
 |---|---|
 | Document store: 9 tables (5 content tables, plus `members`, `member_audit_events`, `member_invites` and `login_throttle`), sources recorded per document | Editing (`PATCH`) documents |
-| Members: invite-only signup, login (JWT), `/members/me`, login throttling — [members and budget](docs/operations.md#members-and-the-token-budget), [throttling](docs/operations.md#login-throttling) | Deployment, TLS, public ports and a production deployment |
+| Members: invite-only signup, login (JWT), `/members/me`, login throttling — [members and budget](docs/operations.md#members-and-the-token-budget), [throttling](docs/operations.md#login-throttling) | Deployment: TLS, public ports and a production host |
 | `POST /chat`: classify, select topics, generate a cited answer; needs both provider keys, and a daily token budget applies — [details](docs/api.md#post-chat) | |
 | Embeddings for every document, offline-testable (`scripts/reindex.py`) — [operations](docs/operations.md#embeddings) | |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
@@ -79,7 +79,7 @@ Requires Docker (28 or newer recommended; see [Local ports](docs/design-notes.md
 ```bash
 # 1. Secrets (.env is git- and docker-ignored): generates the two passwords and SECRET_KEY;
 #    the API keys are needed only for steps 5, 7 and 9:
-#    OPENAI_API_KEY for 5 and 7, plus ANTHROPIC_API_KEY for 9
+#    OPENAI_API_KEY for 5, 7 and 9, and ANTHROPIC_API_KEY for 9
 [ -f .env ] || { cp .env.example .env && sed -i.bak \
   -e "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" \
   -e "s/^DB_PASSWORD=$/DB_PASSWORD=$(openssl rand -hex 16)/" \

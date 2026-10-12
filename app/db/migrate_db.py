@@ -56,8 +56,7 @@ CREATE TRIGGER refile_items_before_sub_category_delete
 def reset_database():
     # with an `alembic_version` table Alembic owns the schema: drop_all() would leave that table and
     # rebuild a schema behind a version row still claiming head, silently. Refuse, not warn.
-    # Only tests/test_migrate_db_guard.py calls this.
-    # DuplicateTable = pre-Alembic DB: docs/operations.md "Migrations".
+    # Only tests/test_migrate_db_guard.py calls this. DuplicateTable = pre-Alembic DB: docs/operations.md "Migrations".
     with engine.begin() as connection:
         managed = connection.execute(
             text("SELECT to_regclass('public.alembic_version') IS NOT NULL")

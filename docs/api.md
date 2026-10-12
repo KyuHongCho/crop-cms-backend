@@ -64,7 +64,7 @@ curl -X POST localhost:8000/chat -H "Authorization: Bearer $TOKEN" \
 - Models are `CHAT_MODEL_CLASSIFY` and `CHAT_MODEL_GENERATE` (both default to `claude-haiku-5-5`, set in `app/chat/llm.py`).
 - The response carries `truncated` (`true` when the answer was cut at the generator's `max_tokens` and may be incomplete; the answer then also ends with a blank line and a fixed notice, but a frontend should read `truncated` rather than string-match the notice; a declined or abstained response is always `false` and carries no notice).
 - The SDK's default retries stay on, so a `429` or `5xx` is called up to 3 times, with backoff, before the `503`.
-- Answers are not word-for-word repeatable: no sampling parameters are set.
+- Answers are not word-for-word repeatable: no sampling parameters are set, and the default model accepts only `temperature` 1 and `top_p` 0.99 ([migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#remove-sampling-parameters)).
 - `anthropic` is in `requirements.txt`: run `docker compose build` so the image has it (the tests in `tests/test_chat.py` that use the real client fail with ImportError otherwise).
 
 **Status codes.** `200` (answered, declined or abstained); `401` without a valid token; `413` when

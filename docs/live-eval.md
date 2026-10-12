@@ -64,9 +64,11 @@ With 3 repeats per question, the rise in the flip rate (1/17 to 2/17) is not dis
   call (`text-embedding-3-small`, $0.02 per million tokens per
   [OpenAI's pricing](https://developers.openai.com/api/docs/pricing)): a few hundred tokens per run,
   effectively free. The script does not measure it, and the member token budget does not count it. Other
-  `CHAT_MODEL_*` choices change the Anthropic prices (see the models page above).
+  `CHAT_MODEL_*` choices change the Anthropic prices (see the pricing page above).
 
-Answers are not word-for-word repeatable: the pinned SDK has no `temperature` argument, so the
+Answers are not word-for-word repeatable: the pinned SDK has no `temperature` argument, and the default model,
+`claude-haiku-5-5`, accepts only `temperature` 1 and `top_p` 0.99 and rejects any `top_k`
+([migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide#remove-sampling-parameters)), so the
 same question can be routed or worded differently between runs, which is why the eval reports a rate. The
 question set's two collision labels (for the not-yet-built `crop_cycle_days`) are checked only by this live
 run; offline the stub just returns the label. The live runs showed "how many days is a lettuce crop cycle?"
