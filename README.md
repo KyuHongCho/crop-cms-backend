@@ -161,6 +161,12 @@ SITE_DIR=../crop-cms-frontend/dist docker compose --profile proxy up -d --wait p
 ```
 
 `proxy/check.sh` fails against the real `dist/` by design: it asserts the placeholder's marker string.
+
+`docker-compose.prod.yaml` is the production counterpart: a standalone file with only `cms` (the
+`prod` image target, no published port, no source mount) and `caddy` (ports 80 and 443), and no
+database service. `bash prod/check.sh` asserts that shape and runs in CI; nothing here has run it
+against a real server yet.
+
 Why same-origin, the Caddy behaviours that shape the config and what is not decided yet:
 [design notes](docs/design-notes.md#how-the-browser-reaches-the-api).
 

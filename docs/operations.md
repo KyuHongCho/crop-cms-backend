@@ -176,12 +176,14 @@ a plain `restart` does not re-read the environment.
 | `TOPIC_SCORE_FLOOR` | `-1.0` | `app/chat/retrieval.py` (at import) | Minimum topic score below which the chat layer abstains; `-1.0` is a no-op for cosine similarity. Not passed through by compose |
 | `TOPIC_SELECTION_K` | `3` | `app/crud/retrieval.py` (at import) | How many topics a question keeps. Not passed through by compose |
 | `CONTEXT_TOKEN_BUDGET` | `8000` | `app/crud/retrieval.py` (at import) | Context budget in tokens, estimated at 4 characters per token. Not passed through by compose |
+| `SQL_ECHO` | off | `app/db/db.py`, `app/db/migrate_db.py` (at import) | `1` logs every SQL statement with its parameters; any other value or unset is off. The dev compose file sets `1`; the production one does not |
+| `PGSSLMODE` | unset (production compose: `require`) | libpq, via `psycopg` | Encrypts the database connection; `require` does not verify the server certificate |
 | `ALEMBIC_ALLOW_DESTRUCTIVE` | unset | `alembic/env.py` | `1` lets `alembic downgrade` run on a database whose name does not end in `_test`; any other value does not |
-| `SITE_ADDRESS` | `http://:80` (compose) | `proxy/Caddyfile`, via `docker-compose.yaml` | The proxy's site address; unset or empty is plain HTTP, a domain turns on HTTPS |
-| `SITE_DIR` | `./proxy/site` (compose) | `docker-compose.yaml` | Directory the proxy serves at `/` |
+| `SITE_ADDRESS` | `http://:80` (dev compose); required in `docker-compose.prod.yaml` | `proxy/Caddyfile`, via the compose files | The proxy's site address; unset or empty is plain HTTP in dev, a domain turns on HTTPS |
+| `SITE_DIR` | `./proxy/site` (dev compose), `/opt/cms/site` (prod compose) | the compose files | Directory the proxy serves at `/` |
 | `DB_USER` | `cms_app` | `app/db/db.py` | Application database role; compose requires it in `.env` |
-| `DB_PASSWORD` | none | `app/db/db.py` | Application role's password; the app does not start without it, and compose requires it in `.env` |
-| `DB_HOST` | `db` | `app/db/db.py` | Database host; compose sets `db` for `cms` |
+| `DB_PASSWORD` | none | `app/db/db.py` | Application role's password; the app does not start without it, and compose requires it in `.env`. Use hex or alphanumeric characters: it goes into the database URL unescaped, so a `%` is silently decoded and changes the password |
+| `DB_HOST` | `db` | `app/db/db.py` | Database host; the dev compose sets `db` for `cms`, the prod compose requires it from the environment |
 | `DB_PORT` | `5432` | `app/db/db.py` | Database port; compose sets `5432` for `cms` |
 | `DB_NAME` | `cms` | `app/db/db.py` | Database name; compose sets `cms` for `cms` (the tests override it with `cms_test`) |
 | `OPENAI_API_KEY` | none | the `langchain-openai` client (`app/chat/embeddings.py`) | Needed by `scripts/reindex.py` and the `POST /chat` query embedding; without it `/chat` answers `503` |

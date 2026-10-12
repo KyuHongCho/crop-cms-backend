@@ -38,7 +38,7 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--email", default=None, help="bind the invite to this address")
     args = parser.parse_args()
-    # The shared engine echoes every statement; keep stdout to the code alone, so
+    # The engine echoes SQL when SQL_ECHO=1 (dev compose); keep stdout to the code alone, so
     # `CODE=$(python -m scripts.make_invite)` works.
     sync_engine.echo = False
     print(make_invite(args.role, args.days, args.email))

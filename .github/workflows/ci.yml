@@ -49,6 +49,10 @@ jobs:
         # rules that class of error out.
         run: docker compose config -q
 
+      - name: Production compose keeps cms unpublished and the proxy minimal
+        # Renders docker-compose.prod.yaml with dummy values; starts nothing.
+        run: bash prod/check.sh
+
       - name: Image builds
         run: docker compose build
 
@@ -411,7 +415,7 @@ jobs:
               UNCATEGORISED_SUB_CATEGORY_ID as BUCKET,
           )
 
-          engine.echo = False  # db.py sets echo=True by default; that log is not the evidence
+          engine.echo = False  # SQL_ECHO=1 (dev compose) turns the log on; it is not the evidence
 
           LOADED = sys.argv[1] == "loaded"
 

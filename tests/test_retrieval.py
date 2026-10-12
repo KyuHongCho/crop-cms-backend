@@ -163,8 +163,8 @@ def test_the_topic_set_statement_compiles_without_a_limit():
 
 
 def test_the_sql_actually_executed_contains_no_limit(client, caplog):
-    """The other half of the pair above: engine.echo=True logs every statement, so what
-    PostgreSQL was really asked is observable."""
+    """The other half of the pair above: the engine's statement log shows what PostgreSQL
+    was really asked; caplog enables it, so the test does not depend on SQL_ECHO."""
     crop_id = _make_crop("basil")
     _make_items(crop_id, "optimal-temperature", 12)
 
@@ -178,9 +178,8 @@ def test_the_sql_actually_executed_contains_no_limit(client, caplog):
         if "FROM items" in record.getMessage()
     ]
     assert logged, (
-        "no SELECT against items was logged -- engine.echo (db.py's default of "
-        "True) should have logged it; this test cannot see a LIMIT it never "
-        "captured"
+        "no SELECT against items was logged -- the engine's statement log should "
+        "have captured it; this test cannot see a LIMIT it never captured"
     )
     for statement in logged:
         assert "LIMIT" not in statement.upper(), statement

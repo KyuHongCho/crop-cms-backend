@@ -23,6 +23,8 @@ services:
       DB_NAME: cms
       PYTHONPATH: /src
       ADVISOR_PATH: /advisor
+      # Logs every SQL statement and its parameters; off by default (app/db/db.py).
+      SQL_ECHO: "1"
       # Provider key, injected at run time -- never in the image
       # (.dockerignore) and never committed (.gitignore). Bare ${VAR},
       # deliberately not ${VAR:?}: the non-AI endpoints must still start
