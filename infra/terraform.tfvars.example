@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (git ignores that file) and replace every placeholder.
+
+# Output of: curl https://checkip.amazonaws.com   -- keep the /32 on the end.
+ssh_cidr = "203.0.113.7/32"
+
+# Contents of ~/.ssh/id_ed25519.pub (the .pub file, never the private key).
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEPLACEHOLDERPLACEHOLDERPLACEHOLDER you@laptop"
+
+# Where the budget alert goes.
+budget_email = "you@example.com"
+
+# Optional: instance_type = "t4g.small"
