@@ -45,8 +45,12 @@ run aws s3api put-bucket-encryption --bucket "$BUCKET" --region "$REGION" \
   --server-side-encryption-configuration \
   '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 
-cat <<MSG
+if [ "$DRY_RUN" -eq 1 ]; then
+  printf '\n(dry run: nothing was created; run without --dry-run to do it)\n'
+else
+  cat <<MSG
 
 State bucket ready. Initialise Terraform with:
   terraform init -backend-config="bucket=$BUCKET"
 MSG
+fi

@@ -211,21 +211,31 @@ The budget `cropcms-monthly` is 25 USD a month. It e-mails you when the actual s
 percent (20 USD) and when AWS forecasts that the month will pass 100 percent (25 USD). The alert
 counts tax, and credits are not subtracted, so it shows what you really use rather than what is
 left after credits. With only this server (about 10.8 USD) neither alert should fire. The forecast
-alert may stay quiet for the first weeks, because AWS needs some usage history to forecast (not
-checked).
+alert stays silent at first: AWS needs approximately 5 weeks of usage data before it can forecast.
 
 ## After a database is added
 
 The database password will then be stored in the Terraform state file. That makes the state bucket
 sensitive, so harden it at that point (for example refuse non-TLS access and limit who can read it).
 
+The budget (`monthly_budget_usd`, default 25) assumes this server only. With a database the stack
+costs about 24.85 USD a month before tax, so the 20 USD actual alert will fire once a month (AWS
+sends an actual alert once per budget period; see
+https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-best-practices.html), and the
+forecast alert at 25 USD can fire repeatedly, because the forecast sits close to 25 (24.85 before
+tax) and may cross back and forth within a period. After the first full month, read the real
+monthly total (with tax, if any) in the Billing console, and set `monthly_budget_usd` so that 80
+percent of it is above that total.
+
 ## Checks without AWS
 
 `bash infra/check.sh` needs only Docker and python3. It fails if the firewall opens anything beyond
 22 (your IP), 80, 443, if a key, token or account id is in these files, if the server lacks IMDSv2 or
 an encrypted disk, if the budget alerts change, or if the bootstrap script allows public access. It
-also runs `terraform fmt`, `init -backend=false` and `validate`, and checks that bad `ssh_cidr`
-values are refused. CI runs it. `bash infra/check.sh --static` skips the Docker parts.
+also rejects `dynamic` ingress or egress blocks, `module` blocks and `.tf.json` files, which could
+hide rules from these checks. It also runs `terraform fmt`, `init -backend=false` and `validate`,
+and checks that bad `ssh_cidr` values are refused. CI runs it. `bash infra/check.sh --static`
+skips the Docker parts.
 
 ## What is not verified
 

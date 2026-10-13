@@ -53,6 +53,7 @@ rm "$tmp/bucket"; : >"$STUB_LOG"
 rc=0; bash "$here/bootstrap-state.sh" --dry-run >"$tmp/out3" 2>&1 || rc=$?; check "dry run exits 0" "$([ "$rc" -eq 0 ] && echo ok)"
 check "dry run makes no aws call" "$([ ! -s "$STUB_LOG" ] && echo ok)"
 check "dry run did not create anything" "$([ ! -e "$tmp/bucket" ] && echo ok)"
+check "dry run does not claim the bucket is ready" "$(! grep -qF 'State bucket ready' "$tmp/out3" && echo ok)"
 for want in "create-bucket" "LocationConstraint=eu-north-1" "put-bucket-versioning" "put-public-access-block" \
   "put-bucket-encryption" "cropcms-tfstate-ACCOUNT_ID"; do
   check "dry run prints: $want" "$(grep -qF -- "$want" "$tmp/out3" && echo ok)"

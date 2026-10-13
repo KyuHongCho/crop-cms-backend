@@ -115,13 +115,18 @@ check("80/tcp, 443/tcp and 443/udp are all present", {(80, "tcp"), (443, "tcp"),
 sgs = res("aws_security_group")
 check("a security group is defined", len(sgs) >= 1)
 for name, body in sgs:
-    inline = [k for k, *_ in blocks(body) or [] if k in ("ingress", "egress")] + [k for k in attrs(body) if k in ("ingress", "egress")]
+    nested = blocks(body) or []
+    inline = ([k for k, _l, *_ in nested if k in ("ingress", "egress")]
+              + [l[0] for k, l, *_ in nested if k == "dynamic" and l and l[0] in ("ingress", "egress")]
+              + [k for k in attrs(body) if k in ("ingress", "egress")])
     check(f"security group {name}: no inline rules (every rule is a checked resource)", not inline, str(inline))
 check("no aws_security_group_rule or network ACL rules sneak in",
       not res("aws_security_group_rule") and not res("aws_network_acl_rule") and not res("aws_network_acl"))
 check("no aws_default_security_group (its inline rules would bypass the checks)", not res("aws_default_security_group"))
 jsons = [str(p.relative_to(infra)) for p in infra.rglob("*.tf.json") if ".terraform" not in p.parts]
 check("no .tf.json files (this checker reads only .tf)", not jsons, str(jsons))
+mods = [l[0] if l else "?" for k, l, *_ in allb if k == "module"]
+check("no module blocks (resources they create would escape these checks)", not mods, str(mods))
 
 v = {l[0]: b for k, l, b, *_ in allb if k == "variable"}
 sv = v.get("ssh_cidr", "")
