@@ -8,3 +8,10 @@ __pycache__/
 # JetBrains IDE state (PyCharm/IntelliJ). Per-user, not per-project:
 # workspace.xml records absolute paths and uncommitted-change state.
 .idea/
+
+# Terraform: local plugin cache, state (may hold secrets) and per-person variables.
+# .terraform.lock.hcl and terraform.tfvars.example stay tracked.
+.terraform/
+*.tfstate*
+*.tfvars
+*.tfvars.json
