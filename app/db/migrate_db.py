@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, text
 
 # db.py owns the connection settings and the single Base; never redefine it here, or
 # create_all() would act on an empty second registry.
-from app.db.db import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME, Base
+from app.db.db import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME, SQL_ECHO, Base
 
 # imported twice: this bare import documents the registration side effect (puts the models on
 # Base.metadata), the `from` import below supplies the id constants.
@@ -15,7 +15,7 @@ from app.model.model import (
 # synchronous counterpart of db.py's async URL (same psycopg 3 package).
 DB_URL = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-engine = create_engine(DB_URL, echo=True)
+engine = create_engine(DB_URL, echo=SQL_ECHO)
 
 # --- the "Uncategorised" bucket ---
 # refile target of a deleted sub-category (id duplicated in the trigger, see model.py). An explicit

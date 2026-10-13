@@ -1,0 +1,75 @@
+# Standalone, not an override: a compose override cannot remove the dev bind mounts
+# or the published port. There is no database service; the database is external.
+# Needs DB_HOST, DB_USER, DB_PASSWORD, SECRET_KEY and SITE_ADDRESS in the environment
+# or in .env (see .env.example).
+services:
+  cms:
+    build:
+      context: .
+      target: prod
+    restart: unless-stopped
+    # No `ports`, ever: uvicorn trusts X-Forwarded-* from any address (--forwarded-allow-ips "*"),
+    # which is safe only while Caddy is the sole way in. prod/check.sh enforces it.
+    environment:
+      DB_USER: ${DB_USER:?set DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      DB_HOST: ${DB_HOST:?set DB_HOST}
+      DB_PORT: 5432
+      DB_NAME: cms
+      # Encrypts the connection but does not verify the server certificate.
+      PGSSLMODE: require
+      PYTHONPATH: /src
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CHAT_MODEL_CLASSIFY:
+      CHAT_MODEL_GENERATE:
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      TOKENS_BUDGET_DAILY: ${TOKENS_BUDGET_DAILY:-20000}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-10}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-900}
+    healthcheck:
+      # Probes /health, never /health/ready: the readiness probe queries the database.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    depends_on:
+      cms:
+        condition: service_healthy
+    # 8081 (the healthcheck listener) must stay unpublished; prod/check.sh enforces it.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # No plain-HTTP default here: a missing domain must fail, not serve HTTP.
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS to the public domain}
+    volumes:
+      # Certificates live in caddy_data; losing it means re-issuing them.
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${SITE_DIR:-/opt/cms/site}:/srv:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  caddy_data:
+  caddy_config:

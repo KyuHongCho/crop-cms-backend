@@ -128,7 +128,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true",
                         help="print the chunk count and what would change, then stop")
     args = parser.parse_args()
-    # migrate_db.py's engine has echo=True; the SQL log would bury the counts.
+    # The engine echoes SQL when SQL_ECHO=1 (dev compose); that log would bury the counts.
     sync_engine.echo = False
     reindex(dry_run=args.dry_run)
 

@@ -23,7 +23,7 @@ config = context.config
 # Overrides alembic.ini's placeholder: one source of truth for the URL,
 # consistent with app/db/migrate_db.py's DB_URL construction. The "%" is
 # doubled because set_main_option runs the value through ConfigParser
-# interpolation, which rejects a bare "%" (a DB_PASSWORD may contain one).
+# interpolation, which rejects a bare "%" (DB_PASSWORD should not contain one: see .env.example).
 config.set_main_option("sqlalchemy.url", ASYNC_DB_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.

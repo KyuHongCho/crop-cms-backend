@@ -215,7 +215,7 @@ prefix stripped, which is what the frontend's Vite dev proxy does today.
 [`proxy/Caddyfile`](../proxy/Caddyfile) holds the config and
 [`proxy/check.sh`](../proxy/check.sh) asserts its routing; CI runs the script after the stack is up.
 The service is a testable stand-in: the host, TLS and public ports are not chosen yet (see
-[Deferred](#deferred-to-the-production-setup)).
+[Production setup](#production-setup-done-and-still-open)).
 
 ### Why same-origin, and the CORS fallback
 
@@ -294,7 +294,7 @@ Caddy that shape this config:
 - **The API's trailing-slash redirect loses `/api` on the dev stack.** FastAPI redirects
   `/items/` to `/items`. The dev `cms` command runs without `--root-path`, so through the proxy the
   `Location` is `http://<host>:<port>/items`: host and port are kept (the `Host` header is
-  forwarded) but `/api` is dropped. With `--root-path /api`, as the production setup should set,
+  forwarded) but `/api` is dropped. With `--root-path /api`, as the production image sets,
   the prefix is kept (`/api/items`). The frontend never emits a trailing slash, so nothing in the
   app triggers it. A `TestClient` shows no prefix in either case; that is an artifact of the
   ASGI-level `root_path`, not what real uvicorn does.
@@ -341,25 +341,28 @@ still serves them.
 - The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not routes of the app
   (harmless, intended). None of the blocked paths is one the frontend uses.
 
-### Deferred to the production setup
+### Production setup: done and still open
 
 - Public ports 80/443 with only the proxy public, DNS for the domain, and that domain as
   `SITE_ADDRESS` so Caddy obtains the certificate (not tried with a real certificate); the
   plain-HTTP default here is for local use.
-- `--root-path /api` in the production command, which removes the trailing-slash limit above. It
-  makes the docs work through the proxy only together with deleting the three `handle` blocks in
-  `proxy/Caddyfile` that answer `404` for `/api/docs*`, `/api/redoc*` and `/api/openapi.json*`.
-- `--forwarded-allow-ips` for uvicorn (not needed today). `*` would be safe only if the API is
-  unreachable except through the proxy; the scheme of a redirect under `--proxy-headers` was not
-  verified.
-- Carrying the proxy healthcheck into the production compose file.
+- Done in the `prod` image target: `--root-path /api`, which removes the trailing-slash limit above
+  (the docs work through the proxy only together with deleting the three `handle` blocks in
+  `proxy/Caddyfile` that answer `404` for `/api/docs*`, `/api/redoc*` and `/api/openapi.json*`), and
+  `--proxy-headers --forwarded-allow-ips "*"`. The `*` is safe only because `cms` publishes no port in
+  `docker-compose.prod.yaml`; `prod/check.sh` fails if that changes.
+- Done in `docker-compose.prod.yaml`: the proxy healthcheck on the unpublished `:8081` listener, which
+  `prod/check.sh` also keeps unpublished.
+- Checked in CI by `prod/smoke.sh`: the `prod` stage builds, runs as a non-root user, and a
+  trailing-slash redirect keeps `/api` and the scheme of a forwarded `X-Forwarded-Proto: https`
+  header. Still open: the same behind a real certificate.
 
 ### Not verified
 
 - TLS and certificates; Swagger UI in a browser; whether `dist/` is current.
 - Editing `Caddyfile` in place on Linux: an in-place edit plus `caddy reload` was picked up on
   arm64 macOS Docker Desktop; CI shows only that the mount is read and served on Linux amd64.
-- The 120 s response timeout under load; `--forwarded-allow-ips` effects.
+- The 120 s response timeout under load.
 
 ## Testing details
 
@@ -401,7 +404,9 @@ choice between them is not recorded.
 
 Dev tooling: `pytest==9.1.1`, `httpx2==2.12.0` (**not** `httpx` — `starlette==1.6.0`'s
 `TestClient` raises `RuntimeError` naming `httpx2` rather than merely warning), both in
-`requirements-dev.txt` and installed into the same image as `requirements.txt`.
+`requirements-dev.txt` and installed into the `base` stage of the Dockerfile, so both the `dev` and
+the `prod` target carry them. There is no variant without them: they are two small packages, and
+nothing has shown that image size or build time hurts.
 
 ## The agentic review pipeline
 

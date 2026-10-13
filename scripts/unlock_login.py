@@ -41,7 +41,7 @@ def main() -> None:
         # Invalid UTF-8 in argv arrives as a lone surrogate; refuse before touching the database.
         print("unlock_login: the address is not valid UTF-8", file=sys.stderr)
         sys.exit(2)
-    # The shared engine echoes every statement; keep stdout to the result alone.
+    # The engine echoes SQL when SQL_ECHO=1 (dev compose); keep stdout to the result alone.
     sync_engine.echo = False
     print("unlocked" if unlock_login(args.email) else "nothing to unlock")
 
