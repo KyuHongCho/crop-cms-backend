@@ -1,12 +1,14 @@
 """Password hashing and JWT signing. No database, no FastAPI.
 
-Argon2 is slow, so hash/verify run in the threadpool (inline they would stall every request).
+Argon2 is slow, so hash/verify run in the threadpool (inline they would stall every request),
+at most `_HASH_CONCURRENCY` at a time (each uses ~64 MiB).
 No refresh tokens: a token lives ACCESS_TOKEN_EXPIRE_MINUTES.
 """
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import anyio
 import jwt
 from pwdlib import PasswordHash
 from starlette.concurrency import run_in_threadpool
@@ -15,6 +17,13 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 _password_hash = PasswordHash.recommended()  # Argon2id
+
+# Each Argon2 hash allocates ~64 MiB; 4 at once keeps a login burst inside a 1 GiB host.
+# Per process: more uvicorn workers multiply it. Raise it with the host's RAM.
+_HASH_CONCURRENCY = 4
+# a semaphore, not an anyio to_thread limiter, so the call still goes through run_in_threadpool;
+# waiting is FIFO and unbounded.
+_hash_slots = anyio.Semaphore(_HASH_CONCURRENCY)
 
 # a real argon2 hash of a throwaway string: login verifies against it for an unknown email,
 # so that path costs as much as a wrong password and timing does not reveal registered emails.
@@ -31,11 +40,13 @@ def get_secret_key() -> str:
 
 
 async def hash_password(plain: str) -> str:
-    return await run_in_threadpool(_password_hash.hash, plain)
+    async with _hash_slots:
+        return await run_in_threadpool(_password_hash.hash, plain)
 
 
 async def verify_password(plain: str, hashed: str) -> bool:
-    return await run_in_threadpool(_password_hash.verify, plain, hashed)
+    async with _hash_slots:
+        return await run_in_threadpool(_password_hash.verify, plain, hashed)
 
 
 def create_access_token(member_id: int, expires_minutes: int | None = None) -> str:

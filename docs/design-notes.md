@@ -5,7 +5,7 @@ The reasoning behind the decisions summarised in the [README](../README.md).
 ## Trade-offs and known limits
 
 The costs and known limits of these design decisions, in brief. The first two are explained in
-full further down this file; the last two are documented next to the code they concern.
+full further down this file; the rest are documented next to the code they concern.
 
 - **Token budgets are estimated, not measured.** Context size is counted in characters and
   converted at 4 characters per token (a common rule of thumb) rather than with a real tokeniser,
@@ -24,6 +24,10 @@ full further down this file; the last two are documented next to the code they c
   backfill. None is included, because the dev database has no un-normalised topics.
   [`tests/test_retrieval.py`](../tests/test_retrieval.py),
   `test_normalization_does_not_heal_a_row_written_without_the_orm`
+- **Password hashing is capped at 4 at a time.** Each Argon2 hash uses about 64 MiB, so a login
+  burst queues instead of exhausting memory; the queue is first-in-first-out and nothing bounds it,
+  so a flood of logins can also slow signups, which hold a database connection while they wait.
+  [`app/auth/auth.py`](../app/auth/auth.py)
 
 ## Topic-set retrieval: the no-truncation guarantee
 

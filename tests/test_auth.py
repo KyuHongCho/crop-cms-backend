@@ -360,6 +360,59 @@ def test_hashing_and_verifying_go_through_the_threadpool(monkeypatch):
     assert offloaded == ["hash", "verify"]
 
 
+def test_concurrent_hashing_is_capped(monkeypatch):
+    import asyncio
+    import threading
+    import time
+    import app.auth.auth as auth_module
+
+    gate = threading.Event()
+    lock = threading.Lock()
+    running = 0
+
+    def blocked(result):
+        nonlocal running
+        with lock:
+            running += 1
+        try:
+            gate.wait(timeout=5)
+            return result
+        finally:
+            with lock:
+                running -= 1
+
+    class FakeHash:
+        def hash(self, plain):
+            return blocked("hashed")
+
+        def verify(self, plain, hashed):
+            return blocked(True)
+
+    monkeypatch.setattr(auth_module, "_password_hash", FakeHash())
+    cap = auth_module._HASH_CONCURRENCY
+
+    async def go():
+        tasks = [
+            asyncio.ensure_future(
+                auth_module.hash_password("x") if i % 2 else auth_module.verify_password("x", "h")
+            )
+            for i in range(12)
+        ]
+        try:
+            deadline = time.monotonic() + 5
+            while running < cap and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)  # lets an uncapped overshoot show
+            seen = running
+        finally:
+            gate.set()
+            await asyncio.gather(*tasks)
+        return seen
+
+    seen = asyncio.run(go())
+    assert seen == cap, f"{seen} hashes ran at once, expected the cap of {cap}"
+
+
 # --- TOKENS_BUDGET_DAILY seeds new members only ------------------------------
 
 def test_signup_gets_the_configured_starting_budget(client, monkeypatch):
