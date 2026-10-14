@@ -5,31 +5,59 @@ It has Docker installed, a fixed public IP address, and a firewall that lets the
 ports 80 and 443 only. SSH (port 22) is open to your own IP address and nobody else. It does not
 create a database; that is a separate piece of work.
 
-This README was written before anything was applied to a real AWS account. The files were checked
-offline only; see "What is not verified" at the end, and trust what a real run shows over this text.
+This README was written before anything was applied to a real AWS account. A first real run on
+2026-10-14 confirmed part of it; see "What is verified" and "What is not verified" at the end, and
+trust what a real run shows over this text.
 
 ## What you need first
 
-1. An AWS account. Turn on MFA for the root login, then create one IAM user for Terraform, turn on
-   MFA for it, give it rights (see "IAM rights" below) and create an access key for that user.
+1. An AWS account, and a way for the command line to sign in to it. There are two routes; step 4
+   says how to use each.
+   - **Route A, browser sign-in.** This is what the first real run used: an AWS account made with
+     "Sign up for AWS (new)" (a project account), entered with the role `AccountFullAccessRole`. You
+     need no IAM user and no access key. AWS applies a service control policy to project accounts;
+     its statement `DenyIAMRestrictedActions` denies `iam:*LoginProfile*`, `billing:*` is denied,
+     and `budgets:*` is allowed (see
+     https://docs.aws.amazon.com/accounts/latest/reference/scps-and-rcps-for-projects.html). If you
+     use this route, you can skip the "IAM rights" lists.
+   - **Route B, IAM user and access key.** For a classic account where route A does not apply. Turn
+     on MFA for the root login, then create one IAM user for Terraform, turn on MFA for it, give it
+     rights (see "IAM rights" below) and create an access key for that user.
 2. A default VPC in eu-north-1. A new account has one, but it can be deleted. Check in the console:
    VPC, then Your VPCs, and look for one with Default VPC = yes. Without it, `plan` fails with "no
    matching EC2 VPC found".
 3. Install the tools: [Terraform](https://developer.hashicorp.com/terraform/install) 1.11 or newer
    and the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
-4. Run `aws configure` and paste the access key. It is stored in `~/.aws/credentials`, outside this
-   repository. Never put it in a file here or paste it into a chat. Then check that it works:
-   `aws sts get-caller-identity` should print your account id and the IAM user. If it prints an
-   error, fix `aws configure` before going on.
-5. Make an SSH key (use a passphrase): `ssh-keygen -t ed25519`. You get a private file
-   `~/.ssh/id_ed25519`, which never leaves your laptop, and a public file `~/.ssh/id_ed25519.pub`,
-   which is safe to share.
+4. Sign in from the command line, using the route from item 1.
+   - **Route A.** Run `aws login --profile <name>` (for example `cropcms`) and finish the sign-in
+     in the browser. Then run `export AWS_PROFILE=<name>` in every terminal window that runs `aws`
+     or `terraform`; a new window does not remember it. From AWS's docs (not from the real run;
+     https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html): `aws login` needs
+     AWS CLI 2.32.0 or newer (`aws --version`), and it gives short-lived credentials that refresh
+     for up to 12 hours, after which you run `aws login --profile <name>` again. `aws login` may
+     offer to set up "AWS skills and the AWS MCP server" for AI agents. That prompt appeared once,
+     right after `aws login` finished in the first real run; it is not needed here, so answer `n`
+     (or `never`; only `n` was considered here, and it declines this time). The same docs say the
+     `SignInLocalDevelopmentAccess` managed policy is required and point IAM Identity Center users
+     to `aws configure sso`. The real run on this account succeeded with `aws login` anyway,
+     without checking either; `aws configure sso` itself was not tried.
+   - **Route B.** Run `aws configure` and paste the access key. It is stored in
+     `~/.aws/credentials`, outside this repository. Never put it in a file here or paste it into a
+     chat.
+
+   Then check that it works: `aws sts get-caller-identity` should print your account id and who you
+   are signed in as. If it prints an error, fix the sign-in before going on.
+5. Make an SSH key (use a passphrase): `ssh-keygen -t ed25519`. The file name is your choice; the
+   examples here use the default, `id_ed25519`, so if you pick another name, use it in every later
+   command. You get a private file `~/.ssh/id_ed25519`, which never leaves your laptop, and a public
+   file `~/.ssh/id_ed25519.pub`, which is safe to share.
 
 ### IAM rights
 
-The lists below were derived from the AWS provider's source code and AWS documentation. They were
-not run against IAM, so expect to iterate: if a step fails with `AccessDenied` or
-`UnauthorizedOperation`, the message names the missing action; add it and run the step again.
+This section is for route B. The lists below were derived from the AWS provider's source code and
+AWS documentation. They were not run against IAM, so expect to iterate: if a step fails with
+`AccessDenied` or `UnauthorizedOperation`, the message names the missing action; add it and run the
+step again.
 
 **Easiest:** attach the AWS managed policy `PowerUserAccess` to the Terraform IAM user. It allows
 everything except IAM, Organizations and Account management, which is enough in principle. One
@@ -84,7 +112,7 @@ everything from the `infra/` folder.
    ```
    cp infra/terraform.tfvars.example infra/terraform.tfvars
    curl https://checkip.amazonaws.com        # your public IP; write it as <ip>/32
-   cat ~/.ssh/id_ed25519.pub                 # paste the whole line
+   cat ~/.ssh/id_ed25519.pub                 # paste the whole line; use your own key file name
    ```
 
    Edit `infra/terraform.tfvars` (also set your e-mail address for the budget alert). Git ignores
@@ -101,16 +129,22 @@ everything from the `infra/` folder.
    Repeat this command on any new clone of the repository or any other computer; the bucket name
    is not stored in the files.
 
-4. **Plan.** `terraform plan` shows what would be created and changes nothing. Read it; see
-   "What the plan should show" below.
+4. **Plan.** `terraform plan -out=tfplan` shows what would be created and changes nothing. Read it;
+   see "What the plan should show" below. The saved plan file `tfplan` stays in `infra/`; Git
+   ignores it.
+   If `apply` later reports that the saved plan is stale or no longer matches (Terraform refuses a
+   saved plan once the state or your settings have changed), run `terraform plan -out=tfplan` again
+   and then `terraform apply tfplan`.
 
-5. **Apply.** `terraform apply`, then type `yes`. It prints the IP, the instance id and an ssh
-   command.
+5. **Apply.** `terraform apply tfplan` applies exactly the plan you read, and does not ask for
+   `yes`. It prints the IP, the instance id and an ssh command.
 
 6. **Log in.**
 
    ```
-   terraform output -raw ssh_command         # copy the line it prints, paste it, press Enter
+   terraform output -raw ssh_command         # prints a line with PATH_TO_YOUR_PRIVATE_KEY
+                                             # in it; replace that with your private key file
+                                             # (for example ~/.ssh/id_ed25519), then run it
    cloud-init status --wait                  # on the server: waits for the first-boot setup
    docker --version
    docker compose version
@@ -150,10 +184,16 @@ private and protected by its passphrase.
   is a new server: `terraform apply -replace=aws_instance.cms` (see "Changing the server setup
   later" for what that destroys).
 - **`apply` stopped part-way** (for example the budget was refused after the server was created).
-  Fix the cause, then run `terraform apply` again. Terraform remembers what it already built and
-  only does the rest.
-- **`UnauthorizedOperation` or `AccessDenied`.** The IAM user lacks a right. The message names the
-  action; see "IAM rights".
+  Fix the cause, then run `terraform apply` again (plain `apply` plans afresh; `apply tfplan` with
+  the old plan file will likely be refused as stale, so make a new one with
+  `terraform plan -out=tfplan` first). Terraform remembers what it already built and only does the
+  rest.
+- **`UnauthorizedOperation` or `AccessDenied`.** Route B: the IAM user lacks a right. The message
+  names the action; see "IAM rights". Route A: the message may instead name a policy that denies the
+  action; that is not something you can add a right for.
+- **A sign-in or credentials error after hours of work (route A).** The short-lived login may have
+  run out (the docs give up to 12 hours; no expiry was observed). Run `aws login --profile <name>`
+  again, and check `AWS_PROFILE` is set in this terminal.
 - **"Your query returned no results" for the image.** The Ubuntu image filter in `main.tf` found
   nothing in this region. Check the image name in the EC2 console (AMIs, then Public images) and
   adjust the `name` filter.
@@ -237,15 +277,26 @@ hide rules from these checks. It also runs `terraform fmt`, `init -backend=false
 and checks that bad `ssh_cidr` values are refused. CI runs it. `bash infra/check.sh --static`
 skips the Docker parts.
 
+## What is verified
+
+A first real run on 2026-10-14, with route A, created all 11 resources, including the budget.
+Confirmed in that run: the Ubuntu image lookup in eu-north-1; budget creation; a `t4g.micro`
+launched; first boot finished (`cloud-init` done), with Docker 29.9.0 and Docker Compose
+v5.6.0 installed, 1 GiB of swap, and `/opt/cms` and `/opt/cms/site` owned by `ubuntu`; and SSH login
+with the key. Also confirmed in it: `aws login --profile cropcms`, `export AWS_PROFILE=cropcms`,
+`terraform init`, `plan -out=tfplan` and `apply "tfplan"` all worked in that account type.
+`bash infra/bootstrap-state.sh` also ran against that account: it created the state bucket, and the
+versioning, public-access-block and encryption calls all succeeded. Step 7's port 22 check also
+ran: from a different network (a phone hotspot), `nc -zv -G 5 <elastic-ip> 22` timed out, which is
+the result step 7 predicts, while the same command from the allowed address succeeded. That was one
+attempt from one other address.
+
 ## What is not verified
 
-- No `plan`, `apply` or bootstrap run against a real account had happened when this was written:
-  there were no credentials. The bootstrap script was tested against a stub `aws` that records its
-  calls.
-- The Ubuntu image name filter and Canonical's account id come from Ubuntu's documentation, not from
-  an AWS call. If the plan finds no image, the filter needs adjusting.
-- `user_data.sh` ran in an Ubuntu 24.04 arm64 container, not on the real image. Swap, `systemctl`
-  and cloud-init behaviour on the real server are untested.
-- That the account may launch `t4g.micro`, that the IAM user holds enough rights (the lists above
-  are derived, not run), that Budgets works for an IAM user, the forecast alert, and the prices
-  above, are unchecked.
+- Running the bootstrap script a second time ("safe to run again") against the real account was not
+  tried; `bootstrap-state.test.sh` still uses a stub `aws` that records its calls.
+- That route A works for every account type is not verified: only the account type above was used.
+  `aws configure sso` was not tried. Route B was not run.
+- The IAM rights lists above are derived, not run, and that Budgets works for an IAM user is
+  unchecked.
+- The forecast alert and the prices above are unchecked.
