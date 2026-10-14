@@ -14,10 +14,10 @@ trust what a real run shows over this text.
 1. An AWS account, and a way for the command line to sign in to it. There are two routes; step 4
    says how to use each.
    - **Route A, browser sign-in.** This is what the first real run used: an AWS account made with
-     "Sign up for AWS (new)" (a project account), entered through IAM Identity Center with the role
-     `AccountFullAccessRole`. You need no IAM user and no access key. AWS applies a service control
-     policy to project accounts; its statement `DenyIAMRestrictedActions` denies
-     `iam:*LoginProfile*`, `billing:*` is denied, and `budgets:*` is allowed (see
+     "Sign up for AWS (new)" (a project account), entered with the role `AccountFullAccessRole`. You
+     need no IAM user and no access key. AWS applies a service control policy to project accounts;
+     its statement `DenyIAMRestrictedActions` denies `iam:*LoginProfile*`, `billing:*` is denied,
+     and `budgets:*` is allowed (see
      https://docs.aws.amazon.com/accounts/latest/reference/scps-and-rcps-for-projects.html). If you
      use this route, you can skip the "IAM rights" lists.
    - **Route B, IAM user and access key.** For a classic account where route A does not apply. Turn
