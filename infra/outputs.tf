@@ -8,6 +8,6 @@ output "instance_id" {
 }
 
 output "ssh_command" {
-  description = "Copy and run to open a shell on the server."
-  value       = "ssh -i ~/.ssh/id_ed25519 ubuntu@${aws_eip.cms.public_ip}"
+  description = "Replace <path-to-your-private-key> with the private key file that matches ssh_public_key, then run it to open a shell on the server."
+  value       = "ssh -i <path-to-your-private-key> ubuntu@${aws_eip.cms.public_ip}"
 }
