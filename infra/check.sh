@@ -211,7 +211,7 @@ def git(*a):
     r = subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
     return r.returncode, r.stdout
 if git("rev-parse", "--git-dir")[0] == 0:
-    for f in ("infra/terraform.tfvars", "infra/prod.auto.tfvars", "infra/terraform.tfvars.json", "infra/x.auto.tfvars.json", "infra/terraform.tfstate", "infra/terraform.tfstate.backup", "infra/.terraform/x", "infra/tfplan"):
+    for f in ("infra/terraform.tfvars", "infra/prod.auto.tfvars", "infra/terraform.tfvars.json", "infra/x.auto.tfvars.json", "infra/terraform.tfstate", "infra/terraform.tfstate.backup", "infra/.terraform/x", "infra/tfplan", "infra/x.tfplan"):
         check(f"git ignores {f}", git("check-ignore", "-q", f)[0] == 0)
     for f in ("infra/.terraform.lock.hcl", "infra/terraform.tfvars.example"):
         check(f"git does not ignore {f}", git("check-ignore", "-q", f)[0] == 1)

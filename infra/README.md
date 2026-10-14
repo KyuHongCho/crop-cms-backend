@@ -142,7 +142,7 @@ everything from the `infra/` folder.
 6. **Log in.**
 
    ```
-   terraform output -raw ssh_command         # prints a line with <path-to-your-private-key>
+   terraform output -raw ssh_command         # prints a line with PATH_TO_YOUR_PRIVATE_KEY
                                              # in it; replace that with your private key file
                                              # (for example ~/.ssh/id_ed25519), then run it
    cloud-init status --wait                  # on the server: waits for the first-boot setup
@@ -192,7 +192,8 @@ private and protected by its passphrase.
   names the action; see "IAM rights". Route A: the message may instead name a policy that denies the
   action; that is not something you can add a right for.
 - **A sign-in or credentials error after hours of work (route A).** The short-lived login may have
-  run out (the docs give up to 12 hours; no expiry was observed). Run `aws login --profile <name>` again, and check `AWS_PROFILE` is set in this terminal.
+  run out (the docs give up to 12 hours; no expiry was observed). Run `aws login --profile <name>`
+  again, and check `AWS_PROFILE` is set in this terminal.
 - **"Your query returned no results" for the image.** The Ubuntu image filter in `main.tf` found
   nothing in this region. Check the image name in the EC2 console (AMIs, then Public images) and
   adjust the `name` filter.
@@ -285,7 +286,10 @@ v5.6.0 installed, 1 GiB of swap, and `/opt/cms` and `/opt/cms/site` owned by `ub
 with the key. Also confirmed in it: `aws login --profile cropcms`, `export AWS_PROFILE=cropcms`,
 `terraform init`, `plan -out=tfplan` and `apply "tfplan"` all worked in that account type.
 `bash infra/bootstrap-state.sh` also ran against that account: it created the state bucket, and the
-versioning, public-access-block and encryption calls all succeeded.
+versioning, public-access-block and encryption calls all succeeded. Step 7's port 22 check also
+ran: from a different network (a phone hotspot), `nc -zv -G 5 <elastic-ip> 22` timed out, which is
+the result step 7 predicts, while the same command from the allowed address succeeded. That was one
+attempt from one other address.
 
 ## What is not verified
 
