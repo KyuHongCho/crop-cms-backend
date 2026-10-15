@@ -157,6 +157,27 @@ checks the plumbing.
 The `cms` container healthcheck probes `GET /health` every 10 s, so the uvicorn access log shows it.
 It probes `/health`, never `/health/ready`, which would log a `SELECT 1` every 10 s.
 
+## Production database
+
+Production uses an RDS PostgreSQL database that only the server can reach, built by `infra/`
+([README](../infra/README.md#the-database)). It is not a container and has no `db` service.
+
+- **Reaching it.** There is no public path. For admin SQL, open an SSH tunnel through the server
+  from the laptop and run `psql` (for example in a `postgres:17` container) against the tunnel's
+  local port; the steps are in the infra README. The app role `cms_app` is created once by
+  `infra/db-bootstrap.sql`; it is not repeatable on purpose.
+- **Passwords.** `DB_PASSWORD` in `/opt/cms/.env` is the `cms_app` password and must be hex or
+  alphanumeric (see the variable table below). The administrator password (role `cms_master`) is
+  managed by RDS in AWS Secrets Manager, rotates about every seven days by default, and is read from
+  there when needed; the app never uses it.
+- **TLS.** The database requires TLS, and the production compose file sets `PGSSLMODE=require`. That
+  encrypts the connection but does not verify the server certificate (the `PGSSLMODE` row below).
+- **Backups.** Automated backups are kept 7 days by default (`db_backup_retention_days`, 1 to 35),
+  with point-in-time recovery inside that window. Deleting the database takes one final snapshot.
+  Restoring from a backup or snapshot is not set up or tried yet, and no one owns that runbook yet.
+- **Not verified.** None of this has run against a real RDS instance yet; the infra README lists what
+  is still open.
+
 ## Environment variables
 
 `docker-compose.yaml` passes some of these through from `.env` or the host and fixes others; the

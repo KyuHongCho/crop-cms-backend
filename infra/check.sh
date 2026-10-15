@@ -93,8 +93,13 @@ res = lambda kind: [(l[1], b) for k, l, b, *_ in allb if k == "resource" and l[0
 ALLOWED = {(22, "tcp"), (80, "tcp"), (443, "tcp"), (443, "udp")}
 seen = set()
 rules = res("aws_vpc_security_group_ingress_rule")
-check("ingress rules exist (the checks below are not vacuous)", len(rules) >= 4)
-for name, body in rules:
+WEB, DB = "aws_security_group.web.id", "aws_security_group.db.id"
+web_rules = [(n, b) for n, b in rules if attrs(b).get("security_group_id") == WEB]
+db_rules = [(n, b) for n, b in rules if attrs(b).get("security_group_id") == DB]
+check("every ingress rule names the web group or the db group", len(web_rules) + len(db_rules) == len(rules),
+      str([n for n, b in rules if attrs(b).get("security_group_id") not in (WEB, DB)]))
+check("ingress rules exist (the checks below are not vacuous)", len(web_rules) >= 4)
+for name, body in web_rules:
     a = attrs(body)
     proto = a.get("ip_protocol", "").strip('"')
     ports = (a.get("from_port"), a.get("to_port"))
@@ -110,8 +115,17 @@ for name, body in rules:
         check(f"ingress {name}: SSH source is exactly var.ssh_cidr", a.get("cidr_ipv4") == "var.ssh_cidr" and not extra,
               f"cidr_ipv4={a.get('cidr_ipv4')} extra={extra}")
 check("SSH is opened by exactly one rule", sum(1 for k in seen if k[0] == 22) == 1 and
-      sum(1 for _, b in rules if attrs(b).get("from_port") == "22") == 1)
+      sum(1 for _, b in web_rules if attrs(b).get("from_port") == "22") == 1)
 check("80/tcp, 443/tcp and 443/udp are all present", {(80, "tcp"), (443, "tcp"), (443, "udp")} <= seen)
+check("the db group has exactly one ingress rule", len(db_rules) == 1, str([n for n, _ in db_rules]))
+for name, body in db_rules:
+    a = attrs(body)
+    wide = [k for k in ("cidr_ipv4", "cidr_ipv6", "prefix_list_id") if k in a]
+    check(f"ingress {name}: db rule is tcp 5432 from aws_security_group.web only",
+          a.get("ip_protocol") == '"tcp"' and a.get("from_port") == "5432" and a.get("to_port") == "5432"
+          and a.get("referenced_security_group_id") == WEB and not wide, f"{a} {wide}")
+check("the db group has no egress rule",
+      not [n for n, b in res("aws_vpc_security_group_egress_rule") if attrs(b).get("security_group_id") != WEB])
 sgs = res("aws_security_group")
 check("a security group is defined", len(sgs) >= 1)
 for name, body in sgs:
@@ -146,6 +160,50 @@ for name, body in insts:
     check(f"instance {name}: root volume encrypted", attrs(sub.get("root_block_device", "")).get("encrypted") == "true")
     ebs = [b for k, _, b, *_ in blocks(body) or [] if k == "ebs_block_device"]
     check(f"instance {name}: every extra volume is encrypted", all(attrs(b).get("encrypted") == "true" for b in ebs))
+
+# --- database ---
+dbi = res("aws_db_instance")
+check("exactly one aws_db_instance", len(dbi) == 1, str(len(dbi)))
+for name, body in dbi:
+    a = attrs(body)
+    for k, want in (("engine", '"postgres"'), ("publicly_accessible", "false"), ("storage_encrypted", "true"),
+                    ("skip_final_snapshot", "false"), ("final_snapshot_identifier", "var.db_final_snapshot_name"),
+                    ("deletion_protection", "var.db_deletion_protection"),
+                    ("backup_retention_period", "var.db_backup_retention_days"),
+                    ("vpc_security_group_ids", "[aws_security_group.db.id]"),
+                    ("parameter_group_name", "aws_db_parameter_group.cms.name"),
+                    ("manage_master_user_password", "true")):
+        check(f"db instance {name}: {k} = {want}", a.get(k) == want, str(a.get(k)))
+    nested = [k for k, *_ in blocks(body) or []]
+    banned = [k for k in ("password", "password_wo", "password_wo_version", "snapshot_identifier", "replicate_source_db",
+                          "master_user_secret_kms_key_id", "restore_to_point_in_time", "s3_import") if k in a or k in nested]
+    check(f"db instance {name}: no password attribute, snapshot, replica, restore or custom secret key", not banned, str(banned))
+pgs = res("aws_db_parameter_group")
+check("a db parameter group forces TLS (rds.force_ssl = 1)", any(
+    attrs(b2).get("name") == '"rds.force_ssl"' and attrs(b2).get("value") == '"1"'
+    for _, b in pgs for k, _l, b2, *_ in blocks(b) or [] if k == "parameter"))
+ALLOWED_DB = {"aws_db_instance", "aws_db_subnet_group", "aws_db_parameter_group"}
+odd = [f"{k} {l[0]}" for k, l, *_ in allb if k in ("resource", "data") and l and l[0].startswith(("aws_db_", "aws_rds_"))
+       and (k == "data" or l[0] not in ALLOWED_DB)]
+check("only aws_db_instance, aws_db_subnet_group and aws_db_parameter_group among aws_db_* and aws_rds_*", not odd, str(odd))
+dv = lambda n: v.get(n, "")
+check("variable db_deletion_protection defaults to true", attrs(dv("db_deletion_protection")).get("default") == "true")
+check("variable db_backup_retention_days defaults to 7 and has a validation",
+      attrs(dv("db_backup_retention_days")).get("default") == "7" and any(k == "validation" for k, *_ in blocks(dv("db_backup_retention_days")) or []))
+check("variable db_final_snapshot_name defaults to cropcms-final and has a validation",
+      attrs(dv("db_final_snapshot_name")).get("default") == '"cropcms-final"' and any(k == "validation" for k, *_ in blocks(dv("db_final_snapshot_name")) or []))
+alltf = "\n".join(tf.values())
+leak = [w for w, rx in (("random_password", r"random_password"), ("secret_string", r"secret_string"),
+                        ("aws_secretsmanager_secret_version", r"aws_secretsmanager_secret_version"),
+                        ("provisioner", r"\bprovisioner\b|local-exec"), ("ephemeral block", r"(?m)^[ \t]*ephemeral[ \t]+\"")) if re.search(rx, alltf)]
+check("no generated password, secret read, ephemeral block or provisioner in any .tf", not leak, str(leak))
+for k, l, b, *_ in allb:
+    if k != "output":
+        continue
+    val = attrs(b).get("value", "")
+    ok = not re.search(r"(?i)passw|secret_string", val) and (
+        "master_user_secret" not in val or val == "aws_db_instance.cms.master_user_secret[0].secret_arn")
+    check(f"output {l[0]}: value does not expose a password or secret string", ok, val)
 
 # --- budget ---
 budgets = res("aws_budgets_budget")
@@ -184,10 +242,14 @@ check("versions.tf (backend and provider) and bootstrap-state.sh name the same r
 # --- secrets and identifiers ---
 CANONICAL = "099720109477"  # public AMI publisher, not an account of ours
 DOC_IP = re.compile(r"^(0\.0\.0\.0|10\..*|192\.0\.2\..*|198\.51\.100\..*|203\.0\.113\..*)$")
+# Catches PASSWORD 'x', E'x', U&'x', = 'x', $$x$$ and a line break after the keyword, in any case.
+# A psql variable (PASSWORD :'name') and prose pass.
+SQL_PW = r"(?i)\bpassword\s*=?\s*(?:e|u&)?(?:'[^']{4,}'|\$(?:[a-z_]\w*)?\$)"
 patterns = {
     "private key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
     "access key id": r"\b(AKIA|ASIA)[0-9A-Z]{16}\b",
     "quoted secret value": r"""(?i)(secret|passw(or)?d|token|api_?key)(_\w+)?\s*[=:]\s*["'][^"'$\s]{8,}["']""",
+    "SQL password literal": SQL_PW,
 }
 files = [p for p in sorted(infra.rglob("*")) if p.is_file() and ".terraform" not in p.parts and
          not re.search(r"\.tfstate|\.tfvars(\.json)?$", p.name)]
@@ -204,7 +266,25 @@ for p in files:
         bad += [f"{p.name}: 12-digit id {i}" for i in re.findall(r"(?<![0-9A-Za-z])[0-9]{12}(?![0-9A-Za-z])", t) if i != CANONICAL]
         bad += [f"{p.name}: IPv4 {i}" for i in re.findall(r"(?<![\w.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![\w.])", t)
                 if all(int(o) < 256 for o in i.split(".")) and not DOC_IP.match(i)]
-check("no private key, access key id, quoted secret, account id or real IP in infra/ files", not bad, "; ".join(bad))
+check("no private key, access key id, quoted secret, SQL password literal, account id or real IP in infra/ files", not bad, "; ".join(bad))
+
+# Fixtures are assembled here, so this file carries no literal the rule would flag.
+kw = "PASS" + "WORD"
+lit = "hunter2" + "hunter2"
+flagged = [f"CREATE ROLE a LOGIN {kw} '{lit}'", f"create role a login {kw.lower()} '{lit}'", f"{kw} E'abcdefg'",
+           f"{kw} $$abcdefg$$", f"{kw.lower()} $tag$abcdefg$tag$", f"{kw} = 'abcdefgh'",
+           f"ALTER ROLE cms_app {kw} '<new " + "pw>'", f"{kw}\n'abcdefgh'", f"{kw} U&'abcdefg'"]
+clean = [f"CREATE ROLE cms_app LOGIN {kw} :'app_pw';", f"ALTER ROLE cms_app {kw} :'new_pw'",
+         "Reset the role's " + kw.lower() + " with ALTER ROLE and a psql variable.", f"{kw} $1",
+         "manage_master_user_" + kw.lower() + " = true", kw.lower() + "_wo = var.x", "DB_" + kw + "=", "PG" + kw + " is read from the environment"]
+check("SQL password rule flags all 9 literal forms", all(re.search(SQL_PW, s) for s in flagged),
+      str([s for s in flagged if not re.search(SQL_PW, s)]))
+check("SQL password rule passes all 8 safe forms", not any(re.search(SQL_PW, s) for s in clean),
+      str([s for s in clean if re.search(SQL_PW, s)]))
+shipped = [infra / "README.md", infra / "db-bootstrap.sql", repo / "docs" / "operations.md", repo / ".env.example"]
+check("shipped docs and SQL pass the SQL password rule",
+      all(not re.search(SQL_PW, p.read_text()) for p in shipped if p.is_file()),
+      str([p.name for p in shipped if p.is_file() and re.search(SQL_PW, p.read_text())]))
 
 # --- git ---
 def git(*a):
@@ -237,7 +317,7 @@ if [ "$static_only" -eq 0 ]; then
 
   echo "-- shellcheck"
   if dk -v "$PWD:/mnt:ro" "$SHELLCHECK_IMAGE" -x -s bash \
-      bootstrap-state.sh bootstrap-state.test.sh check.sh user_data.sh; then
+      bootstrap-state.sh bootstrap-state.test.sh db-bootstrap.test.sh check.sh user_data.sh; then
     echo "ok   shellcheck is clean"
   else
     echo "FAIL shellcheck"; fails=$((fails + 1))
@@ -270,7 +350,7 @@ if [ "$static_only" -eq 0 ]; then
   mkdir "$tmp/vars"
   cp variables.tf "$tmp/vars/"
   cat >"$tmp/vars/probe.tf" <<'TF'
-output "probe" { value = [var.ssh_cidr, var.ssh_public_key, var.budget_email, var.instance_type] }
+output "probe" { value = [var.ssh_cidr, var.ssh_public_key, var.budget_email, var.instance_type, var.db_backup_retention_days, var.db_deletion_protection, var.db_final_snapshot_name] }
 TF
   cat >"$tmp/vars/cases.txt" <<'CASES'
 ssh_cidr|203.0.113.7/32|accept
@@ -294,6 +374,21 @@ budget_email|me@example.com|accept
 budget_email|not-an-address|reject
 instance_type|t4g.small|accept
 instance_type|t3.micro|reject
+db_backup_retention_days|0|reject
+db_backup_retention_days|36|reject
+db_backup_retention_days|1|accept
+db_backup_retention_days|7|accept
+db_backup_retention_days|35|accept
+db_backup_retention_days|1.5|reject
+db_deletion_protection|true|accept
+db_deletion_protection|false|accept
+db_deletion_protection|maybe|reject
+db_final_snapshot_name|cropcms-final|accept
+db_final_snapshot_name|1cropcms|reject
+db_final_snapshot_name|cropcms-|reject
+db_final_snapshot_name|crop--cms|reject
+db_final_snapshot_name||reject
+db_final_snapshot_name|Crop-Cms-9|accept
 CASES
   # Split so this file does not itself contain a private-key header for the secret scan to find.
   printf 'ssh_public_key|%s|reject\n' "-----BEGIN OPENSSH ""PRIVATE KEY-----" >>"$tmp/vars/cases.txt"
@@ -307,7 +402,7 @@ while IFS='|' read -r name value want; do
   if [ "$want" = accept ]; then
     [ "$rc" -eq 0 ] && r=ok || r=FAIL
   else
-    [ "$rc" -ne 0 ] && echo "$out" | grep -q "Invalid value for variable" && echo "$out" | grep -q "variable \"$name\"" && r=ok || r=FAIL
+    [ "$rc" -ne 0 ] && echo "$out" | grep -Eq "Invalid value for (input )?variable" && echo "$out" | grep -q "variable \"$name\"" && r=ok || r=FAIL
   fi
   [ "$r" = ok ] || bad=$((bad + 1))
   echo "$r $name = '$value' must be ${want}ed"
@@ -320,6 +415,9 @@ SH
   else
     echo "FAIL variable validation"; fails=$((fails + 1))
   fi
+
+  echo "-- db-bootstrap.sql in a throwaway database (pulls images and pip packages on a first run)"
+  bash ./db-bootstrap.test.sh || fails=$((fails + 1))
 fi
 
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails check group(s) FAILED"; exit 1; fi

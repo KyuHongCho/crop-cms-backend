@@ -42,6 +42,34 @@ variable "instance_type" {
   }
 }
 
+variable "db_backup_retention_days" {
+  description = "Days of automated backups and point-in-time recovery. 0 is refused because it switches both off."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.db_backup_retention_days >= 1 && var.db_backup_retention_days <= 35 && var.db_backup_retention_days == floor(var.db_backup_retention_days)
+    error_message = "db_backup_retention_days must be a whole number from 1 to 35."
+  }
+}
+
+variable "db_deletion_protection" {
+  description = "Blocks terraform destroy of the database. Turn it off, apply, then destroy, only to remove the database on purpose."
+  type        = bool
+  default     = true
+}
+
+variable "db_final_snapshot_name" {
+  description = "Name of the snapshot taken when the database is destroyed. A second destroy fails while an old snapshot has this name."
+  type        = string
+  default     = "cropcms-final"
+
+  validation {
+    condition     = can(regex("^[A-Za-z][A-Za-z0-9-]{0,254}$", var.db_final_snapshot_name)) && !can(regex("--|-$", var.db_final_snapshot_name))
+    error_message = "db_final_snapshot_name must be 1-255 letters, digits or hyphens, start with a letter, not end with a hyphen and not contain two hyphens in a row."
+  }
+}
+
 variable "monthly_budget_usd" {
   description = "Monthly budget in USD. Alerts: actual spend over 80 percent of it, forecast over 100 percent."
   type        = number
