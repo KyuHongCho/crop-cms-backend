@@ -2,8 +2,8 @@
 
 This folder builds one small server (EC2) in the AWS region eu-north-1 (Stockholm) with Terraform.
 It has Docker installed, a fixed public IP address, and a firewall that lets the whole internet reach
-ports 80 and 443 only. SSH (port 22) is open to your own IP address and nobody else. It does not
-create a database; that is a separate piece of work.
+ports 80 and 443 only. SSH (port 22) is open to your own IP address and nobody else. It also
+creates a PostgreSQL database (RDS) that only that server can reach; see "The database".
 
 This README was written before anything was applied to a real AWS account. A first real run on
 2026-10-14 confirmed part of it; see "What is verified" and "What is not verified" at the end, and
@@ -70,7 +70,8 @@ Billing" (Account page in the console).
   DescribeImages, DescribeKeyPairs, DescribeSecurityGroups, DescribeSecurityGroupRules,
   DescribeInstances, DescribeInstanceAttribute, DescribeInstanceCreditSpecifications,
   DescribeInstanceTypes, DescribeVolumes, DescribeAddresses, DescribeAddressesAttribute,
-  DescribeTags. (DescribeRouteTables is only logged as a warning if denied; the others fail.)
+  DescribeTags, and DescribeSubnets (the database's subnet group reads the default subnets).
+  (DescribeRouteTables is only logged as a warning if denied; the others fail.)
 - EC2 write: ImportKeyPair, DeleteKeyPair, CreateSecurityGroup, DeleteSecurityGroup,
   AuthorizeSecurityGroupIngress, AuthorizeSecurityGroupEgress, RevokeSecurityGroupIngress,
   RevokeSecurityGroupEgress, ModifySecurityGroupRules, RunInstances, TerminateInstances,
@@ -82,6 +83,17 @@ Billing" (Account page in the console).
 - Not needed to create, destroy or replace the server, but needed if you later change the root
   volume size or type in place: ModifyVolume and DescribeVolumesModifications. Also optional:
   UpdateSecurityGroupRuleDescriptionsIngress and Egress, and DescribeNetworkInterfaces.
+- RDS (the database): CreateDBInstance, ModifyDBInstance, DeleteDBInstance, DescribeDBInstances,
+  CreateDBSubnetGroup, ModifyDBSubnetGroup, DeleteDBSubnetGroup, DescribeDBSubnetGroups,
+  CreateDBParameterGroup, ModifyDBParameterGroup, DeleteDBParameterGroup, DescribeDBParameterGroups,
+  DescribeDBParameters, AddTagsToResource, RemoveTagsFromResource, ListTagsForResource,
+  CreateDBSnapshot and DescribeDBSnapshots (the final snapshot), and DescribeDBEngineVersions. RDS
+  may also need `iam:CreateServiceLinkedRole` for `rds.amazonaws.com` the first time.
+- Secrets Manager and KMS, for the master password RDS manages: `kms:DescribeKey`,
+  `secretsmanager:CreateSecret` and `secretsmanager:TagResource` (AWS lists these three for creating
+  such a database). Probably also `secretsmanager:DescribeSecret` and `secretsmanager:DeleteSecret`
+  for later changes and destroy, and `secretsmanager:GetSecretValue` to read the password; those
+  three are guesses.
 - Budgets: `budgets:ViewBudget`, `budgets:ModifyBudget`, `budgets:TagResource`,
   `budgets:UntagResource`, `budgets:ListTagsForResource`. The tag actions are needed because the
   provider tags every resource; without them `apply` fails on the budget.
@@ -137,7 +149,9 @@ everything from the `infra/` folder.
    and then `terraform apply tfplan`.
 
 5. **Apply.** `terraform apply tfplan` applies exactly the plan you read, and does not ask for
-   `yes`. It prints the IP, the instance id and an ssh command.
+   `yes`. It prints the IP, the instance id, an ssh command and the database's address and name. The
+   database takes several minutes to become available. Then follow "The database" for the one-time
+   setup of the app's database role.
 
 6. **Log in.**
 
@@ -169,11 +183,112 @@ everything from the `infra/` folder.
 
 8. **Destroy** when you are done: `terraform destroy`. This deletes the server and its disk, so
    `/opt/cms/.env`, the Caddy certificates and the site files are gone, and the Elastic IP is
-   released: a new one gets a new address, so the DNS record must be pointed at it again. The state
-   bucket stays (it costs almost nothing); delete it by hand in the console if you want it gone.
+   released: a new one gets a new address, so the DNS record must be pointed at it again. It also
+   deletes the database, but only after you turn deletion protection off (see "The database");
+   RDS then takes a final snapshot first. With protection still on, a plain destroy removes the
+   server and the IP and then fails on the database. The state bucket stays (it costs almost nothing); delete
+   it by hand in the console if you want it gone.
 
 Being in the `docker` group on the server is the same as being root there, so keep the SSH key
 private and protected by its passphrase.
+
+## The database
+
+`terraform apply` creates a PostgreSQL 17 database on RDS: `db.t4g.micro`, 20 GB gp3, encrypted,
+one zone, not publicly accessible. Its own firewall group, `cropcms-db`, has one inbound rule,
+5432/tcp from the group `cropcms-web`, and no outbound rule. A parameter group requires TLS
+(`rds.force_ssl`); the app also sets `PGSSLMODE=require`, which encrypts but does not check the
+server certificate. RDS creates the administrator role `cms_master` and keeps its password in AWS
+Secrets Manager. The password is in no file here, and Terraform's state and saved plan hold only
+the address of that entry (output `db_master_secret_arn`); that is what AWS's and HashiCorp's
+documentation say, and no real state was inspected. RDS rotates the password about every seven
+days by default (AWS documentation), so read it fresh each time, never copy it down. The entry
+costs about 0.40 USD a month. The app never uses this role: it uses `cms_app`, below.
+
+**Before the first apply (read-only).** Check that the region offers what the configuration asks
+for. If either command prints nothing, stop.
+
+```
+aws rds describe-db-engine-versions --engine postgres --default-only --region eu-north-1 \
+  --query 'DBEngineVersions[?starts_with(EngineVersion,`17`)].EngineVersion'
+aws rds describe-orderable-db-instance-options --engine postgres --engine-version <that version> \
+  --db-instance-class db.t4g.micro --region eu-north-1
+```
+
+**Settings.** `db_backup_retention_days` (default 7, allowed 1 to 35): days of automated backups.
+`db_deletion_protection` (default true). `db_final_snapshot_name` (default `cropcms-final`).
+If AWS refuses 7 days at apply, set `db_backup_retention_days = 1` in `terraform.tfvars`. Whether
+it does is not known: AWS documents no Free plan cap on retention. A refused database create can
+leave the other four new resources in place (the two firewall objects, the subnet group and the
+parameter group) and the saved `tfplan` stale; fix the cause, run `terraform plan -out=tfplan`
+again, then apply.
+
+**One-time setup of the app role.** The database admits only the server, so run
+`db-bootstrap.sql` from your laptop through an SSH tunnel via the server; the master password then
+never touches the server. It needs Docker on the laptop (the `postgres:17` image supplies `psql`).
+The command below uses `host.docker.internal`, which Docker Desktop provides; it has not been
+tried on Linux.
+
+Terminal A, left running (take the address from `terraform output -raw db_endpoint`):
+
+```
+ssh -N -L 15432:<db_endpoint>:5432 -i ~/.ssh/id_ed25519 ubuntu@<elastic-ip>
+```
+
+Terminal B, from the repository root:
+
+```
+PGPASSWORD=$(aws secretsmanager get-secret-value --secret-id <db_master_secret_arn> \
+  --query SecretString --output text \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
+export PGPASSWORD
+APP_PW=$(openssl rand -hex 24)
+export APP_PW
+docker run --rm -i -e PGPASSWORD -e APP_PW postgres:17 \
+  psql "host=host.docker.internal port=15432 dbname=cms user=cms_master sslmode=require" \
+  -f - < infra/db-bootstrap.sql
+```
+
+Before you close this shell, copy `APP_PW` somewhere private (a password manager): it is the only
+copy of the app role's password. On the server it becomes `DB_PASSWORD` in `/opt/cms/.env`
+(mode 600), next to `DB_HOST` set to the `db_endpoint` output. It must stay hex or alphanumeric
+(`.env.example` says why). Expect `CREATE EXTENSION`, `CREATE ROLE` and two `GRANT` lines. An
+`APP_PW` that is empty or shorter than 16 characters stops the script before it creates anything.
+The SQL is not repeatable: a second run fails with `role "cms_app" already exists`, on purpose. To
+reset a lost password, connect the same way as the master user, load the new value into a psql
+variable (`\getenv new_pw NEW_PW` after exporting `NEW_PW`) and run `ALTER ROLE cms_app` with
+`PASSWORD` followed by `:'new_pw'`. If the tunnel does not work, run the same `docker run` on the
+server and pipe the master password in over ssh stdin, never as an argument.
+
+**Checks after the setup (run by you).**
+
+- Through the tunnel as `cms_app` (set `PGPASSWORD` to `APP_PW`, `user=cms_app`):
+  `SELECT extname FROM pg_extension;` lists `vector`;
+  `SELECT '[1,2,3]'::vector <=> '[1,2,4]'::vector;` returns a number; `SHOW rds.force_ssl;` prints
+  `on`; a connection with `sslmode=disable` is refused.
+- On the server, `getent hosts <db_endpoint>` shows a private address.
+- From the laptop without the tunnel, `nc -zv -G 5 <db_endpoint> 5432` times out (`-G` is the macOS
+  flag; use `-w 5` on Linux).
+- `SHOW max_connections;` as `cms_app`. The app's pool (5 plus 10 overflow, one worker) should be
+  far below it; write the figure under "What is verified".
+
+**Undo before real data exists.** Deletion protection blocks `terraform destroy`. Set
+`db_deletion_protection = false` in `terraform.tfvars`, run `terraform apply`, then destroy only the
+database objects, because a plain `terraform destroy` also removes the server and releases the IP:
+
+```
+terraform destroy -target=aws_db_instance.cms -target=aws_db_parameter_group.cms \
+  -target=aws_db_subnet_group.cms -target=aws_vpc_security_group_ingress_rule.db_from_web \
+  -target=aws_security_group.db
+```
+
+The destroy takes a final snapshot named by `db_final_snapshot_name`. AWS says snapshots cost money
+until deleted (RDS User Guide, "Deleting a DB instance"). A second destroy fails while a snapshot
+with that name exists: delete the old snapshot, or set a new name in `terraform.tfvars` before
+destroying again. Automated backups go with the instance (the provider default, not run), so only
+that snapshot survives.
+Restoring from it is a console or CLI task plus a Terraform import, not covered here. Never
+`-replace` the database without taking a snapshot first.
 
 ## If something fails
 
@@ -225,8 +340,12 @@ without replacing the server, log in with the old key and append the new public 
 
 ## What the plan should show
 
-`Plan: 11 to add, 0 to change, 0 to destroy.` and these outputs: `elastic_ip`, `instance_id`,
-`ssh_command`. Check:
+On an empty state, `Plan: 16 to add, 0 to change, 0 to destroy.`; on a state where the server
+already exists, the database adds exactly `Plan: 5 to add, 0 to change, 0 to destroy.` (the
+database, its subnet group, parameter group and security group, and the one inbound rule), with no
+change to the server, the IP, `cropcms-web` or the budget. If anything else changes, stop. The
+outputs are `elastic_ip`, `instance_id`, `ssh_command`, `db_endpoint`, `db_name`,
+`db_master_username` and `db_master_secret_arn`. Check:
 
 - **Firewall (`cropcms-web`):** inbound 22/tcp from your `/32`; 80/tcp, 443/tcp and 443/udp from
   `0.0.0.0/0`; nothing else inbound; all outbound. If port 22 shows any other source, stop.
@@ -238,34 +357,46 @@ without replacing the server, log in with the old key and append the new public 
   `gp3`, `10` GB, `encrypted = true`, `key_name = "cropcms-admin"`.
 - **Key pair:** `public_key` is your `ssh-ed25519 ...` line.
 - **Elastic IP:** one `aws_eip` and one `aws_eip_association`.
+- **Database (`cropcms`):** `publicly_accessible = false`, `storage_encrypted = true`,
+  `deletion_protection = true`, `backup_retention_period = 7`, `manage_master_user_password = true`,
+  no `password` attribute, and the final snapshot name from `db_final_snapshot_name`.
+  `cropcms-db` has one inbound rule, 5432/tcp, whose source is `cropcms-web` and not an address.
 - **Budget:** `limit_amount = "25"`, `USD`, `MONTHLY`, two notifications to your e-mail address
   (`ACTUAL` above 80 percent, `FORECASTED` above 100 percent), and `include_credit = false`.
 
 ## Cost and the spend alert
 
 What is created here costs about 10.8 USD a month before tax: server 6.28, disk 0.84, public IP
-3.65 (AWS list prices for Stockholm, not re-checked). A database added later brings the whole
-stack to about 24.85 USD a month before tax.
+3.65 (AWS list prices for Stockholm, not re-checked). The database adds about 14.48 USD (instance
+11.68, 20 GB gp3 2.40, the password entry 0.40), which brings the whole stack to about 25.25 USD a
+month before tax. Backup storage beyond what AWS includes, data transfer and tax are not counted.
 
 The budget `cropcms-monthly` is 25 USD a month. It e-mails you when the actual spend passes 80
 percent (20 USD) and when AWS forecasts that the month will pass 100 percent (25 USD). The alert
 counts tax, and credits are not subtracted, so it shows what you really use rather than what is
-left after credits. With only this server (about 10.8 USD) neither alert should fire. The forecast
+left after credits. With only the server (about 10.8 USD) neither alert would fire. The forecast
 alert stays silent at first: AWS needs approximately 5 weeks of usage data before it can forecast.
 
-## After a database is added
+## With the database
 
-The database password will then be stored in the Terraform state file. That makes the state bucket
-sensitive, so harden it at that point (for example refuse non-TLS access and limit who can read it).
+The default of 25 was set for the server alone. With the database the stack is about 25.25 USD a
+month before tax, above it, so the 20 USD actual alert will fire once a month (AWS sends an actual
+alert once per budget period; see
+https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-best-practices.html) and the
+forecast alert at 25 USD will fire every month, until you raise the budget. The default stays 25 in
+the code (`check.sh` pins it); put `monthly_budget_usd = 32` in your untracked `terraform.tfvars`
+before the first apply of the database. 32 is the rule below applied to 25.25 and rounded up
+(25.25 / 0.8 is about 31.6), before any tax, whose rate is unknown. After the first full month,
+read the real monthly total (with tax, if any) in the Billing console, and set `monthly_budget_usd`
+so that 80 percent of it is above that total.
 
-The budget (`monthly_budget_usd`, default 25) assumes this server only. With a database the stack
-costs about 24.85 USD a month before tax, so the 20 USD actual alert will fire once a month (AWS
-sends an actual alert once per budget period; see
-https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-best-practices.html), and the
-forecast alert at 25 USD can fire repeatedly, because the forecast sits close to 25 (24.85 before
-tax) and may cross back and forth within a period. After the first full month, read the real
-monthly total (with tax, if any) in the Billing console, and set `monthly_budget_usd` so that 80
-percent of it is above that total.
+The master password is not in Terraform state, because RDS manages it; state still holds the
+database's other settings, so keep the bucket private anyway.
+
+**Free plan.** If the AWS account is on the Free plan, AWS's plan page says it ends after six
+months or when the credits run out; the account is then suspended and its data kept for 90 days
+unless it is upgraded (read once, not re-checked here). A stack of about 25 USD a month would use
+credits of 100 to 200 USD up in four to eight months. Moving to the Paid plan is your decision.
 
 ## Checks without AWS
 
@@ -274,7 +405,16 @@ percent of it is above that total.
 an encrypted disk, if the budget alerts change, or if the bootstrap script allows public access. It
 also rejects `dynamic` ingress or egress blocks, `module` blocks and `.tf.json` files, which could
 hide rules from these checks. It also runs `terraform fmt`, `init -backend=false` and `validate`,
-and checks that bad `ssh_cidr` values are refused. CI runs it. `bash infra/check.sh --static`
+and checks that bad `ssh_cidr` values and bad database settings (backup days, final snapshot name,
+deletion protection) are refused. For the database it fails if the database group admits anything
+but one 5432/tcp rule from `cropcms-web`, if the instance is public, unencrypted, without a final
+snapshot, without deletion protection from the variable, or sets a password, snapshot, replica or
+restore source, if a database resource other than the instance, subnet group or parameter group
+appears, if a generated password, secret read, `provisioner` or `ephemeral` block appears, if an
+output could expose a password, or if any file here contains a quoted SQL password literal
+(`PASSWORD '...'` in any case, `E'...'`, `$$...$$`). `infra/db-bootstrap.test.sh` runs the
+bootstrap SQL in a throwaway local pgvector container and connects through the app's own URL
+lines, which downloads images and Python packages. CI runs it all. `bash infra/check.sh --static`
 skips the Docker parts.
 
 ## What is verified
@@ -291,6 +431,12 @@ ran: from a different network (a phone hotspot), `nc -zv -G 5 <elastic-ip> 22` t
 the result step 7 predicts, while the same command from the allowed address succeeded. That was one
 attempt from one other address.
 
+The database setup SQL (`db-bootstrap.sql`) ran in a throwaway local `pgvector/pgvector:pg17`
+container: it created the extension and the `cms_app` role, `cms_app` created a `vector(3)` table
+and ran `<=>`, a second run failed with `role "cms_app" already exists`, and `app/db/db.py` and
+`app/db/migrate_db.py` connected with a hex password while an `@` in the password failed. That is
+a local PostgreSQL, not RDS.
+
 ## What is not verified
 
 - Running the bootstrap script a second time ("safe to run again") against the real account was not
@@ -300,3 +446,15 @@ attempt from one other address.
 - The IAM rights lists above are derived, not run, and that Budgets works for an IAM user is
   unchecked.
 - The forecast alert and the prices above are unchecked.
+- Nothing about the database was run against AWS. Unknown until an apply: that eu-north-1 offers
+  PostgreSQL 17 and `db.t4g.micro`; that the Free plan or the project account policy accepts RDS,
+  Secrets Manager or 7 days of backups; at least two default subnets and a private DNS name for
+  the endpoint; free backup storage behaviour; that `CREATE EXTENSION vector` works on the minor
+  version RDS picks; the effect of `rds.force_ssl`; the real `max_connections`; that sshd on the
+  server forwards the tunnel; that `host.docker.internal` reaches the tunnel (not rerun in this
+  change); and the real bill. The `Plan: 5 to add` figure and the steps under "Checks after the
+  setup" are for you to confirm.
+- The Secrets Manager and RDS lines in the IAM lists are derived, not run; the last three
+  Secrets Manager actions are guesses.
+- The Free plan limits above (six months, credits, suspension) are from AWS's plan page as read
+  once. Whether the Free plan allows RDS at all was not found.
