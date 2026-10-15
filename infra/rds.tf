@@ -72,5 +72,7 @@ resource "aws_db_instance" "cms" {
   final_snapshot_identifier = var.db_final_snapshot_name
 
   auto_minor_version_upgrade = true
-  apply_immediately          = true
+  # A later change to the class, engine version or storage type is applied at once, not in the
+  # maintenance window; on this single-AZ instance one that reboots means downtime.
+  apply_immediately = true
 }

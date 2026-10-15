@@ -51,6 +51,19 @@ done
 
 sup() { docker exec -i -e APP_PW -e NEW_PW "$name" psql -U postgres -d cms -X -v ON_ERROR_STOP=1 "$@"; }
 
+# An empty or short APP_PW must stop the script before it creates a role or the extension.
+refused=ok
+for bad in "" short; do
+  if APP_PW="$bad" sup -q -f - <"$here/db-bootstrap.sql" >"$tmp/bad.log" 2>&1; then refused=no; fi
+done
+left=$(docker exec "$name" psql -U postgres -d cms -X -Atc "SELECT (SELECT count(*) FROM pg_roles WHERE rolname = 'cms_app') + (SELECT count(*) FROM pg_extension WHERE extname = 'vector')")
+if [ "$refused" = ok ] && [ "$left" = 0 ]; then
+  check "an empty or short APP_PW is refused and nothing is created" ok
+else
+  check "an empty or short APP_PW is refused and nothing is created" no
+  echo "refused=$refused, objects left behind=$left"
+fi
+
 # A space and a quote exercise the psql-variable quoting that a hex password would not.
 APP_PW="it's a $(openssl rand -hex 8)"
 export APP_PW

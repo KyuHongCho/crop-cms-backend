@@ -252,12 +252,13 @@ docker run --rm -i -e PGPASSWORD -e APP_PW postgres:17 \
 Before you close this shell, copy `APP_PW` somewhere private (a password manager): it is the only
 copy of the app role's password. On the server it becomes `DB_PASSWORD` in `/opt/cms/.env`
 (mode 600), next to `DB_HOST` set to the `db_endpoint` output. It must stay hex or alphanumeric
-(`.env.example` says why). Expect `CREATE EXTENSION`, `CREATE ROLE` and two `GRANT` lines. The SQL
-is not repeatable: a second run fails with `role "cms_app" already exists`, on purpose. To reset a
-lost password, connect the same way as the master user, load the new value into a psql variable
-(`\getenv new_pw NEW_PW` after exporting `NEW_PW`) and run `ALTER ROLE cms_app` with `PASSWORD`
-followed by `:'new_pw'`. If the tunnel does not work, run the same `docker run` on the server and
-pipe the master password in over ssh stdin, never as an argument.
+(`.env.example` says why). Expect `CREATE EXTENSION`, `CREATE ROLE` and two `GRANT` lines. An
+`APP_PW` that is empty or shorter than 16 characters stops the script before it creates anything.
+The SQL is not repeatable: a second run fails with `role "cms_app" already exists`, on purpose. To
+reset a lost password, connect the same way as the master user, load the new value into a psql
+variable (`\getenv new_pw NEW_PW` after exporting `NEW_PW`) and run `ALTER ROLE cms_app` with
+`PASSWORD` followed by `:'new_pw'`. If the tunnel does not work, run the same `docker run` on the
+server and pipe the master password in over ssh stdin, never as an argument.
 
 **Checks after the setup (run by you).**
 

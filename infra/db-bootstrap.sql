@@ -3,6 +3,13 @@
 -- on CREATE ROLE, which is the intent. The password comes from the environment, never this file.
 \set ON_ERROR_STOP on
 \getenv app_pw APP_PW
+-- An empty password would create a role that can never log in, so stop before creating anything.
+SELECT length(:'app_pw') >= 16 AS app_pw_ok \gset
+\if :app_pw_ok
+\else
+\echo 'APP_PW must be at least 16 characters; nothing was created.'
+SELECT 1 / 0;
+\endif
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE ROLE cms_app LOGIN PASSWORD :'app_pw';
 GRANT CONNECT ON DATABASE cms TO cms_app;
