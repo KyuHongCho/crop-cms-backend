@@ -43,9 +43,9 @@ variable "instance_type" {
 }
 
 variable "db_backup_retention_days" {
-  description = "Days of automated backups and point-in-time recovery. 0 is refused because it switches both off."
+  description = "Days of automated backups and point-in-time recovery. 0 is refused because it switches both off. On one real apply the Free plan refused 7 and 3 and accepted 1; 2 was not tried, and a Paid plan may allow more (untested)."
   type        = number
-  default     = 7
+  default     = 1
 
   validation {
     condition     = var.db_backup_retention_days >= 1 && var.db_backup_retention_days <= 35 && var.db_backup_retention_days == floor(var.db_backup_retention_days)

@@ -209,18 +209,25 @@ costs about 0.40 USD a month. The app never uses this role: it uses `cms_app`, b
 for. If either command prints nothing, stop.
 
 ```
-aws rds describe-db-engine-versions --engine postgres --default-only --region eu-north-1 \
-  --query 'DBEngineVersions[?starts_with(EngineVersion,`17`)].EngineVersion'
-aws rds describe-orderable-db-instance-options --engine postgres --engine-version <that version> \
-  --db-instance-class db.t4g.micro --region eu-north-1
+aws rds describe-db-engine-versions --engine postgres --region eu-north-1 \
+  --query "DBEngineVersions[?starts_with(EngineVersion,'17')].EngineVersion" --output text
+aws rds describe-orderable-db-instance-options --engine postgres --engine-version <17.x> \
+  --db-instance-class db.t4g.micro --region eu-north-1 \
+  --query "OrderableDBInstanceOptions[].[DBInstanceClass,StorageType,MultiAZCapable]" --output text
 ```
 
-**Settings.** `db_backup_retention_days` (default 7, allowed 1 to 35): days of automated backups.
+The first should list 17.x minors. For `<17.x>` use the highest one listed (compare the numbers
+after the dot: 17.11 is higher than 17.9). AWS creates its default minor for `engine_version =
+"17"` (17.9 on the real apply, while 17.11 was the highest listed), so this checks the region, not
+that exact minor. The second must list `gp3`.
+
+**Settings.** `db_backup_retention_days` (default 1, allowed 1 to 35): days of automated backups.
 `db_deletion_protection` (default true). `db_final_snapshot_name` (default `cropcms-final`).
-If AWS refuses 7 days at apply, set `db_backup_retention_days = 1` in `terraform.tfvars`. Whether
-it does is not known: AWS documents no Free plan cap on retention. A refused database create can
-leave the other four new resources in place (the two firewall objects, the subnet group and the
-parameter group) and the saved `tfplan` stale; fix the cause, run `terraform plan -out=tfplan`
+On one real apply, AWS's Free plan refused 7 days and then 3 (`FreeTierRestrictionError`); it did
+not state the maximum, accepted 1, and 2 was not tried. A Paid plan may allow more (untested): set
+`db_backup_retention_days` in `terraform.tfvars` and apply. On that run a refused database create
+left the other four new resources (the two firewall objects, the subnet group and the parameter
+group) in place and the saved `tfplan` stale; fix the cause, run `terraform plan -out=tfplan`
 again, then apply.
 
 **One-time setup of the app role.** The database admits only the server, so run
@@ -232,8 +239,10 @@ tried on Linux.
 Terminal A, left running (take the address from `terraform output -raw db_endpoint`):
 
 ```
-ssh -N -L 15432:<db_endpoint>:5432 -i ~/.ssh/id_ed25519 ubuntu@<elastic-ip>
+ssh -N -L 15432:<db_endpoint>:5432 -i <your-private-key-file> ubuntu@<elastic-ip>
 ```
+
+`<your-private-key-file>` is the same private key file you use to ssh to the server.
 
 Terminal B, from the repository root:
 
@@ -264,8 +273,11 @@ server and pipe the master password in over ssh stdin, never as an argument.
 
 - Through the tunnel as `cms_app` (set `PGPASSWORD` to `APP_PW`, `user=cms_app`):
   `SELECT extname FROM pg_extension;` lists `vector`;
-  `SELECT '[1,2,3]'::vector <=> '[1,2,4]'::vector;` returns a number; `SHOW rds.force_ssl;` prints
-  `on`; a connection with `sslmode=disable` is refused.
+  `SELECT '[1,2,3]'::vector <=> '[1,2,4]'::vector;` returns a number;
+  `SELECT ssl, version FROM pg_stat_ssl WHERE pid = pg_backend_pid();` shows `t`; a connection with
+  `sslmode=disable` is refused with `no pg_hba.conf entry ... no encryption`. (`SHOW rds.force_ssl;`
+  does not work: RDS answers `unrecognized configuration parameter`.) The refusal proves TLS is
+  required, but cannot tell our setting from RDS's own default.
 - On the server, `getent hosts <db_endpoint>` shows a private address.
 - From the laptop without the tunnel, `nc -zv -G 5 <db_endpoint> 5432` times out (`-G` is the macOS
   flag; use `-w 5` on Linux).
@@ -317,6 +329,20 @@ Restoring from it is a console or CLI task plus a Terraform import, not covered 
   right now, or your account may not use it. Set `instance_type = "t4g.small"` (or another ARM size)
   in `terraform.tfvars` and run `terraform apply` again. A larger size costs more.
 
+## If you lose the SSH key
+
+The key's passphrase cannot be recovered; keep it in a password manager. With a lost key, make a
+new key pair, put the new PUBLIC key in `terraform.tfvars` (`ssh_public_key`), and run
+`terraform plan -out=tfplan -replace=aws_instance.cms`. Check that the plan replaces only the key
+pair, the server and the Elastic IP association, and not the database or the Elastic IP; then
+apply, and run `ssh-keygen -R <ip>` because the new server has a new host fingerprint. Observed in
+a plan, and the replacement apply completed on the owner's account (server up, `cloud-init`
+`done`).
+
+Replacing the server loses its disk (`/opt/cms/.env`, Caddy certificates); see
+[Changing the server setup later](#changing-the-server-setup-later) and copy out what you can
+first. With the old key lost, that copy may be impossible.
+
 ## If your IP changes
 
 You will be locked out of SSH. Read your new IP with `curl https://checkip.amazonaws.com`, change
@@ -333,17 +359,23 @@ server anyway. To apply a changed script or image, replace the server:
 and the Caddy certificates are lost; copy out what you need first. The Elastic IP stays.
 
 Changing `ssh_public_key` replaces only the key pair in AWS. It does not change the keys already
-installed on a running server, so the old key keeps working and the new one does not. This is what
-the provider's design suggests; it has not been checked with a real plan. To use the new key
-without replacing the server, log in with the old key and append the new public line to
-`~/.ssh/authorized_keys` on the server (and remove the old line if you want the old key gone).
+installed on a running server, so the old key keeps working and the new one does not. A real
+plan showed only the key pair `# forces replacement`; the server is replaced only with
+`-replace=aws_instance.cms`. To use the new key without replacing the server, log in with the old
+key and append the new public line to `~/.ssh/authorized_keys` on the server (and remove the old
+line if you want the old key gone).
 
 ## What the plan should show
 
 On an empty state, `Plan: 16 to add, 0 to change, 0 to destroy.`; on a state where the server
-already exists, the database adds exactly `Plan: 5 to add, 0 to change, 0 to destroy.` (the
-database, its subnet group, parameter group and security group, and the one inbound rule), with no
-change to the server, the IP, `cropcms-web` or the budget. If anything else changes, stop. The
+already exists, the database adds `Plan: 5 to add, 0 to change, 0 to destroy.` (the database, its
+subnet group, parameter group and security group, and the one inbound rule), with no change to the
+server, the IP or `cropcms-web`. If `monthly_budget_usd` is set in `terraform.tfvars` (as this
+README tells you) and differs from the default 25, the plan also shows the budget as 1 change:
+`Plan: 5 to add, 1 to change, 0 to destroy.` (seen with 32). A harmless parameter-group diff for
+`rds.force_ssl` showed in every plan made after the group existed (three plans seen). Setting
+`apply_method = "pending-reboot"` removed it: the next plan on the owner's account showed no
+changes. If anything else changes, stop. The
 outputs are `elastic_ip`, `instance_id`, `ssh_command`, `db_endpoint`, `db_name`,
 `db_master_username` and `db_master_secret_arn`. Check:
 
@@ -358,10 +390,11 @@ outputs are `elastic_ip`, `instance_id`, `ssh_command`, `db_endpoint`, `db_name`
 - **Key pair:** `public_key` is your `ssh-ed25519 ...` line.
 - **Elastic IP:** one `aws_eip` and one `aws_eip_association`.
 - **Database (`cropcms`):** `publicly_accessible = false`, `storage_encrypted = true`,
-  `deletion_protection = true`, `backup_retention_period = 7`, `manage_master_user_password = true`,
+  `deletion_protection = true`, `backup_retention_period = 1`, `manage_master_user_password = true`,
   no `password` attribute, and the final snapshot name from `db_final_snapshot_name`.
   `cropcms-db` has one inbound rule, 5432/tcp, whose source is `cropcms-web` and not an address.
-- **Budget:** `limit_amount = "25"`, `USD`, `MONTHLY`, two notifications to your e-mail address
+- **Budget:** `limit_amount` equal to your `monthly_budget_usd` (25 by default; 32 if you set it as
+  the README tells you below), `USD`, `MONTHLY`, two notifications to your e-mail address
   (`ACTUAL` above 80 percent, `FORECASTED` above 100 percent), and `include_credit = false`.
 
 ## Cost and the spend alert
@@ -437,24 +470,33 @@ and ran `<=>`, a second run failed with `role "cms_app" already exists`, and `ap
 `app/db/migrate_db.py` connected with a hex password while an `@` in the password failed. That is
 a local PostgreSQL, not RDS.
 
+The database, observed on one real run, not generalised: `describe-db-engine-versions` listed
+postgres 17.5 to 17.11 in eu-north-1, and `db.t4g.micro` with 17.11 listed gp2, gp3, io1 and io2
+storage. A create with retention 7 and with 3 was refused (`FreeTierRestrictionError`), and 1
+succeeded: the instance was `available`, engine 17.9, not public, encrypted, deletion protection
+on, and the master secret was `active`. Inferred from that, not separately tested: the Free plan
+allows RDS and the managed secret. Through the tunnel as `cms_app`, with `host.docker.internal` on
+Docker Desktop for Mac, `vector` worked (a `<=>` query returned a number), `pg_stat_ssl` showed ssl
+`t` with TLSv1.3, and `sslmode=disable` was refused with "no encryption" (this cannot separate our
+parameter group from RDS's default). The parameter group was `in-sync`; `max_connections` was 79.
+`getent hosts <db_endpoint>` on the server returned a private address, and `nc -zv -G 5
+<db_endpoint> 5432` from the laptop timed out. Replacing the server with `-replace=aws_instance.cms`
+completed, the new server came up and `cloud-init` said `done`.
+
 ## What is not verified
 
 - Running the bootstrap script a second time ("safe to run again") against the real account was not
   tried; `bootstrap-state.test.sh` still uses a stub `aws` that records its calls.
 - That route A works for every account type is not verified: only the account type above was used.
   `aws configure sso` was not tried. Route B was not run.
-- The IAM rights lists above are derived, not run, and that Budgets works for an IAM user is
+- The route B IAM rights lists above are derived, not run, and that Budgets works for an IAM user is
   unchecked.
 - The forecast alert and the prices above are unchecked.
-- Nothing about the database was run against AWS. Unknown until an apply: that eu-north-1 offers
-  PostgreSQL 17 and `db.t4g.micro`; that the Free plan or the project account policy accepts RDS,
-  Secrets Manager or 7 days of backups; at least two default subnets and a private DNS name for
-  the endpoint; free backup storage behaviour; that `CREATE EXTENSION vector` works on the minor
-  version RDS picks; the effect of `rds.force_ssl`; the real `max_connections`; that sshd on the
-  server forwards the tunnel; that `host.docker.internal` reaches the tunnel (not rerun in this
-  change); and the real bill. The `Plan: 5 to add` figure and the steps under "Checks after the
-  setup" are for you to confirm.
+- Still unverified for the database: backup retention of 2; higher retention on a Paid plan;
+  `host.docker.internal` on Linux; verify-full TLS (not done); free backup storage behaviour; and
+  the real bill. Not yet checked: that `cms_app` can run `alembic current` against this database;
+  that moves to the first deploy.
 - The Secrets Manager and RDS lines in the IAM lists are derived, not run; the last three
   Secrets Manager actions are guesses.
 - The Free plan limits above (six months, credits, suspension) are from AWS's plan page as read
-  once. Whether the Free plan allows RDS at all was not found.
+  once.

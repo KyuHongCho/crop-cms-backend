@@ -172,11 +172,13 @@ Production uses an RDS PostgreSQL database that only the server can reach, built
   there when needed; the app never uses it.
 - **TLS.** The database requires TLS, and the production compose file sets `PGSSLMODE=require`. That
   encrypts the connection but does not verify the server certificate (the `PGSSLMODE` row below).
-- **Backups.** Automated backups are kept 7 days by default (`db_backup_retention_days`, 1 to 35),
-  with point-in-time recovery inside that window. Deleting the database takes one final snapshot.
+- **Backups.** Automated backups are kept 1 day by default (`db_backup_retention_days`, 1 to 35). That
+  is the value the Free plan accepted on one real apply; 7 and 3 were refused and 2 was not tried.
+  A Paid plan may allow more (untested). Point-in-time recovery is configured for that window.
+  Deleting the database takes one final snapshot.
   Restoring from a backup or snapshot is not set up or tried yet, and no one owns that runbook yet.
-- **Not verified.** None of this has run against a real RDS instance yet; the infra README lists what
-  is still open.
+- **Verified so far.** The database was applied once on a real account. The observed facts and the
+  open items are in the infra README ("What is verified", "What is not verified").
 
 ## Environment variables
 
