@@ -188,8 +188,8 @@ odd = [f"{k} {l[0]}" for k, l, *_ in allb if k in ("resource", "data") and l and
 check("only aws_db_instance, aws_db_subnet_group and aws_db_parameter_group among aws_db_* and aws_rds_*", not odd, str(odd))
 dv = lambda n: v.get(n, "")
 check("variable db_deletion_protection defaults to true", attrs(dv("db_deletion_protection")).get("default") == "true")
-check("variable db_backup_retention_days defaults to 7 and has a validation",
-      attrs(dv("db_backup_retention_days")).get("default") == "7" and any(k == "validation" for k, *_ in blocks(dv("db_backup_retention_days")) or []))
+check("variable db_backup_retention_days defaults to 1 (the value the Free plan accepted) and has a validation",
+      attrs(dv("db_backup_retention_days")).get("default") == "1" and any(k == "validation" for k, *_ in blocks(dv("db_backup_retention_days")) or []))
 check("variable db_final_snapshot_name defaults to cropcms-final and has a validation",
       attrs(dv("db_final_snapshot_name")).get("default") == '"cropcms-final"' and any(k == "validation" for k, *_ in blocks(dv("db_final_snapshot_name")) or []))
 alltf = "\n".join(tf.values())

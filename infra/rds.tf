@@ -38,8 +38,10 @@ resource "aws_db_parameter_group" "cms" {
   family = "postgres17"
 
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    # AWS reports this setting as pending-reboot, so the default "immediate" shows a plan diff.
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 }
 
