@@ -217,7 +217,9 @@ aws rds describe-orderable-db-instance-options --engine postgres --engine-versio
 ```
 
 The first should list 17.x minors. For `<17.x>` use the highest one listed (compare the numbers
-after the dot: 17.11 is higher than 17.9). The second must list `gp3`.
+after the dot: 17.11 is higher than 17.9). AWS creates its default minor for `engine_version =
+"17"` (17.9 on the real apply, while 17.11 was the highest listed), so this checks the region, not
+that exact minor. The second must list `gp3`.
 
 **Settings.** `db_backup_retention_days` (default 1, allowed 1 to 35): days of automated backups.
 `db_deletion_protection` (default true). `db_final_snapshot_name` (default `cropcms-final`).
@@ -332,8 +334,7 @@ Restoring from it is a console or CLI task plus a Terraform import, not covered 
 The key's passphrase cannot be recovered; keep it in a password manager. With a lost key, make a
 new key pair, put the new PUBLIC key in `terraform.tfvars` (`ssh_public_key`), and run
 `terraform plan -out=tfplan -replace=aws_instance.cms`. Check that the plan replaces only the key
-pair, the server and the Elastic IP association, and not the database or the Elastic IP (one
-unrelated in-place change, such as the `rds.force_ssl` parameter group, may also show); then
+pair, the server and the Elastic IP association, and not the database or the Elastic IP; then
 apply, and run `ssh-keygen -R <ip>` because the new server has a new host fingerprint. Observed in
 a plan, and the replacement apply completed on the owner's account (server up, `cloud-init`
 `done`).
@@ -392,7 +393,8 @@ outputs are `elastic_ip`, `instance_id`, `ssh_command`, `db_endpoint`, `db_name`
   `deletion_protection = true`, `backup_retention_period = 1`, `manage_master_user_password = true`,
   no `password` attribute, and the final snapshot name from `db_final_snapshot_name`.
   `cropcms-db` has one inbound rule, 5432/tcp, whose source is `cropcms-web` and not an address.
-- **Budget:** `limit_amount = "25"`, `USD`, `MONTHLY`, two notifications to your e-mail address
+- **Budget:** `limit_amount` equal to your `monthly_budget_usd` (25 by default; 32 if you set it as
+  the README tells you below), `USD`, `MONTHLY`, two notifications to your e-mail address
   (`ACTUAL` above 80 percent, `FORECASTED` above 100 percent), and `include_credit = false`.
 
 ## Cost and the spend alert

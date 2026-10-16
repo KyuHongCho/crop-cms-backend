@@ -179,8 +179,9 @@ for name, body in dbi:
                           "master_user_secret_kms_key_id", "restore_to_point_in_time", "s3_import") if k in a or k in nested]
     check(f"db instance {name}: no password attribute, snapshot, replica, restore or custom secret key", not banned, str(banned))
 pgs = res("aws_db_parameter_group")
-check("a db parameter group forces TLS (rds.force_ssl = 1)", any(
+check("a db parameter group forces TLS (rds.force_ssl = 1, apply_method pending-reboot)", any(
     attrs(b2).get("name") == '"rds.force_ssl"' and attrs(b2).get("value") == '"1"'
+    and attrs(b2).get("apply_method") == '"pending-reboot"'
     for _, b in pgs for k, _l, b2, *_ in blocks(b) or [] if k == "parameter"))
 ALLOWED_DB = {"aws_db_instance", "aws_db_subnet_group", "aws_db_parameter_group"}
 odd = [f"{k} {l[0]}" for k, l, *_ in allb if k in ("resource", "data") and l and l[0].startswith(("aws_db_", "aws_rds_"))

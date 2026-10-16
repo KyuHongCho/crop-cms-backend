@@ -43,7 +43,7 @@ variable "instance_type" {
 }
 
 variable "db_backup_retention_days" {
-  description = "Days of automated backups and point-in-time recovery. 0 is refused because it switches both off. 1 is the most the Free plan accepted on a real apply; a Paid plan may allow more (untested)."
+  description = "Days of automated backups and point-in-time recovery. 0 is refused because it switches both off. On one real apply the Free plan refused 7 and 3 and accepted 1; 2 was not tried, and a Paid plan may allow more (untested)."
   type        = number
   default     = 1
 
