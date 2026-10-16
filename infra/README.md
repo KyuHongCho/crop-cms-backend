@@ -435,13 +435,14 @@ credits of 100 to 200 USD up in four to eight months. Moving to the Paid plan is
 
 `bash infra/check.sh` needs only Docker and python3. It fails if the firewall opens anything beyond
 22 (your IP), 80, 443, if a key, token, account id, real IP, AWS endpoint name or personal e-mail
-is in these files, in `docs/*.md`, `README.md`, `docker-compose.prod.yaml`, `proxy/Caddyfile` or a
-`.env*` file that git tracks or would add (ignored ones are never read). It also fails if one of
-those env files gives a value to a name ending in PASSWORD, SECRET, KEY or TOKEN, or a password to
-a URL; blank, quoted-empty and `${...}` values pass. It fails if the server lacks IMDSv2 or an
-encrypted disk, if the budget alerts change, or if the bootstrap script allows public access. It
-also rejects `dynamic` ingress or egress blocks, `module` blocks and `.tf.json` files, which could
-hide rules from these checks. It also runs `terraform fmt`, `init -backend=false` and `validate`,
+is in these files, in `docs/*.md`, `README.md`, `docker-compose.yaml`, `docker-compose.prod.yaml`,
+`proxy/Caddyfile`, `prod/check.sh`, `prod/smoke.sh` or a `.env*` file that git tracks or would add
+(ignored ones are never read). It also fails if one of those env files gives a value to a name
+ending in PASSWORD, SECRET, KEY, TOKEN or PRIVATEKEY, or a password to a URL; blank, quoted-empty
+and `${...}` values pass. It fails if the server lacks IMDSv2 or an encrypted disk, if the budget
+alerts change, or if the bootstrap script allows public access. It also rejects `dynamic` ingress or
+egress blocks, `module` blocks and `.tf.json` files, which could hide rules from these checks. It
+also runs `terraform fmt`, `init -backend=false` and `validate`,
 and checks that bad `ssh_cidr` values and bad database settings (backup days, final snapshot name,
 deletion protection) are refused. For the database it fails if the database group admits anything
 but one 5432/tcp rule from `cropcms-web`, if the instance is public, unencrypted, without a final
