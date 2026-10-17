@@ -1,7 +1,6 @@
-# Standalone, not an override: a compose override cannot remove the dev bind mounts
-# or the published port. There is no database service; the database is external.
-# Needs DB_HOST, DB_USER, DB_PASSWORD, SECRET_KEY and SITE_ADDRESS in the environment
-# or in .env (see .env.example).
+# Standalone, not an override: an override cannot remove the dev bind mounts or the published port.
+# The database is external. Needs DB_HOST, DB_USER, DB_PASSWORD, SECRET_KEY and SITE_ADDRESS
+# from /opt/cms/.env, passed with --env-file (template: .env.prod.example).
 services:
   cms:
     build:
@@ -54,6 +53,8 @@ services:
     environment:
       # No plain-HTTP default here: a missing domain must fail, not serve HTTP.
       SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS to the public domain}
+      # `:-` and not a bare variable: an empty acme_ca argument is a Caddyfile error.
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
     volumes:
       # Certificates live in caddy_data; losing it means re-issuing them.
       - caddy_data:/data

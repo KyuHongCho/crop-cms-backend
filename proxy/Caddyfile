@@ -1,3 +1,9 @@
+# The CA comes from the environment so staging vs production is an env-file line. The default is
+# production: a forgotten variable must not leave visitors with untrusted staging certificates.
+{
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+}
+
 {$SITE_ADDRESS:http://:80} {
 	root * /srv
 	header -Server
