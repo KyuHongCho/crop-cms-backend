@@ -190,7 +190,7 @@ a plain `restart` does not re-read the environment.
 |---|---|---|---|
 | `SECRET_KEY` | none | `app/auth/auth.py` (at call time) | Signs the login JWT. Unset or empty: logging in fails loudly with a `500`; the rest of the app starts |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | `app/auth/auth.py` (at import) | Token lifetime in minutes; there is no refresh-token flow |
-| `TOKENS_BUDGET_DAILY` | `20000` | `app/crud/member.py` (at import) | Starting daily token budget for members who sign up afterwards; a negative value stops the app at startup |
+| `TOKENS_BUDGET_DAILY` | `20000` (production template: `100000`, for the shared demo account) | `app/crud/member.py` (at import) | Starting daily token budget for members who sign up afterwards; a negative value stops the app at startup |
 | `LOGIN_MAX_FAILURES` | `10` | `app/auth/throttle.py` (at import) | Counted login attempts per account per window; an integer >= 1 or the app does not start |
 | `LOGIN_WINDOW_SECONDS` | `900` | `app/auth/throttle.py` (at import) | Length of the login throttle window; an integer from 1 to 315360000 or the app does not start |
 | `EMBEDDER` | `openai` | `app/chat/embeddings.py` | `openai` or `fake` (offline); another name raises. Not passed through by compose: use `docker compose exec -e EMBEDDER=fake cms ...` |
@@ -204,8 +204,10 @@ a plain `restart` does not re-read the environment.
 | `ALEMBIC_ALLOW_DESTRUCTIVE` | unset | `alembic/env.py` | `1` lets `alembic downgrade` run on a database whose name does not end in `_test`; any other value does not |
 | `SITE_ADDRESS` | `http://:80` (dev compose); required in `docker-compose.prod.yaml` | `proxy/Caddyfile`, via the compose files | The proxy's site address; unset or empty is plain HTTP in dev, a domain turns on HTTPS |
 | `SITE_DIR` | `./proxy/site` (dev compose), `/opt/cms/site` (prod compose) | the compose files | Directory the proxy serves at `/` |
-| `DB_USER` | `cms_app` | `app/db/db.py` | Application database role; compose requires it in `.env` |
-| `DB_PASSWORD` | none | `app/db/db.py` | Application role's password; the app does not start without it, and compose requires it in `.env`. Use hex or alphanumeric characters: it goes into the database URL unescaped, so an `@` misparses it and a `%41`-style escape is silently decoded, which changes the password |
+| `ACME_CA` | `https://acme-v02.api.letsencrypt.org/directory` (Let's Encrypt production) | `proxy/Caddyfile`, via the production compose file | The certificate authority Caddy asks for certificates. Set `https://acme-staging-v02.api.letsencrypt.org/directory` to test; empty or unset gives production. With it set, the adapted config lists that CA as the only issuer, so the ZeroSSL fallback that Caddy's documentation describes for its defaults does not apply. Any string passes `caddy validate`, so a typo shows only when issuance fails |
+| `COMPOSE_PROJECT_NAME` | the directory name | Docker Compose itself | Names the compose project. Production pins `cms` in its env file, so the volumes are `cms_caddy_data` and `cms_caddy_config`. Compose reads it itself, from the environment, an `--env-file`, or a `.env` in the project directory; production passes `/opt/cms/.env` with `--env-file` |
+| `DB_USER` | `cms_app` | `app/db/db.py` | Application database role; the dev compose requires it in `.env`, the production one in the env file passed with `--env-file` |
+| `DB_PASSWORD` | none | `app/db/db.py` | Application role's password; the app does not start without it, and compose requires it (dev: in `.env`; production: in the env file passed with `--env-file`). Use hex or alphanumeric characters: it goes into the database URL unescaped, so an `@` misparses it and a `%41`-style escape is silently decoded, which changes the password |
 | `DB_HOST` | `db` | `app/db/db.py` | Database host; the dev compose sets `db` for `cms`, the prod compose requires it from the environment |
 | `DB_PORT` | `5432` | `app/db/db.py` | Database port; compose sets `5432` for `cms` |
 | `DB_NAME` | `cms` | `app/db/db.py` | Database name; compose sets `cms` for `cms` (the tests override it with `cms_test`) |
