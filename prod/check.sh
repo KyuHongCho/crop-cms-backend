@@ -17,9 +17,10 @@ docker compose --profile proxy -f docker-compose.yaml config --format json >"$TM
   || { echo "FAIL dev compose does not render"; cat "$TMP/dev.err"; exit 1; }
 ACME_PROD="https://acme-v02.api.letsencrypt.org/directory"
 ACME_STAGING="https://acme-staging-v02.api.letsencrypt.org/directory"
+# --env-file /dev/null: compose would otherwise read the repo's own .env for an unset ACME_CA.
 render() {
   local out=$1; shift
-  "$@" docker compose -f docker-compose.prod.yaml config --format json >"$TMP/$out.json" 2>"$TMP/$out.err" \
+  "$@" docker compose -f docker-compose.prod.yaml --env-file /dev/null config --format json >"$TMP/$out.json" 2>"$TMP/$out.err" \
     || { echo "FAIL prod compose does not render ($out)"; cat "$TMP/$out.err"; exit 1; }
 }
 render acme-unset env -u ACME_CA

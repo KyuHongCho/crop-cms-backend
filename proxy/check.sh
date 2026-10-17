@@ -115,12 +115,13 @@ if [ "$local_proxy" = 1 ]; then
   check "SITE_ADDRESS set on the host reaches the proxy container" $?
 
   # Read the adapted JSON: caddy validate accepts any string as the CA, so it cannot see a wrong one.
+  # More than one issuer also fails: the docs promise the chosen CA is the only one (no ZeroSSL fallback).
   acme_prod=https://acme-v02.api.letsencrypt.org/directory
   acme_staging=https://acme-staging-v02.api.letsencrypt.org/directory
   adapted_ca() {
     docker compose --profile proxy run --rm --no-deps -T -e SITE_ADDRESS=example.test "$@" proxy \
       caddy adapt --config /etc/caddy/Caddyfile 2>/dev/null |
-      python3 -I -c 'import json,sys; print(json.load(sys.stdin)["apps"]["tls"]["automation"]["policies"][0]["issuers"][0]["ca"])' 2>/dev/null
+      python3 -I -c 'import json,sys; i=json.load(sys.stdin)["apps"]["tls"]["automation"]["policies"][0]["issuers"]; print(i[0]["ca"] if len(i) == 1 else f"{len(i)} issuers")' 2>/dev/null
   }
   [ "$(adapted_ca)" = "$acme_prod" ]
   check "the certificate authority defaults to Let's Encrypt production" $?
