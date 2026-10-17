@@ -190,7 +190,7 @@ a plain `restart` does not re-read the environment.
 |---|---|---|---|
 | `SECRET_KEY` | none | `app/auth/auth.py` (at call time) | Signs the login JWT. Unset or empty: logging in fails loudly with a `500`; the rest of the app starts |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | `app/auth/auth.py` (at import) | Token lifetime in minutes; there is no refresh-token flow |
-| `TOKENS_BUDGET_DAILY` | `20000` | `app/crud/member.py` (at import) | Starting daily token budget for members who sign up afterwards; a negative value stops the app at startup |
+| `TOKENS_BUDGET_DAILY` | `20000` (production template: `100000`, for the shared demo account) | `app/crud/member.py` (at import) | Starting daily token budget for members who sign up afterwards; a negative value stops the app at startup |
 | `LOGIN_MAX_FAILURES` | `10` | `app/auth/throttle.py` (at import) | Counted login attempts per account per window; an integer >= 1 or the app does not start |
 | `LOGIN_WINDOW_SECONDS` | `900` | `app/auth/throttle.py` (at import) | Length of the login throttle window; an integer from 1 to 315360000 or the app does not start |
 | `EMBEDDER` | `openai` | `app/chat/embeddings.py` | `openai` or `fake` (offline); another name raises. Not passed through by compose: use `docker compose exec -e EMBEDDER=fake cms ...` |

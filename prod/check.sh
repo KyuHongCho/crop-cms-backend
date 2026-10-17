@@ -106,6 +106,7 @@ tpl_err = open(f"{tmp}/tpl.err").read()
 blanks = ["DB_HOST", "DB_PASSWORD", "SECRET_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SITE_ADDRESS"]
 
 check("the unedited template refuses to start", tpl_rc != "0" and "required variable" in tpl_err)
+# The template pins 100000 because the demo uses one shared member account.
 check("the filled-in template renders as project cms with its own values",
       filled.get("name") == "cms"
       and filled["services"]["cms"]["environment"]["DB_USER"] == "cms_app"
