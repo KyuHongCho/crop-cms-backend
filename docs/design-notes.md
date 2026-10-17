@@ -307,7 +307,7 @@ Caddy that shape this config:
   `--proxy-headers` on uvicorn is not needed either: nothing in `app/` reads a client address or
   an `X-Forwarded-*` header, and the login throttle is keyed on the email hash.
 - **Forwarded headers.** `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` are
-  overwritten, not appended: a spoofed `X-Forwarded-For: 6.6.6.6`, `X-Forwarded-Proto: https` and
+  overwritten, not appended: a spoofed `X-Forwarded-For`, `X-Forwarded-Proto: https` and
   `X-Forwarded-Host: evil.test` do not reach the API (`check.sh` asserts it). The `Host` header is
   forwarded unchanged.
 - **Timeouts.** The app sets no deadline of its own on a model call, so the Anthropic SDK's

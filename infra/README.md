@@ -434,10 +434,15 @@ credits of 100 to 200 USD up in four to eight months. Moving to the Paid plan is
 ## Checks without AWS
 
 `bash infra/check.sh` needs only Docker and python3. It fails if the firewall opens anything beyond
-22 (your IP), 80, 443, if a key, token or account id is in these files, if the server lacks IMDSv2 or
-an encrypted disk, if the budget alerts change, or if the bootstrap script allows public access. It
-also rejects `dynamic` ingress or egress blocks, `module` blocks and `.tf.json` files, which could
-hide rules from these checks. It also runs `terraform fmt`, `init -backend=false` and `validate`,
+22 (your IP), 80, 443, if a key, token, account id, real IP, AWS endpoint name or personal e-mail
+is in these files, in `docs/*.md`, `README.md`, `docker-compose.yaml`, `docker-compose.prod.yaml`,
+`proxy/Caddyfile`, `prod/check.sh`, `prod/smoke.sh` or a `.env*` file that git tracks or would add
+(ignored ones are never read). It also fails if one of those env files gives a value to a name
+ending in PASSWORD, SECRET, KEY, TOKEN or PRIVATEKEY, or a password to a URL; blank, quoted-empty
+and `${...}` values pass. It fails if the server lacks IMDSv2 or an encrypted disk, if the budget
+alerts change, or if the bootstrap script allows public access. It also rejects `dynamic` ingress or
+egress blocks, `module` blocks and `.tf.json` files, which could hide rules from these checks. It
+also runs `terraform fmt`, `init -backend=false` and `validate`,
 and checks that bad `ssh_cidr` values and bad database settings (backup days, final snapshot name,
 deletion protection) are refused. For the database it fails if the database group admits anything
 but one 5432/tcp rule from `cropcms-web`, if the instance is public, unencrypted, without a final
@@ -447,7 +452,9 @@ appears, if a generated password, secret read, `provisioner` or `ephemeral` bloc
 output could expose a password, or if any file here contains a quoted SQL password literal
 (`PASSWORD '...'` in any case, `E'...'`, `$$...$$`). `infra/db-bootstrap.test.sh` runs the
 bootstrap SQL in a throwaway local pgvector container and connects through the app's own URL
-lines, which downloads images and Python packages. CI runs it all. `bash infra/check.sh --static`
+lines, which downloads images and Python packages. It also checks that git ignores `.env.*` except
+the two example files, and that `.dockerignore` keeps env files at any depth out of the image
+(the Docker part builds a throwaway context). CI runs it all. `bash infra/check.sh --static`
 skips the Docker parts.
 
 ## What is verified

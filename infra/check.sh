@@ -242,7 +242,7 @@ check("versions.tf (backend and provider) and bootstrap-state.sh name the same r
 
 # --- secrets and identifiers ---
 CANONICAL = "099720109477"  # public AMI publisher, not an account of ours
-DOC_IP = re.compile(r"^(0\.0\.0\.0|10\..*|192\.0\.2\..*|198\.51\.100\..*|203\.0\.113\..*)$")
+DOC_IP = re.compile(r"^(0\.0\.0\.0|10\..*|127\.0\.0\.1|192\.0\.2\..*|198\.51\.100\..*|203\.0\.113\..*)$")
 # Catches PASSWORD 'x', E'x', U&'x', = 'x', $$x$$ and a line break after the keyword, in any case.
 # A psql variable (PASSWORD :'name') and prose pass.
 SQL_PW = r"(?i)\bpassword\s*=?\s*(?:e|u&)?(?:'[^']{4,}'|\$(?:[a-z_]\w*)?\$)"
@@ -252,22 +252,101 @@ patterns = {
     "quoted secret value": r"""(?i)(secret|passw(or)?d|token|api_?key)(_\w+)?\s*[=:]\s*["'][^"'$\s]{8,}["']""",
     "SQL password literal": SQL_PW,
 }
-files = [p for p in sorted(infra.rglob("*")) if p.is_file() and ".terraform" not in p.parts and
-         not re.search(r"\.tfstate|\.tfvars(\.json)?$", p.name)]
-bad = []
-for p in files:
-    t = p.read_text(errors="replace")
+AWS_HOST = (r"(?i)\b(?:[a-z0-9-]+\.[a-z0-9]{8,}\.[a-z]{2}(?:-[a-z]+)+-\d\.rds\.amazonaws\.com"
+            r"|ec2-\d{1,3}(?:-\d{1,3}){3}\.[a-z0-9.-]*amazonaws\.com(?:\.cn)?"
+            r"|[a-z0-9-]+\.[a-z]{2}(?:-[a-z]+)+-\d\.elb\.amazonaws\.com)\b")
+EMAIL = r"(?<![\w.+-])[\w.+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})(?![\w-])"
+EMAIL_OK = re.compile(r"(?i)(^|\.)(example\.(com|org|net)|[^.]+\.example|example|test|invalid|localhost)$")
+# Commented-out assignments count: an old value pasted into a comment is still a leak. The name must
+# END in a secret word (ACCESS_TOKEN_EXPIRE_MINUTES and SECRETARY are not secrets). `:` is taken only
+# after an upper-case name and one word, so prose such as "# SECRET_KEY: signs the JWT" passes.
+ENV_ASSIGN = re.compile(r"[#\s]*(?:export\s+)?([A-Za-z0-9_]+)\s*([=:])(.*)")
+ENV_SECRET_WORDS = {"PASSWORD", "SECRET", "KEY", "TOKEN", "PRIVATEKEY"}
+ENV_URL_PW = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:([^@\s/]+)@")
+ENV_NAME = re.compile(r"(^|/)\.env(\.|$)")
+
+
+def blank_value(v):
+    v = re.sub(r"(^|\s)#.*$", "", v).strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return v == "" or re.fullmatch(r"\$\{[^}]*\}", v) is not None
+
+
+def env_secrets(text):
+    """(line, what) for each non-blank secret value; never the value itself."""
+    out = []
+    for n, ln in enumerate(text.splitlines(), 1):
+        m = ENV_ASSIGN.match(ln)
+        if m:
+            name, sep, val = m.groups()
+            if name.upper().split("_")[-1] in ENV_SECRET_WORDS and (sep == "=" or (name.isupper() and len(val.split()) <= 1)) and not blank_value(val):
+                out.append((n, name))
+        for u in ENV_URL_PW.finditer(ln):
+            if not blank_value(u.group(1)) and not u.group(1).startswith(("<", "$")):
+                out.append((n, "a URL with credentials"))
+    return out
+
+
+def scan(name, text):
+    out = []
     for label, rx in patterns.items():
-        if re.search(rx, t):
-            bad.append(f"{p.name}: {label}")
-    for m in re.finditer(r"ssh-(?:ed25519|rsa) AAAA[0-9A-Za-z+/=]+", t):
+        if re.search(rx, text):
+            out.append(f"{name}: {label}")
+    for m in re.finditer(r"ssh-(?:ed25519|rsa) AAAA[0-9A-Za-z+/=]+", text):
         if "EXAMPLE" not in m.group(0):
-            bad.append(f"{p.name}: a real-looking SSH public key")
-    if p.name != ".terraform.lock.hcl":
-        bad += [f"{p.name}: 12-digit id {i}" for i in re.findall(r"(?<![0-9A-Za-z])[0-9]{12}(?![0-9A-Za-z])", t) if i != CANONICAL]
-        bad += [f"{p.name}: IPv4 {i}" for i in re.findall(r"(?<![\w.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![\w.])", t)
+            out.append(f"{name}: a real-looking SSH public key")
+    if not name.endswith(".terraform.lock.hcl"):
+        out += [f"{name}: 12-digit id {i}" for i in re.findall(r"(?<![0-9A-Za-z])[0-9]{12}(?![0-9A-Za-z])", text) if i != CANONICAL]
+        out += [f"{name}: IPv4 {i}" for i in re.findall(r"(?<![\w.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![\w.])", text)
                 if all(int(o) < 256 for o in i.split(".")) and not DOC_IP.match(i)]
-check("no private key, access key id, quoted secret, SQL password literal, account id or real IP in infra/ files", not bad, "; ".join(bad))
+    out += [f"{name}: AWS hostname {m.group(0)}" for m in re.finditer(AWS_HOST, text)]
+    out += [f"{name}: e-mail address at line {text.count(chr(10), 0, m.start()) + 1}, outside the example domains"
+            for m in re.finditer(EMAIL, text) if not EMAIL_OK.search(m.group(1))]
+    if ENV_NAME.search(name):
+        out += [f"{name}: env-secret value set for {what} at line {n}" for n, what in env_secrets(text)]
+    return out
+
+
+def git_run(root, *a):
+    try:
+        r = subprocess.run(["git", "-C", str(root), *a], capture_output=True, text=True)
+    except OSError:
+        return 127, ""
+    return r.returncode, r.stdout
+
+
+def scan_set(root, use_git):
+    """Files the scan reads. Never globs .env: that is the owner's real file."""
+    paths = [p for p in sorted((root / "infra").rglob("*")) if p.is_file() and ".terraform" not in p.parts and
+             not re.search(r"\.tfstate|\.tfvars(\.json)?$|^tfplan$|\.tfplan$", p.name)]
+    paths += sorted(root.glob("docs/*.md"))
+    paths += [root / n for n in ("README.md", "docker-compose.yaml", "docker-compose.prod.yaml", "proxy/Caddyfile",
+                                 "prod/check.sh", "prod/smoke.sh")]
+    names = None
+    if use_git:
+        # Untracked but not ignored counts too, so a new template is scanned before `git add`.
+        rc, out = git_run(root, "ls-files", "--cached", "--others", "--exclude-standard")
+        if rc == 0:
+            names = [n for n in out.splitlines() if ENV_NAME.search(n)]
+    if names is None:
+        names = [".env.example", ".env.prod.example"]
+    paths += [root / n for n in names]
+    return [p for p in dict.fromkeys(paths) if p.is_file()]
+
+
+def scan_tree(root, use_git):
+    return [b for p in scan_set(root, use_git) for b in scan(p.relative_to(root).as_posix(), p.read_text(errors="replace"))]
+
+
+in_git = git_run(repo, "rev-parse", "--git-dir")[0] == 0
+rels = {p.relative_to(repo).as_posix() for p in scan_set(repo, in_git)}
+want_set = {"docs/operations.md", "README.md", "docker-compose.yaml", "docker-compose.prod.yaml", "proxy/Caddyfile",
+            "prod/check.sh", "prod/smoke.sh", ".env.example"}
+check("the scan set includes the operations doc, README, both compose files, Caddyfile, prod scripts and .env.example", want_set <= rels, str(want_set - rels))
+bad = scan_tree(repo, in_git)
+check("no private key, access key id, quoted secret, SQL password literal, account id, real IP, AWS hostname, "
+      "outside e-mail or env secret value in infra/, docs, README, both compose files, Caddyfile, prod scripts or .env files", not bad, "; ".join(bad))
 
 # Fixtures are assembled here, so this file carries no literal the rule would flag.
 kw = "PASS" + "WORD"
@@ -287,11 +366,89 @@ check("shipped docs and SQL pass the SQL password rule",
       all(not re.search(SQL_PW, p.read_text()) for p in shipped if p.is_file()),
       str([p.name for p in shipped if p.is_file() and re.search(SQL_PW, p.read_text())]))
 
+# Scan fixtures: a temporary tree laid out like the repo goes through the same file-set and scan code.
+import tempfile
+sv = "abc123" + "xyz"
+dbpw = "DB_" + kw
+bad_ip = ".".join(["172", "31", "4", "5"])
+bad_tree = {
+    "docs/a.md": "host " + bad_ip + "\n",
+    "docker-compose.prod.yaml": "h: db." + "abcdefghijkl" + ".eu-north-1.rds." + "amazonaws.com\n",
+    "proxy/Caddyfile": "tls x@" + "gmail" + ".com\n",
+    ".env.prod.example": f"SECRET_KEY={sv}\n# {dbpw}={sv}\n",
+    "prod/check.sh": "h=db." + "abcdefghijkl" + ".eu-north-1.rds." + "amazonaws.com\n",
+    "README.md": "id " + "AK" + "IA" + "ABCDEFGHIJKLMNOP\n",
+    "docs/other.md": "owner@" + "corp" + ".io\n",
+}
+good_tree = {
+    "docs/a.md": "127.0.0.1 and 203.0.113.7 and checkip.amazonaws.com and me@example.com\n",
+    "docker-compose.prod.yaml": "u: rds.amazonaws.com\n",
+    "proxy/Caddyfile": "x\n",
+    ".env.prod.example": f"SECRET_KEY=\nDB_USER=cms_app\n# {dbpw}=\n",
+    "README.md": "x\n",
+}
+
+
+def layout(tree):
+    d = pathlib.Path(tempfile.mkdtemp())
+    (d / "infra").mkdir()
+    for rel, body in tree.items():
+        (d / rel).parent.mkdir(parents=True, exist_ok=True)
+        (d / rel).write_text(body)
+    return d
+
+
+import shutil
+d = layout(bad_tree)
+found = scan_tree(d, False)
+shutil.rmtree(d)
+want = [("docs/a.md", "IPv4 " + bad_ip), ("docker-compose.prod.yaml", "AWS hostname"), ("proxy/Caddyfile", "e-mail address at line 1"), ("prod/check.sh", "AWS hostname"),
+        (".env.prod.example", "env-secret value set for SECRET_KEY at line 1"), (".env.prod.example", f"env-secret value set for {dbpw} at line 2"),
+        ("README.md", "access key id"), ("docs/other.md", "e-mail address at line 1")]
+miss = [w for w in want if not any(f.startswith(w[0] + ":") and w[1] in f for f in found)]
+check("scan fixtures: every new rule flags its bad file, new docs files included", not miss, str(miss))
+check("scan fixtures: env-secret messages never carry the value", not any(sv in f for f in found))
+d = layout(good_tree)
+found = scan_tree(d, False)
+shutil.rmtree(d)
+check("scan fixtures: loopback, documentation addresses, service hostnames, example e-mail and blank env values pass", not found, str(found))
+
+import os
+cases_bad = [f"# {dbpw}: abc", f"export {dbpw}=abc", f"## {dbpw}=abc", f"# # {dbpw}=abc", "# KEY=abc", "   KEY=abc", "AUTH_TOKEN=abc", "ACCESS_TOKEN=abc",
+             "TOKEN=abc", f"{dbpw}:abc", "PRIVATEKEY=abc", "SECRET_KEY=abc", "OPENAI_API_KEY=abc", "DATABASE_URL=postgresql://u:pw@h/db",
+             f"{dbpw}=a # note", f"{dbpw.lower()}=abc"]
+cases_ok = ["# SECRET_KEY: signs the JWT; tokens last 30 minutes", "SECRETARY=x", f"{dbpw}=\"\"", f"{dbpw}=''", f"{dbpw}= # note", f"{dbpw}=${{{dbpw}}}", f"{dbpw}=\"${{{dbpw}}}\"",
+            "# ACCESS_TOKEN_EXPIRE_MINUTES=30", "ACCESS_TOKEN_EXPIRE_MINUTES=30", "DATABASE_URL=postgresql://u:${X}@h/db",
+            "DATABASE_URL=postgresql://u:<password>@h/db", "DATABASE_URL=postgresql://u@h/db", "# Secret: do not commit", "SECRET_KEY=",
+            "DB_USER=cms_app", "# KEY=", "SECRET_KEY= # set me"]
+hit = lambda s: any("env-secret" in f for f in scan(".env.t", s + "\n"))
+check("env-secret rule flags every secret form", all(hit(s) for s in cases_bad), str([s for s in cases_bad if not hit(s)]))
+check("env-secret rule passes blank values, placeholders, non-secret names and prose", not any(hit(s) for s in cases_ok),
+      str([s for s in cases_ok if hit(s)]))
+import time
+t0 = time.time()
+scan(".env.t", " \t" * 40000 + "x\n" + "#" * 40000 + "\n")
+check("env-secret rule is linear on long whitespace and # runs", time.time() - t0 < 2, f"{time.time() - t0:.1f}s")
+d = layout({"infra/tfplan": bad_ip + "\n", "infra/x.tfplan": bad_ip + "\n", "infra/y.tf": bad_ip + "\n"})
+found = scan_tree(d, False)
+shutil.rmtree(d)
+check("a local tfplan is not scanned, other infra files are", len(found) == 1 and found[0].startswith("infra/y.tf:"), str(found))
+if git_run(repo, "--version")[0] == 0:
+    d = layout({".gitignore": ".env.*\n!.env.example\n!.env.prod.example\n", ".env.prod.example": f"SECRET_KEY={sv}\n", ".env.prod": f"SECRET_KEY={sv}\n"})
+    git_run(d, "init", "-q")
+    found = scan_tree(d, True)
+    shutil.rmtree(d)
+    check("an untracked template is scanned, an ignored .env.prod is not", len(found) == 1 and found[0].startswith(".env.prod.example:"), str(found))
+old_path = os.environ["PATH"]
+os.environ["PATH"] = ""
+rc = git_run(repo, "--version")[0]
+os.environ["PATH"] = old_path
+check("a missing git binary reads as not a checkout, without a crash", rc != 0)
+
 # --- git ---
 def git(*a):
-    r = subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True)
-    return r.returncode, r.stdout
-if git("rev-parse", "--git-dir")[0] == 0:
+    return git_run(repo, *a)
+if in_git:
     for f in ("infra/terraform.tfvars", "infra/prod.auto.tfvars", "infra/terraform.tfvars.json", "infra/x.auto.tfvars.json", "infra/terraform.tfstate", "infra/terraform.tfstate.backup", "infra/.terraform/x", "infra/tfplan", "infra/x.tfplan"):
         check(f"git ignores {f}", git("check-ignore", "-q", f)[0] == 0)
     for f in ("infra/.terraform.lock.hcl", "infra/terraform.tfvars.example"):
@@ -299,8 +456,21 @@ if git("rev-parse", "--git-dir")[0] == 0:
     tracked = git("ls-files")[1].splitlines()
     sens = [f for f in tracked if re.search(r"\.tfstate|\.tfvars(\.json)?$|\.pem$|(^|/)id_(rsa|ed25519|ecdsa)$|\.pfx$", f)]
     check("git tracks no state, tfvars or private key file", not sens, str(sens))
+    # --no-index: a tracked file is otherwise reported as not ignored whatever the rules say.
+    for f in (".env", ".env.prod", ".env.local", ".env.bak"):
+        check(f"git ignores {f}", git("check-ignore", "-q", "--no-index", f)[0] == 0)
+    for f in (".env.example", ".env.prod.example"):
+        check(f"git does not ignore {f}", git("check-ignore", "-q", "--no-index", f)[0] == 1)
+    envs = [f for f in tracked if ENV_NAME.search(f) and f not in (".env.example", ".env.prod.example")]
+    check("git tracks no .env file besides the two examples", not envs, str(envs))
 else:
     print("skip git checks (not a git checkout)")
+di = repo / ".dockerignore"
+dlines = di.read_text().splitlines() if di.is_file() else []
+for rule in ("**/.env", "**/.env.*"):
+    check(f".dockerignore has {rule} on its own line", rule in dlines)
+last = max((dlines.index(r) for r in ("**/.env", "**/.env.*") if r in dlines), default=0)
+check(".dockerignore has no ! negation after the **/.env lines", not any(l.startswith("!") for l in dlines[last:]))
 check("the provider lock file exists", (infra / ".terraform.lock.hcl").is_file())
 
 print("static checks:", "ALL PASS" if not fails else f"{fails} FAILED")
@@ -415,6 +585,21 @@ SH
     echo "ok   every variable rule accepts and rejects as expected"
   else
     echo "FAIL variable validation"; fails=$((fails + 1))
+  fi
+
+  # The repo's .dockerignore against fake env files at the root and one level down, through the
+  # same COPY the Dockerfile does; FROM scratch keeps it free of any image pull.
+  echo "-- .dockerignore keeps env files out of the build context"
+  mkdir -p "$tmp/di/ctx/sub" "$tmp/di/out"
+  cp ../.dockerignore "$tmp/di/ctx/.dockerignore"
+  for f in .env .env.prod .env.example .env.prod.example sub/.env sub/.env.prod keep sub/keep; do : >"$tmp/di/ctx/$f"; done
+  printf 'FROM scratch\nCOPY . /ctx\n' >"$tmp/di/Dockerfile"
+  if docker build -q -f "$tmp/di/Dockerfile" --output "type=local,dest=$tmp/di/out" "$tmp/di/ctx" >"$tmp/di/build.log" 2>&1 &&
+     [ "$(cd "$tmp/di/out/ctx" && find . -type f | sort | tr '\n' ' ')" = "./.dockerignore ./keep ./sub/keep " ]; then
+    echo "ok   only the non-env files reach the build context, nested ones included"
+  else
+    echo "FAIL .dockerignore probe: $(cd "$tmp/di/out/ctx" 2>/dev/null && find . -type f | sort | tr '\n' ' ')"
+    cat "$tmp/di/build.log"; fails=$((fails + 1))
   fi
 
   echo "-- db-bootstrap.sql in a throwaway database (pulls images and pip packages on a first run)"

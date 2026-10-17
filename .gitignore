@@ -1,4 +1,8 @@
 .env
+# Other env files (.env.prod, .env.local, .env.bak) can hold secrets; only the templates are tracked.
+.env.*
+!.env.example
+!.env.prod.example
 .venv/
 dockerenv/
 __pycache__/
