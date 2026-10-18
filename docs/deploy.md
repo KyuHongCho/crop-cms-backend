@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-The steps from a fresh server to a running stack behind a Let's Encrypt staging certificate are written below, but nobody has run them yet, so every command and every expected result is unproven until a run confirms it. The sections after "First start" are still an outline.
+The steps from a fresh server to a running stack behind a Let's Encrypt staging certificate are written below, but nobody has run them yet, so every command and every expected result is unproven until a run confirms it. Step 12, in "Checks from outside the network", runs a script from the laptop; the other sections after "First start" are still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -189,6 +189,39 @@ The tables, the seed data and the embeddings are created on the new database onc
 ## Checks from outside the network
 
 The public address is checked from a machine outside the server's network, and only ports 80 and 443 should answer.
+
+**Step 12, on the laptop, from the repository root, on a network that is not the server's** (a phone hotspot works). `prod/outside-check.sh` sends only GET requests, logs in nowhere, makes no paid call and needs only `curl`, `openssl` and `nc`. It runs every selected check, prints one row each (`PASS`, `FAIL`, or `SKIP` with its reason), ends with `ALL PASS` or `FAILED`, and exits 1 if any row failed and 2 on a usage error. The domain and the flags may come in any order. The groups are `tls` (certificate issuer, trust, the HTTP redirect, `/api/health`), `edge` (blocked paths, the trailing-slash redirect), `data` (the item list, the unpublished draft, one retrieval) and `ports` (5432, 8000 and 8081 must not answer). Until the database is filled, leave `data` out with `--only`. Always include `tls` in a strict run: without it, an untrusted certificate shows as plain `FAIL` rows (a status of `000` or a `curl exit 60`) instead of one `trust` failure with the rest skipped. A `closed` PASS means only that nothing answered from this network, not that the ports are shut: a mistyped domain or a network that blocks outbound ports passes too, so the check on the server itself (`ss -ltnup`) stays the proof.
+
+The first run is strict, as the production certificate will be checked. The server still has the staging certificate, so it must fail on `issuer` and `trust` and nowhere else, and the rows that would need `-k` are skipped:
+
+```sh
+bash prod/outside-check.sh demo.cropcms.com --only tls
+```
+
+```text
+FAIL issuer        STAGING certificate on a strict run; issuer: ...; notAfter: ...
+FAIL trust         curl exit 60 without -k
+PASS http-redirect ...
+SKIP health        skipped: trust failed, so this request would need -k
+```
+
+The second run expects the staging certificate, so every row passes and the exit code is 0:
+
+```sh
+bash prod/outside-check.sh --staging --only tls,edge,ports demo.cropcms.com
+```
+
+| Row | Result | What it shows |
+|---|---|---|
+| `issuer` | PASS | the certificate's issuer name contains `STAGING` |
+| `trust` | PASS | `curl` without `-k` fails with exit 60, because the staging certificate is not trusted |
+| `http-redirect` | PASS | port 80 redirects to `https://demo.cropcms.com` |
+| `health` | PASS | `/api/health` is 200 with `status` `ok` |
+| `blocked` | PASS | the readiness, docs, redoc and openapi paths answer 404 |
+| `slash` | PASS | `/api/items/` redirects with 307 to `https://demo.cropcms.com/api/items` |
+| `closed` | PASS | 5432, 8000 and 8081 refuse or time out within 5 seconds |
+
+Stop if the first run fails anywhere but `issuer` and `trust`, or the second run shows any `FAIL`. If the laptop's resolver still holds an old answer for the domain, add `--ip <elastic-ip>` to point both `curl` and `openssl` at the server directly. The table holds only public facts (issuer, expiry, status codes), so it is safe to share.
 
 ## The first admin and the demo member
 

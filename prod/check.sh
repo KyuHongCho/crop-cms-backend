@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Asserts docker-compose.prod.yaml keeps cms unpublished and the proxy minimal, ACME_CA reaches caddy with a
-# production default, .env.prod.example cannot start the stack unfilled, and docs/deploy.md passes its lint.
-# Needs docker and python3; no containers start. Dummy secrets render the file (template: env -i).
+# production default, .env.prod.example cannot start the stack unfilled, docs/deploy.md passes its lint and
+# outside-check.sh passes its stub tests. Needs docker and python3; no containers start (dummy secrets, env -i).
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 export DB_USER="${DB_USER:-cms_app}" DB_PASSWORD="${DB_PASSWORD:-dummy}" DB_HOST="${DB_HOST:-dummy-host}"
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-dummy}" SECRET_KEY="${SECRET_KEY:-dummy}"
 export SITE_ADDRESS="${SITE_ADDRESS:-example.test}"
@@ -320,5 +320,7 @@ for path in ("README.md", "docs/operations.md", "infra/README.md"):
 sys.exit(1 if fails else 0)
 PY
 status=$?
+echo "-- outside-check.sh against stub tools"
+bash prod/outside-check.test.sh || status=1
 if [ "$status" -eq 0 ]; then echo "ALL PASS"; else echo "FAILED"; cat "$TMP/prod.err" "$TMP/dev.err"; fi
 exit "$status"
