@@ -321,8 +321,8 @@ def scan_set(root, use_git):
     paths = [p for p in sorted((root / "infra").rglob("*")) if p.is_file() and ".terraform" not in p.parts and
              not re.search(r"\.tfstate|\.tfvars(\.json)?$|^tfplan$|\.tfplan$", p.name)]
     paths += sorted(root.glob("docs/*.md"))
-    paths += [root / n for n in ("README.md", "docker-compose.yaml", "docker-compose.prod.yaml", "proxy/Caddyfile",
-                                 "prod/check.sh", "prod/smoke.sh")]
+    paths += sorted(root.glob("prod/*.sh"))
+    paths += [root / n for n in ("README.md", "docker-compose.yaml", "docker-compose.prod.yaml", "proxy/Caddyfile")]
     names = None
     if use_git:
         # Untracked but not ignored counts too, so a new template is scanned before `git add`.
@@ -342,8 +342,8 @@ def scan_tree(root, use_git):
 in_git = git_run(repo, "rev-parse", "--git-dir")[0] == 0
 rels = {p.relative_to(repo).as_posix() for p in scan_set(repo, in_git)}
 want_set = {"docs/operations.md", "README.md", "docker-compose.yaml", "docker-compose.prod.yaml", "proxy/Caddyfile",
-            "prod/check.sh", "prod/smoke.sh", ".env.example"}
-check("the scan set includes the operations doc, README, both compose files, Caddyfile, prod scripts and .env.example", want_set <= rels, str(want_set - rels))
+            "prod/check.sh", "prod/smoke.sh", "prod/outside-check.sh", "prod/outside-check.test.sh", ".env.example"}
+check("the scan set includes the operations doc, README, both compose files, Caddyfile, every prod script and .env.example", want_set <= rels, str(want_set - rels))
 bad = scan_tree(repo, in_git)
 check("no private key, access key id, quoted secret, SQL password literal, account id, real IP, AWS hostname, "
       "outside e-mail or env secret value in infra/, docs, README, both compose files, Caddyfile, prod scripts or .env files", not bad, "; ".join(bad))
@@ -377,6 +377,7 @@ bad_tree = {
     "proxy/Caddyfile": "tls x@" + "gmail" + ".com\n",
     ".env.prod.example": f"SECRET_KEY={sv}\n# {dbpw}={sv}\n",
     "prod/check.sh": "h=db." + "abcdefghijkl" + ".eu-north-1.rds." + "amazonaws.com\n",
+    "prod/outside-check.test.sh": "ip=" + bad_ip + "\n",
     "README.md": "id " + "AK" + "IA" + "ABCDEFGHIJKLMNOP\n",
     "docs/other.md": "owner@" + "corp" + ".io\n",
 }
@@ -402,7 +403,7 @@ import shutil
 d = layout(bad_tree)
 found = scan_tree(d, False)
 shutil.rmtree(d)
-want = [("docs/a.md", "IPv4 " + bad_ip), ("docker-compose.prod.yaml", "AWS hostname"), ("proxy/Caddyfile", "e-mail address at line 1"), ("prod/check.sh", "AWS hostname"),
+want = [("docs/a.md", "IPv4 " + bad_ip), ("docker-compose.prod.yaml", "AWS hostname"), ("proxy/Caddyfile", "e-mail address at line 1"), ("prod/check.sh", "AWS hostname"), ("prod/outside-check.test.sh", "IPv4 " + bad_ip),
         (".env.prod.example", "env-secret value set for SECRET_KEY at line 1"), (".env.prod.example", f"env-secret value set for {dbpw} at line 2"),
         ("README.md", "access key id"), ("docs/other.md", "e-mail address at line 1")]
 miss = [w for w in want if not any(f.startswith(w[0] + ":") and w[1] in f for f in found)]
@@ -492,6 +493,21 @@ if [ "$static_only" -eq 0 ]; then
     echo "ok   shellcheck is clean"
   else
     echo "FAIL shellcheck"; fails=$((fails + 1))
+  fi
+
+  echo "-- shellcheck prod/"
+  root=$(cd .. && pwd)
+  prod_sh=()
+  for f in "$root"/prod/*.sh; do
+    [ -e "$f" ] && prod_sh+=("prod/$(basename "$f")")
+  done
+  # A glob that matched nothing must not read as a clean run.
+  if [ "${#prod_sh[@]}" -lt 4 ]; then
+    echo "FAIL shellcheck prod: the glob found only ${#prod_sh[@]} files"; fails=$((fails + 1))
+  elif dk -v "$root:/mnt:ro" -w /mnt "$SHELLCHECK_IMAGE" -x -s bash "${prod_sh[@]}"; then
+    echo "ok   shellcheck is clean on all ${#prod_sh[@]} prod scripts"
+  else
+    echo "FAIL shellcheck prod"; fails=$((fails + 1))
   fi
 
   echo "-- terraform ($TF_IMAGE)"

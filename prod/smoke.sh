@@ -2,7 +2,7 @@
 # Builds the prod stage and checks what only a running container shows. No database is
 # needed: /health and the redirect are answered before any query.
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 img="cms-prod-smoke-$$"
 cid=""
 fails=0
@@ -22,8 +22,9 @@ check "the prod stage builds" $?
 [ "$fails" -eq 0 ] || { echo FAILED; exit 1; }
 
 uid=$(docker run --rm --entrypoint id "$img" -u)
-[ -n "$uid" ] && [ "$uid" != 0 ]
-check "the app runs as a non-root user (uid $uid)" $?
+nonroot=1
+if [ -n "$uid" ] && [ "$uid" != 0 ]; then nonroot=0; fi
+check "the app runs as a non-root user (uid $uid)" "$nonroot"
 
 cid=$(docker run -d -p 127.0.0.1::8000 -e DB_HOST=nohost -e DB_USER=x -e DB_PASSWORD=x -e SECRET_KEY=x "$img")
 port=$(docker port "$cid" 8000/tcp | head -1 | awk -F: '{print $NF}')

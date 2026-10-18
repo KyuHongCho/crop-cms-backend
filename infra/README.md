@@ -441,7 +441,7 @@ credits of 100 to 200 USD up in four to eight months. Moving to the Paid plan is
 `bash infra/check.sh` needs only Docker and python3. It fails if the firewall opens anything beyond
 22 (your IP), 80, 443, if a key, token, account id, real IP, AWS endpoint name or personal e-mail
 is in these files, in `docs/*.md`, `README.md`, `docker-compose.yaml`, `docker-compose.prod.yaml`,
-`proxy/Caddyfile`, `prod/check.sh`, `prod/smoke.sh` or a `.env*` file that git tracks or would add
+`proxy/Caddyfile`, `prod/*.sh` or a `.env*` file that git tracks or would add
 (ignored ones are never read). It also fails if one of those env files gives a value to a name
 ending in PASSWORD, SECRET, KEY, TOKEN or PRIVATEKEY, or a password to a URL; blank, quoted-empty
 and `${...}` values pass. It fails if the server lacks IMDSv2 or an encrypted disk, if the budget
