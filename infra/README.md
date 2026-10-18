@@ -261,7 +261,7 @@ docker run --rm -i -e PGPASSWORD -e APP_PW postgres:17 \
 Before you close this shell, copy `APP_PW` somewhere private (a password manager): it is the only
 copy of the app role's password. On the server it becomes `DB_PASSWORD` in `/opt/cms/.env`
 (mode 600), next to `DB_HOST` set to the `db_endpoint` output. It must stay hex or alphanumeric
-(`.env.example` says why). Expect `CREATE EXTENSION`, `CREATE ROLE` and two `GRANT` lines. An
+(`.env.prod.example` says why). Expect `CREATE EXTENSION`, `CREATE ROLE` and two `GRANT` lines. An
 `APP_PW` that is empty or shorter than 16 characters stops the script before it creates anything.
 The SQL is not repeatable: a second run fails with `role "cms_app" already exists`, on purpose. To
 reset a lost password, connect the same way as the master user, load the new value into a psql
@@ -301,6 +301,11 @@ destroying again. Automated backups go with the instance (the provider default, 
 that snapshot survives.
 Restoring from it is a console or CLI task plus a Terraform import, not covered here. Never
 `-replace` the database without taking a snapshot first.
+
+## Running the app on the server
+
+This folder stops at the server and the database. What remains to run the app on them is outlined
+in [docs/deploy.md](../docs/deploy.md); it has no steps yet.
 
 ## If something fails
 
