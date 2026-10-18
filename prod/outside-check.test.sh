@@ -147,6 +147,7 @@ t "strict run against a staging server: exactly issuer and trust FAIL" 1 "issuer
 ok_if "that run has exactly two FAIL rows" test "$(rows | grep -c '^FAIL')" -eq 2
 ok_if "every SKIP row says why" test "$(rows | grep '^SKIP' | grep -c 'trust failed')" -eq 6
 t "http answers 200 with no redirect" 1 "http-redirect=FAIL" S_CODES="http:/api/health=200" S_LOCS="http:/api/health=" -- "$D"
+t "http answers 200 with an https Location" 1 "http-redirect=FAIL" S_CODES="http:/api/health=200" -- "$D"
 t "http redirects to http://" 1 "http-redirect=FAIL" S_LOCS="http:/api/health=http://$D/api/health" -- "$D"
 t "http redirects to another host" 1 "http-redirect=FAIL" S_LOCS="http:/api/health=https://other.$D/api/health" -- "$D"
 t "http redirects to a host that merely starts with the domain" 1 "http-redirect=FAIL" S_LOCS="http:/api/health=https://$D.other.$D/" -- "$D"
@@ -168,6 +169,7 @@ t "slash redirect keeps the slash" 1 "slash=FAIL" S_LOCS="https:/api/items/=http
 
 echo "-- data"
 t "items answers 500" 1 "items=FAIL no-draft=FAIL" S_CODES="https:/api/items=500" S_ITEMS_BODY= -- "$D"
+t "items answers 500 with a list body" 1 "items=FAIL no-draft=FAIL" S_CODES="https:/api/items=500" -- "$D"
 t "items is an empty list" 1 "items=FAIL" S_ITEMS_BODY='[]' -- "$D"
 t "items is not a list" 1 "items=FAIL" S_ITEMS_BODY='{"detail":"x"}' -- "$D"
 t "items is a pretty-printed non-empty list" 0 "" S_ITEMS_BODY="$(printf '[\n  {\n    "id": 1\n  }\n]')" -- "$D"
@@ -175,6 +177,7 @@ t "the draft marker is in the items body" 1 "no-draft=FAIL" S_ITEMS_BODY="[{\"bo
 t "retrieval answers 500" 1 "retrieval=FAIL" S_CODES="https:/api/retrieval/basil/optimal-temperature=500" -- "$D"
 t "retrieval reports 2 documents" 1 "retrieval=FAIL" S_RET_BODY='{"document_count":2,"documents":[{"read_directly":true},{"read_directly":true}]}' -- "$D"
 t "retrieval count says 3 but lists 2" 1 "retrieval=FAIL" S_RET_BODY='{"document_count":3,"documents":[{"read_directly":true},{"read_directly":true}]}' -- "$D"
+t "retrieval lists 3 but reports 2" 1 "retrieval=FAIL" S_RET_BODY='{"document_count":2,"documents":[{"read_directly":true},{"read_directly":false},{"read_directly":true}]}' -- "$D"
 
 echo "-- ports"
 for p in 5432 8000 8081; do
