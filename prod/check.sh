@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Asserts docker-compose.prod.yaml keeps cms unpublished and the proxy minimal, ACME_CA reaches
-# caddy with a production default, and .env.prod.example cannot start the stack unfilled.
+# caddy with a production default, and .env.prod.example cannot start the stack unfilled. Every
+# variable the compose file reads must be in the template and the operations table, and the
+# links of docs/deploy.md and the three pointers to it must resolve.
 # Needs docker and python3; no containers start. Dummy secrets render the file (template: env -i).
 set -u
 cd "$(dirname "$0")/.."
@@ -41,7 +43,7 @@ awk '/^FROM .* AS prod$/{p=1;next} /^FROM /{p=0} p' Dockerfile >"$TMP/prod-stage
 awk '/^FROM /{n=$NF} END{print n}' Dockerfile >"$TMP/last-stage"
 
 python3 - "$TMP" "$PWD" "$ACME_PROD" "$ACME_STAGING" <<'PY'
-import json, re, sys
+import json, os, re, sys
 tmp, repo, acme_prod, acme_staging = sys.argv[1:5]
 prod = json.load(open(f"{tmp}/prod.json"))["services"]
 dev = json.load(open(f"{tmp}/dev.json"))["services"]
@@ -98,7 +100,8 @@ assign = re.compile(r"\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=(.*)")
 active = [(m[1], m[2].strip()) for m in map(assign.match, tpl) if m]
 values = dict(active)
 compose_text = open(f"{repo}/docker-compose.prod.yaml").read()
-known = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_text))
+compose_vars = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", compose_text))
+known = set(compose_vars)
 known |= set(re.findall(r"^\s+([A-Z][A-Z0-9_]*):\s*$", compose_text, re.M))
 known.add("COMPOSE_PROJECT_NAME")
 filled = json.load(open(f"{tmp}/filled.json"))
@@ -118,6 +121,60 @@ check("the template has exactly one active ACME_CA line, the production URL",
 stale = sorted({k for k, _ in active} - known)
 check("every active template name is one the prod compose reads" + (f" (stale: {stale})" if stale else ""), not stale)
 check("the secrets, hosts and domain are blank in the template", all(values.get(b) == "" for b in blanks))
+
+# Commented lines count: the optional variables are documented as `# NAME=default`.
+mentioned = set(re.findall(r"^\s*#?\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=", "\n".join(tpl), re.M))
+documented = compose_vars | {"COMPOSE_PROJECT_NAME"}
+ops = open(f"{repo}/docs/operations.md").read()
+table = ops.split("\n## Environment variables", 1)[-1]
+rows = set(re.findall(r"^\| `([A-Z][A-Z0-9_]*)`", table, re.M))
+miss_tpl, miss_row = sorted(documented - mentioned), sorted(documented - rows)
+check("every variable of the prod compose is assigned in the template" + (f" (missing: {miss_tpl})" if miss_tpl else ""), not miss_tpl)
+check("every variable of the prod compose has a row in the operations table" + (f" (missing: {miss_row})" if miss_row else ""), not miss_row)
+
+def read(path):
+    return open(f"{repo}/{path}").read()
+
+def strip_fences(text):
+    return re.sub(r"^ {0,3}(```|~~~).*?^ {0,3}\1[^\n]*$", "", text, flags=re.M | re.S)
+
+def slugs(text):
+    seen, out = {}, set()
+    for h in re.findall(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$", strip_fences(text), re.M):
+        h = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", h)
+        base = re.sub(r"[^\w\- ]", "", h.lower()).replace(" ", "-")
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        out.add(base if n == 0 else f"{base}-{n}")
+    return out
+
+def links(text):
+    return re.findall(r"\[[^\]]*\]\(([^)\s]+)\)", strip_fences(text))
+
+def dead_links(path):
+    base = os.path.dirname(f"{repo}/{path}")
+    bad = []
+    for target in links(read(path)):
+        if re.match(r"[a-z][a-z0-9+.-]*:", target):
+            continue
+        file, _, frag = target.partition("#")
+        dest = os.path.normpath(os.path.join(base, file)) if file else f"{repo}/{path}"
+        if not os.path.isfile(dest) or (frag and frag not in slugs(open(dest).read())):
+            bad.append(target)
+    return bad
+
+fixture = "# T\n## Under_score x\n## Dup\n```\n## in a fence\n```\n## Dup\n## Dup\n"
+check("the anchor fixture resolves an underscore heading and Dup, Dup-1, Dup-2, not a fenced one",
+      slugs(fixture) == {"t", "under_score-x", "dup", "dup-1", "dup-2"})
+
+bad = dead_links("docs/deploy.md")
+check("every link of docs/deploy.md resolves, fragments included" + (f" (dead: {bad})" if bad else ""), not bad)
+check("docs/deploy.md has no fenced code block (it stays an outline)",
+      not re.search(r"^ {0,3}(```|~~~)", read("docs/deploy.md"), re.M))
+for path in ("README.md", "docs/operations.md", "infra/README.md"):
+    ok = any(os.path.normpath(os.path.join(os.path.dirname(f"{repo}/{path}"), t.partition("#")[0])) == f"{repo}/docs/deploy.md"
+             for t in links(read(path)) if not re.match(r"[a-z][a-z0-9+.-]*:", t))
+    check(f"{path} links to docs/deploy.md", ok)
 
 sys.exit(1 if fails else 0)
 PY

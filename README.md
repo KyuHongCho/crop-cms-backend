@@ -165,7 +165,8 @@ SITE_DIR=../crop-cms-frontend/dist docker compose --profile proxy up -d --wait p
 `docker-compose.prod.yaml` is the production counterpart: a standalone file with only `cms` (the
 `prod` image target, no published port, no source mount) and `caddy` (ports 80 and 443), and no
 database service. `bash prod/check.sh` asserts that shape and `bash prod/smoke.sh` builds and runs
-the image; both run in CI. Nothing here has run it against a real server yet.
+the image; both run in CI. Nothing here has run it against a real server yet; what remains is
+outlined in [docs/deploy.md](docs/deploy.md).
 
 Why same-origin, the Caddy behaviours that shape the config and what is not decided yet:
 [design notes](docs/design-notes.md#how-the-browser-reaches-the-api).
@@ -210,6 +211,7 @@ are in [operations](docs/operations.md#migrations).
 - [`docs/api.md`](docs/api.md) — every endpoint, and `POST /chat` in detail.
 - [`docs/operations.md`](docs/operations.md) — members and the token budget, login throttling,
   migrations, embeddings, topic selection, health checks and the environment variables.
+- [`docs/deploy.md`](docs/deploy.md) — an outline of what remains to run the app on the server.
 - [`docs/live-eval.md`](docs/live-eval.md) — the manual live eval of `POST /chat` and its measured
   results.
 - [`docs/design-notes.md`](docs/design-notes.md) — the reasoning behind the decisions, trade-offs and
