@@ -16,7 +16,7 @@ Stop and ask rather than guess when any of these holds:
 - `sudo ufw status` says the firewall is active (step 2): ports 80 and 443 may be blocked on the host itself.
 - The build is killed or `dmesg` shows out-of-memory lines (step 6): wait if CPU credits are the cause and retry once; a second failure is a decision for the owner, not a third try.
 - `df -h /` shows more than 85 percent used: `docker builder prune -f`, then `docker image prune -f` (dangling images only).
-- The readiness request in step 10 is not 200: the database is not reachable, so do not go on; check `DB_HOST`, that `DB_PASSWORD` is hex, the security group and `PGSSLMODE`.
+- The readiness request in step 10 is not 200: the database is not reachable, so do not go on; check `DB_HOST`, that `DB_PASSWORD` is hex or alphanumeric only, the security group and `PGSSLMODE`.
 
 Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never run a compose command without `--env-file /opt/cms/.env`, and never print the rendered configuration (`config` without `-q` shows every secret).
 
