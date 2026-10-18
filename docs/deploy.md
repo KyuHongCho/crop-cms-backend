@@ -30,7 +30,7 @@ The public address is checked from a machine outside the server's network, and o
 
 ## The first admin and the demo member
 
-The first admin and the shared demo member are created after the app is up; see [members and the token budget](operations.md#members-and-the-token-budget).
+The first admin and the shared demo member are created after the app is up; invites, roles and the starting budget are in [members and the token budget](operations.md#members-and-the-token-budget).
 
 ## Redeploying
 

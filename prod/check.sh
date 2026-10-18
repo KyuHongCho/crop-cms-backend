@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Asserts docker-compose.prod.yaml keeps cms unpublished and the proxy minimal, ACME_CA reaches
-# caddy with a production default, and .env.prod.example cannot start the stack unfilled. Every
-# variable the compose file reads must be in the template and the operations table, and the
-# links of docs/deploy.md and the three pointers to it must resolve.
+# caddy with a production default, and .env.prod.example cannot start the stack unfilled.
 # Needs docker and python3; no containers start. Dummy secrets render the file (template: env -i).
 set -u
 cd "$(dirname "$0")/.."
