@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Asserts docker-compose.prod.yaml keeps cms unpublished and the proxy minimal, ACME_CA reaches
-# caddy with a production default, and .env.prod.example cannot start the stack unfilled.
+# Asserts docker-compose.prod.yaml keeps cms unpublished and the proxy minimal, ACME_CA reaches caddy with a
+# production default, .env.prod.example cannot start the stack unfilled, and docs/deploy.md passes its lint.
 # Needs docker and python3; no containers start. Dummy secrets render the file (template: env -i).
 set -u
 cd "$(dirname "$0")/.."
@@ -167,8 +167,151 @@ check("the anchor fixture resolves an underscore heading and Dup, Dup-1, Dup-2, 
 
 bad = dead_links("docs/deploy.md")
 check("every link of docs/deploy.md resolves, fragments included" + (f" (dead: {bad})" if bad else ""), not bad)
-check("docs/deploy.md has no fenced code block (it stays an outline)",
-      not re.search(r"^ {0,3}(```|~~~)", read("docs/deploy.md"), re.M))
+
+COMPOSE_CMD = re.compile(r"\bdocker\s+compose\b")
+READ_P = re.compile(r"(^|[;&|\s])read(\s+[^;&|]*)?\s-[a-zA-Z0-9]*p")  # \s: POSIX classes do not work in re
+HAS_FILE = re.compile(r"(?<!\S)-f\s+docker-compose\.prod\.yaml(?!\S)")
+HAS_ENV = re.compile(r"(?<!\S)--env-file\s+/opt/cms/\.env(?!\S)")
+NO_PROJECT = {"version"}
+TAKES_ARG = {"-f", "--file", "--env-file", "-p", "--project-name", "--profile", "--project-directory",
+             "--ansi", "--parallel", "--progress"}
+
+def fenced_blocks(text):
+    blocks, cur, closed = [], None, True
+    for n, line in enumerate(text.split("\n"), 1):
+        m = re.match(r"^ {0,3}(`{3,}|~{3,})\s*(\S*)(.*)$", line)
+        if cur is None:
+            if m:
+                cur = (m[1], m[2], [])
+        elif m and m[1][0] == cur[0][0] and len(m[1]) >= len(cur[0]) and not m[2] and not m[3].strip():
+            blocks.append((cur[1], cur[2]))
+            cur = None
+        else:
+            closed = closed and not m  # a fence line inside a fence: a close went missing
+            cur[2].append((n, line))
+    if cur is not None:
+        blocks.append((cur[1], cur[2]))
+        closed = False
+    return blocks, closed
+
+def logical_lines(lines):
+    out, buf, start = [], "", None
+    for n, line in lines:
+        start = n if start is None else start
+        if line.rstrip().endswith("\\"):
+            buf += line.rstrip()[:-1] + " "
+        else:
+            out.append((start, buf + line))
+            buf, start = "", None
+    return out + ([(start, buf)] if buf else [])
+
+def simple_commands(line):
+    parts, cur, quote = [], "", None
+    for ch in line:
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "|;&":
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    return parts + [cur]
+
+def subcommand(tokens):
+    i = 0
+    while i < len(tokens):
+        if tokens[i] in TAKES_ARG:
+            i += 2
+        elif tokens[i].startswith("-"):
+            i += 1
+        else:
+            return tokens[i], tokens[i + 1:]
+    return "", []
+
+def lint(text):
+    blocks, closed = fenced_blocks(text)
+    bad, composes = [], 0
+    if not closed:
+        bad.append(("L4", 0, "a fence is never closed"))
+    if not blocks:
+        bad.append(("L4", 0, "no fenced block at all"))
+    for info, lines in blocks:
+        if info.lower() == "text":  # output, not commands
+            continue
+        for n, line in logical_lines(lines):
+            if READ_P.search(line):
+                bad.append(("L3", n, line.strip()))
+            for part in simple_commands(line):
+                m = COMPOSE_CMD.search(part)
+                if not m:
+                    continue
+                composes += 1
+                args = part[m.end():]
+                tokens = args.split()
+                sub, rest = subcommand(tokens)
+                if sub not in NO_PROJECT and not (HAS_FILE.search(args) and HAS_ENV.search(args)):
+                    bad.append(("L1", n, line.strip()))
+                if (sub == "run"
+                        or (sub == "down" and any(re.fullmatch(r"-[a-zA-Z]*v[a-zA-Z]*|--volumes", t) for t in rest))
+                        or ("--force-recreate" in tokens and "--no-deps" not in tokens)
+                        or (sub == "config" and not {"-q", "--quiet"} & set(rest))):
+                    bad.append(("L2", n, line.strip()))
+    if not composes:
+        bad.append(("L4", 0, "no docker compose command found"))
+    return bad
+
+def fenced(snippet, info="sh"):
+    return f"```{info}\n{snippet}\n```\n"
+
+def rules(snippet, info="sh"):
+    return {r for r, _, _ in lint(fenced(snippet, info)) if r != "L4"}
+
+PROD = "docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env"
+for snippet in ("docker compose up -d",
+                "docker compose -f docker-compose.prod.yaml up -d",
+                "docker compose --env-file /opt/cms/.env up -d",
+                "docker compose -f docker-compose.yaml --env-file /opt/cms/.env up -d",
+                "docker compose -f docker-compose.prod.yaml --env-file .env up -d",
+                "docker compose -f other.yaml -p docker-compose.prod.yaml --env-file /opt/cms/.env up -d",
+                "docker compose -f docker-compose.prod.yaml \\\n  up -d",
+                f"{PROD} ps && docker compose ps"):
+    check(f"L1 flags: {snippet!r}", rules(snippet) == {"L1"})
+for snippet in (PROD + " up -d", "docker compose version",
+                "docker compose -f docker-compose.prod.yaml \\\n  --env-file /opt/cms/.env \\\n  up -d"):
+    check(f"L1 passes: {snippet!r}", "L1" not in rules(snippet))
+check("L1 does not lint a text block", not rules("docker compose up -d", "text"))
+for snippet in (f"{PROD} run cms alembic upgrade head", f"{PROD} down -v", f"{PROD} down -fv", f"{PROD} down --volumes",
+                f"{PROD} up -d --force-recreate caddy", f"{PROD} config"):
+    check(f"L2 flags: {snippet!r}", rules(snippet) == {"L2"})
+for snippet in (f"{PROD} down", f"{PROD} up -d --force-recreate --no-deps cms", f"{PROD} config -q",
+                f"{PROD} config --quiet", f"{PROD} exec -T cms python -m scripts.seed"):
+    check(f"L2 passes: {snippet!r}", rules(snippet) == set())
+for snippet in ("read -p x V", "read -rsp x V", "read -sp V", 'read -rs -p "x" V', "read -r -s -p x V",
+                "read -rp x V", "read -t 5 -p x V", "read -n1 -p x V", 'read -r -d "" -p x V',
+                "while read -r -p x l; do :; done"):
+    check(f"L3 flags: {snippet!r}", rules(snippet) == {"L3"})
+for snippet in ("read -rs PW", "read -r ADMIN_EMAIL", 'read -rs "PW?x"', "read -t 5 PW",
+                "while read -r line; do :; done", 'read -d "" line', 'printf "x: "; read -rs PW; echo',
+                "read -r a b", "read -n1 k"):
+    check(f"L3 passes: {snippet!r}", rules(snippet) == set())
+GOOD = fenced(PROD + " ps")
+check("L4 passes a balanced document with a compose command", lint(GOOD) == [])
+check("L4 flags an unclosed fence", [r for r, _, _ in lint("```sh\n" + PROD + " ps\n")] == ["L4"])
+check("L4 flags a missing close that the next fence swallows",
+      [r for r, _, _ in lint("```sh\n" + PROD + " ps\n```sh\n" + PROD + " ps\n```\n")] == ["L4"])
+check("L4 flags a document with no fence", [r for r, _, _ in lint("no fence here\n")].count("L4") == 2)
+check("L4 flags a fenced document with no compose command", [r for r, _, _ in lint(fenced("ls"))] == ["L4"])
+check("L4 does not count a text block's compose command", [r for r, _, _ in lint(fenced(PROD + " ps", "text"))] == ["L4"])
+
+found = lint(read("docs/deploy.md"))
+for rule, what in (("L1", "every docker compose command names -f docker-compose.prod.yaml and --env-file /opt/cms/.env"),
+                   ("L2", "no compose run, no down -v, no --force-recreate without --no-deps, no config without -q"),
+                   ("L3", "no read with a -p flag"),
+                   ("L4", "balanced fences, at least one fence and one docker compose command")):
+    hits = [f"line {n}: {t[:60]}" for r, n, t in found if r == rule]
+    check(f"docs/deploy.md ({rule}): {what}" + (f" (found: {hits})" if hits else ""), not hits)
 for path in ("README.md", "docs/operations.md", "infra/README.md"):
     ok = any(os.path.normpath(os.path.join(os.path.dirname(f"{repo}/{path}"), t.partition("#")[0])) == f"{repo}/docs/deploy.md"
              for t in links(read(path)) if not re.match(r"[a-z][a-z0-9+.-]*:", t))
