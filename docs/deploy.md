@@ -477,7 +477,7 @@ That both services come back `healthy` on their own relies on `restart: unless-s
 
 ### If a production-certificate step fails
 
-None of these was seen on the real run; the rows come from Let's Encrypt's published limits and Caddy's documented behaviour. The only failure met in steps 19-27, the hotspot timeout of step 21, is under "If something fails" at the end.
+None of these was seen on the real run; the certificate rows come from Let's Encrypt's published limits and Caddy's documented behaviour, and the port and reboot rows are the expected repairs, not seen either. The only failure met in steps 19-27, the hotspot timeout of step 21, is under "If something fails" at the end.
 
 | Situation | Seen as | Repair |
 |---|---|---|
