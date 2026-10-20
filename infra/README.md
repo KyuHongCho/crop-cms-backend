@@ -304,8 +304,9 @@ Restoring from it is a console or CLI task plus a Terraform import, not covered 
 
 ## Running the app on the server
 
-This folder stops at the server and the database. What remains to run the app on them is outlined
-in [docs/deploy.md](../docs/deploy.md); it has no steps yet.
+This folder stops at the server and the database. Running the app on them (the build, the certificate,
+the database fill, the first admin and one chat answer) is in [docs/deploy.md](../docs/deploy.md), which was run on
+this server.
 
 ## If something fails
 
@@ -495,6 +496,10 @@ parameter group from RDS's default). The parameter group was `in-sync`; `max_con
 <db_endpoint> 5432` from the laptop timed out. Replacing the server with `-replace=aws_instance.cms`
 completed, the new server came up and `cloud-init` said `done`.
 
+On the first deploy (2026-10-19), `cms_app` ran the migrations and `alembic current` against this
+database from the app container, over TLS, and the head revision printed; the steps and what they
+showed are in [docs/deploy.md](../docs/deploy.md).
+
 ## What is not verified
 
 - Running the bootstrap script a second time ("safe to run again") against the real account was not
@@ -506,8 +511,7 @@ completed, the new server came up and `cloud-init` said `done`.
 - The forecast alert and the prices above are unchecked.
 - Still unverified for the database: backup retention of 2; higher retention on a Paid plan;
   `host.docker.internal` on Linux; verify-full TLS (not done); free backup storage behaviour; and
-  the real bill. Not yet checked: that `cms_app` can run `alembic current` against this database;
-  that moves to the first deploy.
+  the real bill.
 - The Secrets Manager and RDS lines in the IAM lists are derived, not run; the last three
   Secrets Manager actions are guesses.
 - The Free plan limits above (six months, credits, suspension) are from AWS's plan page as read

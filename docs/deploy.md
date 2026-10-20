@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, were run on 2026-10-19 on the real server, and steps 19-27, in "Switching to the production certificate", on 2026-10-20; each step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network, and the site is live behind a Let's Encrypt production certificate. The steps from 28 on, in "The first admin and the demo member", are unproven until they are run: where a result is a prediction the text says so. Redeploying is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Redeploying is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -196,9 +196,9 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env down
 
 ### Memory and disk
 
-The server has 1 GiB of RAM plus 1 GiB of swap and a 10 GB root disk, and its CPU credits are in `standard` mode (`infra/main.tf`), where a drained balance slows everything instead of billing extra.
+The server has 1 GiB of RAM plus 1 GiB of swap and a 10 GB root disk, and its CPU credits are in `standard` mode (`infra/main.tf`), where a drained balance slows everything instead of billing extra. The image build and the running stack fit in that memory on the real server; the figures are in [What was verified on the server](#what-was-verified-on-the-server).
 
-Measured on the real server (first run): the image build took 1m13s of wall time. During it the lowest `available` figure was 433 MiB, swap use was at most 47 MiB, the out-of-memory count in `dmesg` was 0 and CPU steal (`st`) was at most 4. The root disk `/` is 8.7 GB: 3.8 GB used before the build, 6.8 GB (78 percent) after it, and 6.9 GB (79 percent) with the stack up. After the build `docker system df` showed one image of 1.836 GB and a build cache of 1.837 GB (15 entries), of which only 1.278 MB is reclaimable. The idle stack uses about 430 MiB, with 475 MiB available; `cms` uses 102 MiB and `caddy` 13 MiB. Around the database steps `available` was 514 MiB (swap used 91 MiB) before the seed and 517 MiB (swap used 98 MiB) after the reindex. Redeploys have not been measured yet, so how many the disk holds is not known; the 85 percent stop rule leaves about 0.6 GB above the figure after the build.
+**Disk budget.** The root file system is 8.7 GB. After the first deploy it read 6.9 GB used and 1.9 GB free (80 percent), and the 85 percent stop rule stops at about 7.4 GB used, so there is about 0.5 GB of room. How much one rebuild after a code change adds was not measured, so how many redeploys the disk holds is not known and no number is given. At the next redeploy run `df -h /` and `docker system df` before and after the rebuild and write both down. After the first build only 1.278 MB of the 1.837 GB build cache was reclaimable, so `docker builder prune -f` may free little; run the pruning of the stop rules only when `df -h /` is above 85 percent, and record what it freed.
 
 ## Database migration and seed
 
@@ -277,7 +277,7 @@ Once a member exists, never run it: undoing the migrations would delete the memb
 
 The public address is checked from a machine outside the server's network, and only ports 80 and 443 should answer.
 
-**Step 12, on the laptop, from the repository root, on a network that is not the server's** (a phone hotspot works). `prod/outside-check.sh` sends only GET requests, logs in nowhere, makes no paid call and needs only `curl`, `openssl` and `nc`. It runs every selected check, prints one row each (`PASS`, `FAIL`, or `SKIP` with its reason), ends with `ALL PASS` or `FAILED`, and exits 1 if any row failed and 2 on a usage error. The domain and the flags may come in any order. The groups are `tls` (certificate issuer, trust, the HTTP redirect, `/api/health`), `edge` (blocked paths, the trailing-slash redirect), `data` (the item list, the unpublished draft, one retrieval) and `ports` (5432, 8000 and 8081 must not answer). Until the database is filled, leave `data` out with `--only`. Always include `tls` in a strict run: without it, an untrusted certificate shows as plain `FAIL` rows (a status of `000` or a `curl exit 60`) instead of one `trust` failure with the rest skipped. A `closed` PASS means only that nothing answered from this network, not that the ports are shut: a mistyped domain or a network that blocks outbound ports passes too, so the check on the server itself (`ss -ltnup`) stays the proof.
+**Step 12, on the laptop, from the repository root, on a network that is not the server's** (a phone hotspot is enough, but a slow one can make a request time out, see "If something fails" at the end). `prod/outside-check.sh` sends only GET requests, logs in nowhere, makes no paid call and needs only `curl`, `openssl` and `nc`. It runs every selected check, prints one row each (`PASS`, `FAIL`, or `SKIP` with its reason), ends with `ALL PASS` or `FAILED`, and exits 1 if any row failed and 2 on a usage error. The domain and the flags may come in any order. The groups are `tls` (certificate issuer, trust, the HTTP redirect, `/api/health`), `edge` (blocked paths, the trailing-slash redirect), `data` (the item list, the unpublished draft, one retrieval) and `ports` (5432, 8000 and 8081 must not answer). Until the database is filled, leave `data` out with `--only`. Always include `tls` in a strict run: without it, an untrusted certificate shows as plain `FAIL` rows (a status of `000` or a `curl exit 60`) instead of one `trust` failure with the rest skipped. A `closed` PASS means only that nothing answered from this network, not that the ports are shut: a mistyped domain or a network that blocks outbound ports passes too, so the check on the server itself (`ss -ltnup`) stays the proof.
 
 The first run is strict, as the production certificate will be checked. The server still has the staging certificate, so it must fail on `issuer` and `trust` and nowhere else, and the rows that would need `-k` are skipped:
 
@@ -477,16 +477,18 @@ That both services come back `healthy` on their own relies on `restart: unless-s
 
 ### If a production-certificate step fails
 
+None of these was seen on the real run; the rows come from Let's Encrypt's published limits and Caddy's documented behaviour. The only failure met in steps 19-27, the hotspot timeout of step 21, is under "If something fails" at the end.
+
 | Situation | Seen as | Repair |
 |---|---|---|
 | Typo in the `ACME_CA` URL | issuance errors in the log; the strict run fails | Stop Caddy as in the stop rules, fix the line, then `up -d --no-deps --wait caddy` as in step 20. This is the repair start. The attempt may count as a failure. |
-| The staging certificate is still served after the switch | the strict `issuer` row says STAGING, and the log has no `certificate obtained successfully` | Wait two more minutes and read the log again. If Caddy still keeps the staging certificate, use the volume steps below (the repair start). |
+| The staging certificate is still served after the switch | the strict `issuer` row says STAGING, and the log has no `certificate obtained successfully` | Not seen: the strict run that passed after step 20 showed the production issuer. Wait two more minutes and read the log again. An offline test with Caddy 2.11.7, made while the production-certificate steps were being checked and not on the real server, showed that Caddy ignores a staging certificate once the authority is production, so the volume steps below are probably never needed (unconfirmed); stop and ask before using them. |
 | Production issuance fails (DNS, port 80 or 443, wrong name) | a challenge failure in the log | Stop Caddy at once so it stops retrying. Each failed authorization uses the hourly failure allowance (5 per name per hour, one refilled every 12 minutes); wait 12 minutes for every failure the log shows, fix the cause, then the repair start. It is not a weekly slot. |
 | `too many certificates` for the exact set of names | log text with a retry time | Stop Caddy. The exact-set limit (5 per 7 days for exactly these names) refills one certificate per 34 hours and has no override; the registered-domain limit (50 per 7 days) has an override request, per the Let's Encrypt page. Put the staging line back and run `up -d --no-deps --wait caddy`, so the API answers (untrusted) meanwhile. `acme_ca` makes Let's Encrypt the only authority (see the `ACME_CA` row of [the variable table](operations.md#environment-variables)), and changing the set of names to get around the limit is deliberately not done. Re-plan the timing. |
 | 22 (from a network outside `ssh_cidr`), 5432, 8000 or 8081 answers | step 23 or 24 | Stop. Read the security group in the console (read-only) and the `ss` listing again. |
 | The server does not come back cleanly | a service is down, no swap, or SSH refused | Look at the instance status checks in the console and run `sudo journalctl -u docker`, then `up -d` from `/opt/cms/app` with the two flags. The data is on the database and in the volumes, so nothing is lost. |
 
-**The staging certificate persists.** Only while no production certificate exists, and as the repair start. Stop Caddy and copy the volume out first (the copy holds the certificate's private key: keep it on the server, never paste it; the first `docker run` downloads the small `busybox` image):
+**If the staging certificate persists (not seen, probably never needed).** Only while no production certificate exists, and as the repair start. Stop Caddy and copy the volume out first (the copy holds the certificate's private key: keep it on the server, never paste it; the first `docker run` downloads the small `busybox` image):
 
 ```sh
 cd /opt/cms/app
@@ -503,7 +505,7 @@ docker run --rm -v cms_caddy_data:/data busybox rm -r /data/caddy/certificates/a
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --no-deps --wait caddy
 ```
 
-Whether Caddy really keeps a staging certificate in storage after the switch is unconfirmed: the per-authority directory layout is expected from Caddy's behaviour but was not seen. Never delete the volume, never run `down -v`, and once a production certificate has been obtained never remove anything from the volume or recreate the certificate "to try again".
+Whether Caddy keeps a staging certificate in storage after the switch is unconfirmed: it did not happen on the real run, and the per-authority directory layout above is expected from Caddy's behaviour but was not seen. Never delete the volume, never run `down -v`, and once a production certificate has been obtained never remove anything from the volume or recreate the certificate "to try again".
 
 ## The first admin and the demo member
 
@@ -576,7 +578,7 @@ unset MEMBER_EMAIL MEMBER_PASSWORD
 free -m
 ```
 
-Then, on the laptop, put exactly one question as the demo member. `curl` prints the status and the time of the call (`time_total`, in seconds) and writes the answer to a private temporary file; the `python3` line prints the non-secret fields, then the answer text for you to read. Expect `status 200`, `abstained` `null`, `truncated` `false`, a non-empty `documents` list and keys such as `S1`. Caddy waits up to 120 seconds for the answer, and the command gives up after 150. The time and the exact shape of a real answer are unconfirmed until the run.
+Then, on the laptop, put exactly one question as the demo member. `curl` prints the status and the time of the call (`time_total`, in seconds) and writes the answer to a private temporary file; the `python3` line prints the non-secret fields, then the answer text for you to read. Expect `status 200`, `abstained` `null`, `truncated` `false`, a non-empty `documents` list and keys such as `S1`. Caddy waits up to 120 seconds for the answer, and the command gives up after 150. On the real run the status was 200 after 18.149 s, with `abstained` `null`, `truncated` `false` and 7 documents (`S1` to `S7`).
 
 ```sh
 CHAT_OUT=$(mktemp)
@@ -595,7 +597,7 @@ curl -s -K <(printf 'header = "Authorization: Bearer %s"\n' "$DEMO_TOKEN") https
 free -m
 ```
 
-**Step 35, the published-only count.** On the server this prints the number of published documents, and on the laptop the number of documents the public list returns; the two numbers must be equal (61 on a freshly seeded database: the seed has 62 documents, and the unpublished draft is in neither number). Equal numbers show that the list holds published documents only; the value on the real server is unconfirmed until the run.
+**Step 35, the published-only count.** On the server this prints the number of published documents, and on the laptop the number of documents the public list returns; the two numbers must be equal (61 on a freshly seeded database: the seed has 62 documents, and the unpublished draft is in neither number). Equal numbers show that the list holds published documents only; on the real server both printed 61.
 
 ```sh
 cd /opt/cms/app
@@ -606,7 +608,7 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms 
 curl -s https://demo.cropcms.com/api/items | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))'
 ```
 
-**Step 36, log hygiene, then clear the secrets.** On the server, both commands print a count and no log line: the first counts requests in the Caddy log that carry a token after the word `Bearer` (a `401` answer shows the bare word `Bearer` in its `WWW-Authenticate` header, which does not match), the second counts SQL text of a member insert in the `cms` log. Both must print `0`. Caddy writes the `Authorization` header of a request as `REDACTED` in its request log (seen in a local test of this Caddyfile); on the real server that is unconfirmed until the run, and these counts are the check.
+**Step 36, log hygiene, then clear the secrets.** On the server, both commands print a count and no log line: the first counts requests in the Caddy log that carry a token after the word `Bearer` (a `401` answer shows the bare word `Bearer` in its `WWW-Authenticate` header, which does not match), the second counts SQL text of a member insert in the `cms` log. Both must print `0`. Caddy writes the `Authorization` header of a request as `REDACTED` in its request log (seen in a local test of this Caddyfile); on the real server both counts were 0.
 
 ```sh
 cd /opt/cms/app
@@ -632,9 +634,9 @@ unset LOCKED_EMAIL
 
 ### What the chat costs and what it needs in memory
 
-One question is one paid call to each provider. The classifier answers at most 256 tokens and the generator at most 1024 (`app/chat/llm.py`), and the measured median is 2771 tokens per question on the previous model (`docs/live-eval.md`; the current default has not been measured). At the listed Haiku 5.5 price of $0.50 per million output tokens, which was read on 2026-10-12 and is unverified since, one question costs about $0.002 even if every token were billed at the output rate; the embedding of the question adds a few hundred tokens at $0.02 per million. The demo member's cap of 100000 tokens a day is therefore at most about $0.05 a day (concurrent requests can overshoot the cap), and the provider limits of the gate are the second bound.
+One question is one paid call to each provider. The classifier answers at most 256 tokens and the generator at most 1024 (`app/chat/llm.py`), and the measured median is 2771 tokens per question on the previous model (`docs/live-eval.md`; the current default has not been measured here, but the first real question counted 4021 tokens, so about 24 such questions fit in the 100000 a day). At the listed Haiku 5.5 price of $0.50 per million output tokens, which was read on 2026-10-12 and is unverified since, one question costs about $0.002 even if every token were billed at the output rate; the embedding of the question adds a few hundred tokens at $0.02 per million. The demo member's cap of 100000 tokens a day is therefore at most about $0.05 a day (concurrent requests can overshoot the cap), and the provider limits of the gate are the second bound. The cost per question is not confirmed: the month's total on the provider's usage page was accounted for by the earlier live-evaluation runs, and the first real question had not appeared on the page yet, so its cost stays an unverified estimate.
 
-Each login hashes the password with Argon2, about 64 MiB, and at most four hashes run at once, so a burst of logins stays near 325 MiB; that is a figure from a laptop and unconfirmed on the server. The steps hash four passwords, one after the other (two signups, two logins). Compare the `available` figures of `free -m` before and after step 34 with the 484 MiB of step 27; they are unconfirmed until the run.
+Each login hashes the password with Argon2, about 64 MiB, and at most four hashes run at once, so a burst of logins stays near 325 MiB; that is a figure from a laptop and unconfirmed on the server. The steps hash four passwords, one after the other (two signups, two logins). On the real server `available` was 519 MiB before step 34 and 392 MiB after it (484 MiB after the reboot of step 27).
 
 ### If a step of this section fails
 
@@ -643,8 +645,9 @@ Each login hashes the password with Argon2, about 64 MiB, and at most four hashe
 | Signup `400` | step 29 or 32 prints `400` | The invite is unknown, used or expired, or the address is already registered. Make a new invite (step 28, or step 31 for the demo member); if the address is registered, the member exists, so go on. |
 | Signup `422` | `422` | A field is refused: the password is under 8 characters, or the code is under 20. Never paste the body. |
 | Step 30 prints `0` | no row changed | Wrong address, or step 29 failed: repeat step 30 with the address of step 29. |
-| Admin login prints a length of `0` | step 31 | Wrong address or password (one `401` answer covers both), a lock (`429`), or an app error (an empty `SECRET_KEY` in `/opt/cms/.env` gives `500`). Each wrong login counts toward the lock, so retry once at most: repeat the first two lines of step 31, because `MEMBER_EMAIL` and `MEMBER_PASSWORD` are still set after step 29. If they were cleared or the terminal was replaced, use the admin's login block below the table. |
-| Demo login prints a length of `0` | step 33 | Wrong address or password (one `401` answer covers both), a deleted member, a lock (`429`), or an app error (an empty `SECRET_KEY` in `/opt/cms/.env` gives `500`). Each wrong login counts toward the lock, so retry once at most, with the demo member's login block below the table, because step 33 cleared the variables. |
+| Admin login prints a length of `0` | step 31 | Wrong address or password (one `401` answer covers both), a lock (`429`), or an app error (an empty `SECRET_KEY` in `/opt/cms/.env` gives `500`). Each wrong login counts toward the lock, so retry once at most: repeat the first two lines of step 31, because `MEMBER_EMAIL` and `MEMBER_PASSWORD` are still set after step 29. If they were cleared or the terminal was replaced, use the admin's login block below the table. When the whole of step 31 was pasted as one block, the failed login also left `DEMO_INVITE` empty: once the admin token works, run the last two lines of step 31 again. If the retry also fails, stop and ask: the password cannot be changed through the API, and the last admin cannot be deleted. |
+| Admin token length above 100, invite length `0` | step 31 | The login worked but the invite request failed: the member is not an admin (the route answers `403`; check that step 30 printed `1`, and repeat it if not), or the body was refused (`422`) or the app failed (`500`). Repeat the last two lines of step 31 after the cause is fixed. |
+| Demo login prints a length of `0` | step 33 | Wrong address or password (one `401` answer covers both), a deleted member, a lock (`429`), or an app error (an empty `SECRET_KEY` in `/opt/cms/.env` gives `500`). Each wrong login counts toward the lock, so retry once at most, with the demo member's login block below the table, because step 33 cleared the variables. If the retry also fails, the demo password may have been mistyped at step 32: use the row "Wrong role, or a wrong demo account" below (delete the member as admin, then sign up again with a new invite). |
 | Login or any call answers `429` | status `429` | The account is locked (ten wrong logins in 900 seconds), or the chat budget is spent. For the lock use step 37; the chat budget resets when the day changes in the database. |
 | Token calls answer `401` | status `401` | The token is older than 30 minutes: log in again with the matching block below the table (the demo member's for `DEMO_TOKEN`, the admin's for `ADMIN_TOKEN`). |
 | Step 32 failed after it cleared `DEMO_INVITE` | the signup printed anything but `201` | Make a new demo invite first: run the last two lines of step 31 (they need `ADMIN_TOKEN`; if it is unset or older than 30 minutes, run the admin's login block below the table first), then repeat step 32. |
@@ -695,10 +698,35 @@ When done, clear the shell again:
 unset ADMIN_TOKEN MEMBER_EMAIL MEMBER_PASSWORD MEMBER_ID
 ```
 
+## What was verified on the server
+
+Measured on the real server (1 GiB of RAM, 904 MiB usable, and 1023 MiB of swap) while running the steps of this document, on 2026-10-19 (steps 1-18) and 2026-10-20 (steps 19-36).
+
+- **Software.** Docker 29.9.1 and Docker Compose v5.6.0.
+- **Image build.** 1m13s on the 1 GiB host. The lowest `available` figure was 433 MiB, swap use at most 47 MiB, CPU steal (`st`) at most 4, and the out-of-memory count in `dmesg` 0. The CPU credit balance was 288 before the build and still 288 about a day later (the cap for this size is believed to be 288, unconfirmed).
+- **Disk.** The root file system is 8.7 GB. Used: 3.8 GB before the build, 6.8 GB (78 percent) after it, 6.9 GB (79 percent) with the stack up after the first start, and 6.9 GB used with 1.9 GB free (80 percent) 18 hours after the reboot. `docker system df` after the build: images 1.836 GB, build cache 1.837 GB (15 entries) with 1.278 MB reclaimable. Later: 2 images 1.925 GB, 2 containers 1.7 MB, 2 volumes 14.49 kB, build cache 1.837 GB (1.278 MB reclaimable). The budget drawn from this is under [Memory and disk](#memory-and-disk).
+- **Memory.** Idle stack right after the start: about 428 MiB used and 475 MiB available, `cms` 102.5 MiB and `caddy` 13 MiB. At the database steps `available` was 514 MiB (swap 91 MiB) before the seed and 517 MiB (swap 98 MiB) after the reindex. After the reboot: 484 MiB available and swap 0. Around the first chat question `available` was 519 MiB before and 392 MiB after (swap 79 to 82 MiB). 18 hours after the reboot (uptime 18 h 8 min): 502 MiB used, 401 MiB available, swap 87 MiB, and in `docker stats` `cms` 191.5 MiB and `caddy` 32.7 MiB with CPU at 0.15 and 0.00 percent.
+- **Database.** The migrations ran up to `c5e8a2f41d70` (nine). The 62 documents and 62 chunks were embedded in one call, and the second dry run reported 0 to embed. The published count was 61 and `/api/items` returned 61 documents (one unpublished draft).
+- **Certificates.** The staging issuer was `C=US, O=Let's Encrypt, CN=(STAGING) Artificial Amaranth YE1` (challenge `http-01`). The production issuer is `C=US, O=Let's Encrypt, CN=YE2`, issued on 2026-10-20 (challenge `tls-alpn-01`), `notAfter` Jan 18 01:52:54 2027 GMT. Port 80 redirects with status 308. The renewal window starts about 2026-12-18 (from the renewal information in the log); a real renewal has not been seen.
+- **From outside.** The strict run of `prod/outside-check.sh` passed all 10 rows (`ALL PASS`) from the usual network. On a phone hotspot the first strict run failed with `curl exit 28`: the script gives each request 10 s, and the hotspot took 2.6 s to connect and 8.3 s to finish the TLS handshake. With `--staging` against the production certificate exactly `issuer` and `trust` fail. Ports 5432, 8000, 8081 and 22 (from a network outside `ssh_cidr`) are closed, and 80 and 443 are open. On the host, `ss` lists `docker-proxy` on 80/tcp, 443/tcp and 443/udp (IPv4 and IPv6), `sshd` and `systemd` on 22, `systemd-resolve`, `chronyd` and `systemd-network`.
+- **Recreate and reboot.** Recreating `cms` left the uptime of `caddy` counting (44 to 54 minutes). After the reboot Docker was enabled, `/swapfile` was 1024M, both services were healthy without any command, and no new certificate was requested.
+- **The first chat question.** Status 200 in `time_total` 18.149 s, `abstained` null, `truncated` false, 7 documents (`S1` to `S7`). `tokens_used_today` was 4021 afterwards against a budget of 100000, so about 24 such questions a day fit on the shared account. Both provider spend limits were confirmed to be enforced before the paid call.
+- **Log hygiene.** Both counts of step 36 were 0.
+
+Not confirmed:
+
+- A real certificate renewal (expected from Caddy's behaviour and the renewal window above).
+- The memory burst of several Argon2 hashes on the server (the 325 MiB figure is from a laptop).
+- The cost of a chat question. The estimate in [the section on chat costs](#what-the-chat-costs-and-what-it-needs-in-memory) comes from listed prices that are unverified since 2026-10-12. The month's total on the provider's usage page was accounted for by the earlier live-evaluation runs, and the first real question had not appeared on the page yet, so its real cost is not read from the provider and the cost per question is not confirmed.
+- The CPU credit cap of 288 for this size.
+- How much one rebuild adds to the disk (see the budget under Memory and disk).
+
 ## Redeploying
 
-A later release has to be deployed without losing the certificates kept in the `cms_caddy_data` volume.
+A later release has to be deployed without losing the certificates kept in the `cms_caddy_data` volume. Measure `df -h /` and `docker system df` before and after the rebuild, as in the disk budget under [Memory and disk](#memory-and-disk).
 
 ## If something fails
 
-Server and database problems are listed in the [infra README](../infra/README.md#if-something-fails); app problems have no list yet beyond the stop rules above.
+Server and database problems are listed in the [infra README](../infra/README.md#if-something-fails). For the app, the stop rules above, the tables under "If a database step fails", "If a production-certificate step fails" and "If a step of this section fails" cover each stage.
+
+The one failure the real runs met: a strict run of `prod/outside-check.sh` from a phone hotspot failed with `curl exit 28` (a timeout). The script gives each request 10 seconds, and a slow hotspot can take longer to finish the TLS handshake. Run it again from the usual network; no change on the server is needed.

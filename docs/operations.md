@@ -177,8 +177,8 @@ Production uses an RDS PostgreSQL database that only the server can reach, built
   A Paid plan may allow more (untested). Point-in-time recovery is configured for that window.
   Deleting the database takes one final snapshot.
   Restoring from a backup or snapshot is not set up or tried yet, and no one owns that runbook yet.
-- **Deploying the app.** What remains to run the app on the server is outlined in
-  [deploy.md](deploy.md); it has no steps yet.
+- **Deploying the app.** The steps that deployed the app to the server, and what they showed, are in
+  [deploy.md](deploy.md).
 - **Verified so far.** The database was applied once on a real account. The observed facts and the
   open items are in the infra README ("What is verified", "What is not verified").
 
