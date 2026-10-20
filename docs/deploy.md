@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-12, from a fresh server to a running stack behind a Let's Encrypt staging certificate, were run once on 2026-10-19 on the real server, and every step gave its expected result. Steps 13-18, in "Database migration and seed", have not been run, so their commands and expected results are unproven until a run confirms them. The rest (the production certificate, the first admin and the demo member, redeploying) is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, were run once on 2026-10-19 on the real server, and every step gave its expected result. The steps from 19 on, in "Switching to the production certificate", are unproven until they are run: where a result is a prediction the text says so. The rest (the first admin and the demo member, redeploying) is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -19,9 +19,14 @@ Stop and ask rather than guess when any of these holds:
 - The readiness request in step 10 is not 200: the database is not reachable, so do not go on; check `DB_HOST`, that `DB_PASSWORD` is hex or alphanumeric only, the security group and `PGSSLMODE`.
 - Either provider console (OpenAI, Anthropic) shows no monthly spend limit, or the owner cannot read one (the gate before step 13): do not start the database steps.
 - The dry run in step 16 reports more than 100 chunks to embed: do not embed; the corpus is not the one expected (about 62).
-- `no-draft` fails in step 18: the unpublished draft is public, a data-exposure defect; do not go on.
+- `no-draft` fails in step 18: either the unpublished draft is public (a data-exposure defect) or `/api/items` gave no 200 body to inspect; do not go on.
+- Before step 19, a gate of "Switching to the production certificate" does not hold: do not change `ACME_CA`.
+- Production certificate starts: at most 2 in all, one planned (step 20) and one repair. Any failed production start means `docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env stop caddy` at once, then stop and ask; after a second failure, re-plan with the owner instead of trying a third time.
+- The Caddy log after step 20 says `too many certificates`: stop Caddy as above; the limit cannot be reset early (see the table in "Switching to the production certificate").
+- The strict run of step 21 still reports a STAGING issuer after the wait the step names: do not restart Caddy again and again; see the table.
+- From a network outside `ssh_cidr`, port 22, 5432 or 8000 answers (step 23), or `ss` shows a listener on 5432, 8000 or 8081 (step 24): stop and read the security group.
 
-Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never run a compose command without `--env-file /opt/cms/.env`, never use `docker compose run` (the image's entrypoint is the web server, so the command that follows becomes its arguments), never run `alembic downgrade` except the rollback in "Database migration and seed", and never print the rendered configuration (`config` without `-q` shows every secret).
+Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never recreate the certificate "to try again" after a production certificate was obtained, never run a compose command without `--env-file /opt/cms/.env`, never use `docker compose run` (the image's entrypoint is the web server, so the command that follows becomes its arguments), never run `alembic downgrade` except the rollback in "Database migration and seed", and never print the rendered configuration (`config` without `-q` shows every secret).
 
 Do not paste into a chat or a ticket: the contents of `/opt/cms/.env`, `docker compose config` output, `docker inspect`, `printenv` or `ps e` output, API keys, passwords, invite codes, tokens, `Authorization` headers, or unfiltered `docker compose logs` (they hold client addresses). Safe to share: exit codes, `free -m`, `df -h /`, `docker compose ps`, `grep`-filtered certificate and error lines, HTTP status lines.
 
@@ -190,7 +195,7 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env down
 
 The server has 1 GiB of RAM plus 1 GiB of swap and a 10 GB root disk, and its CPU credits are in `standard` mode (`infra/main.tf`), where a drained balance slows everything instead of billing extra.
 
-Measured on the real server (first run): the image build took 1m13s of wall time. During it the lowest `available` figure was 433 MiB, swap use was at most 47 MiB, the out-of-memory count in `dmesg` was 0 and CPU steal (`st`) was at most 4. The root disk `/` is 8.7 GB: 3.8 GB used before the build, 6.8 GB (78 percent) after it, and 6.9 GB (79 percent) with the stack up. After the build `docker system df` showed one image of 1.836 GB and a build cache of 1.837 GB (15 entries), of which only 1.278 MB is reclaimable. The idle stack uses about 430 MiB, with 475 MiB available; `cms` uses 102 MiB and `caddy` 13 MiB. Redeploys have not been measured yet, so how many the disk holds is not known; the 85 percent stop rule leaves about 0.6 GB above the figure after the build.
+Measured on the real server (first run): the image build took 1m13s of wall time. During it the lowest `available` figure was 433 MiB, swap use was at most 47 MiB, the out-of-memory count in `dmesg` was 0 and CPU steal (`st`) was at most 4. The root disk `/` is 8.7 GB: 3.8 GB used before the build, 6.8 GB (78 percent) after it, and 6.9 GB (79 percent) with the stack up. After the build `docker system df` showed one image of 1.836 GB and a build cache of 1.837 GB (15 entries), of which only 1.278 MB is reclaimable. The idle stack uses about 430 MiB, with 475 MiB available; `cms` uses 102 MiB and `caddy` 13 MiB. Around the database steps `available` was 514 MiB (swap used 91 MiB) before the seed and 517 MiB (swap used 98 MiB) after the reindex. Redeploys have not been measured yet, so how many the disk holds is not known; the 85 percent stop rule leaves about 0.6 GB above the figure after the build.
 
 ## Database migration and seed
 
@@ -205,7 +210,7 @@ cd /opt/cms/app
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -c "import os;print(bool(os.environ.get('OPENAI_API_KEY')))"
 ```
 
-**Step 14, create the tables.** The first command exits 0. Its output has INFO lines about the migration context and then one `Running upgrade` line for each of the nine migrations (the exact wording is unconfirmed until the run). The second prints a revision id followed by `(head)`. The migrations do not create the `vector` extension; it comes from [the database](../infra/README.md#the-database) set-up.
+**Step 14, create the tables.** The first command exits 0. Its output has INFO lines about the migration context and then one `Running upgrade` line for each of the nine migrations; the first run printed exactly nine and exit code 0. The second prints a revision id followed by `(head)`; on the first run it was `c5e8a2f41d70 (head)`, and a later release prints its own id. The migrations do not create the `vector` extension; it comes from [the database](../infra/README.md#the-database) set-up.
 
 ```sh
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms alembic upgrade head
@@ -213,7 +218,7 @@ echo $?
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms alembic current
 ```
 
-**Step 15, load the seed data.** First read the memory: `scripts.seed` and `scripts.reindex` each start a second Python process beside the app. Record the `available` figure. If the seed prints `Killed`, the process was an out-of-memory kill: stop, read `sudo dmesg | grep -i 'out of memory'` and ask. The seed prints nothing and exits 0, and running it again is safe (it updates what exists and adds what is missing). It includes one unpublished draft on purpose; step 18 checks that it is not public.
+**Step 15, load the seed data.** First read the memory: `scripts.seed` and `scripts.reindex` each start a second Python process beside the app. Record the `available` figure (514 MiB, with 91 MiB of swap used, on the first run). If the seed prints `Killed`, the process was an out-of-memory kill: stop, read `sudo dmesg | grep -i 'out of memory'` and ask. The seed prints nothing and exits 0, and running it again is safe (it updates what exists and adds what is missing). It includes one unpublished draft on purpose; step 18 checks that it is not public.
 
 ```sh
 free -m
@@ -221,13 +226,13 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms 
 echo $?
 ```
 
-**Step 16, count before the paid call.** The dry run reads the database and embeds nothing; it needs no key and costs nothing. It prints two lines: `N documents, M chunks; K to embed with text-embedding-3-small, 0 stale to delete`, then `dry run: nothing embedded, nothing written`. On a fresh database K equals M, and about 62 is expected. Up to 100: go on. Above 100: stop and ask. `0 documents` means step 15 did not fill the table: stop.
+**Step 16, count before the paid call.** The dry run reads the database and embeds nothing; it needs no key and costs nothing. It prints two lines: `N documents, M chunks; K to embed with text-embedding-3-small, 0 stale to delete`, then `dry run: nothing embedded, nothing written`. On a fresh database K equals M, and about 62 is expected; the first run printed `62 documents, 62 chunks; 62 to embed with text-embedding-3-small, 0 stale to delete`. Up to 100: go on. Above 100: stop and ask. `0 documents` means step 15 did not fill the table: stop.
 
 ```sh
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -m scripts.reindex --dry-run
 ```
 
-**Step 17, embed.** This is the paid OpenAI call, and the owner runs it. It prints the same count line, then `embedded K chunks, deleted 0 stale chunks`. The second command must then report `0 to embed`, which shows every chunk is stored with a matching hash and model; if it does not, stop and ask. If the embedding prints `Killed`, it was an out-of-memory kill: stop, read `sudo dmesg | grep -i 'out of memory'` and ask. Read the memory again and record `available`; its value is unconfirmed until the run. An authentication error can quote part of the key, so read it before pasting it anywhere.
+**Step 17, embed.** This is the paid OpenAI call, and the owner runs it. It prints the same count line, then `embedded K chunks, deleted 0 stale chunks` (on the first run `embedded 62 chunks, deleted 0 stale chunks`). The second command must then report `0 to embed` (on the first run `62 documents, 62 chunks; 0 to embed ...`), which shows every chunk is stored with a matching hash and model; if it does not, stop and ask. If the embedding prints `Killed`, it was an out-of-memory kill: stop, read `sudo dmesg | grep -i 'out of memory'` and ask. Read the memory again and record `available` (517 MiB, with 98 MiB of swap used, on the first run). An authentication error can quote part of the key, so read it before pasting it anywhere.
 
 ```sh
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -m scripts.reindex
@@ -241,7 +246,7 @@ free -m
 bash prod/outside-check.sh --staging demo.cropcms.com
 ```
 
-Every row passes: the ten rows are the seven of step 12 plus the three data rows below, and the summary is `10 passed, 0 failed, 0 skipped` then `ALL PASS`. The wording of the data rows comes from the script and is unconfirmed until the run. Any `FAIL` other than `no-draft` (which is a stop rule): stop and share the rows.
+Every row passes: the ten rows are the seven of step 12 plus the three data rows below, and the summary is `10 passed, 0 failed, 0 skipped` then `ALL PASS`. The first run printed the three data rows below, and the summary line above. Any `FAIL` other than `no-draft` (which is a stop rule): stop and share the rows.
 
 ```text
 PASS items         200 and a non-empty JSON list
@@ -319,6 +324,183 @@ ALL PASS
 ```
 
 Stop if the first run fails anywhere but `issuer` and `trust`, or the second run shows any `FAIL`. If the laptop's resolver still holds an old answer for the domain, add `--ip "$(cd infra && terraform output -raw elastic_ip)"` to point both `curl` and `openssl` at the server directly. The table holds only public facts (issuer, expiry, status codes), so it is safe to share.
+
+## Switching to the production certificate
+
+Steps 19-27 run after steps 1-18. They change `ACME_CA` from the staging address to the production one, so that Caddy asks Let's Encrypt for a certificate that browsers trust, then check the result from outside, check the open ports, and survive a reboot. Steps 19, 20 and 24-27 are typed on the server (from `/opt/cms/app`, except the edit of step 19), steps 21 and 23 on the laptop from the repository root, step 22 on the phone; steps 25 and 27 end with a run of the script on the laptop. Keep the phone hotspot on for steps 21-23: the laptop must be on a network that is not the server's and is outside `ssh_cidr`.
+
+The limits that shape these steps, from [Let's Encrypt](https://letsencrypt.org/docs/rate-limits/) as read again on 2026-10-19: 5 certificates per 7 days for one exact set of names (so for `demo.cropcms.com`) and 50 per 7 days for one registered domain, neither resettable; separately, 5 authorization failures per name per account per hour, one of them refilled every 12 minutes. A failed attempt uses the hourly failure allowance; only an issued certificate uses one of the weekly 5. A production start is each time Caddy runs with the production line active while no production certificate is stored; there are at most two, the planned one in step 20 and one repair.
+
+**The gates, before step 19 (the owner confirms each; if one fails, stop).**
+
+- Steps 1-18 passed, including the `10 passed, 0 failed, 0 skipped` of step 18.
+- The three lookups of step 5 (the first, second and fifth command of the gate there) still print the fixed address. Run them again now.
+- The answers to the two questions of step 5 still hold. Count every production certificate for exactly `demo.cropcms.com` requested in the last 7 days against the 5; if unsure, wait.
+- The owner accepts at most 2 production starts, as the stop rules say.
+
+**Step 19, on the server: make production the only active authority.** In the editor, put `#` in front of the staging line and remove the `#` (and the space after it, if there is one) in front of the production line. The first command below prints `1` (compose takes the last `ACME_CA` line, so two active lines are a mistake); the second prints the one line, `ACME_CA=https://acme-v02.api.letsencrypt.org/directory`; the third prints `0` (no active line mentions `staging`); the fifth prints nothing, and the `0` printed by the last is its exit code. If any of this is different, fix the file before step 20.
+
+```sh
+grep -c '^ACME_CA=' /opt/cms/.env
+grep '^ACME_CA=' /opt/cms/.env
+grep -c '^ACME_CA=.*staging' /opt/cms/.env
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env config -q
+echo $?
+```
+
+**Step 20, on the server: start Caddy with the production authority.** This is the planned production start. The environment of `caddy` changed, so `up` recreates only `caddy`, and `--no-deps` keeps `cms` as it is; the certificate volume is kept. The second command prints the production address, with no `staging` in it.
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --no-deps --wait caddy
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T caddy sh -c 'echo $ACME_CA'
+```
+
+Wait about a minute, then read the certificate lines with the same masking as step 9. The recreated container has a fresh log, so the staging lines are gone. Do not restart Caddy while you wait.
+
+```sh
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs caddy | grep -iE 'certificate|acme|error' | sed -E 's/"(client_ip|remote_ip|remote_addr)":"[^"]*"/"\1":"<ip>"/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/<ip>/g'
+```
+
+Expect, as on the staging run, the line `certificate obtained successfully`; its issuer field should name `acme-v02.api.letsencrypt.org-directory` and not contain `staging`. The production wording and the issuer field are predictions from the staging run, unconfirmed until the first run. Caddy creates a new account for the new authority, so the harmless "creating new account" line may appear again. If the log shows an error about a challenge or about too many certificates, go to the stop rules and stop Caddy at once. If after two minutes the log shows neither a success nor an error, run the command once more and go on to step 21, whose issuer row settles it.
+
+**Step 21, on the laptop (hotspot): the certificate seen from outside.** The strict run, with all four groups, must end `ALL PASS`; check the exit code with `echo $?` (it prints `0`). The issuer name after `CN=` and the expiry date are public and unconfirmed until the run.
+
+```sh
+bash prod/outside-check.sh demo.cropcms.com
+echo $?
+```
+
+```text
+outside-check demo.cropcms.com (strict)
+PASS issuer        issuer: C=US, O=Let's Encrypt, CN=...; notAfter: ...
+PASS trust         curl accepted the certificate without -k
+PASS http-redirect 308 to https://demo.cropcms.com/api/health
+PASS health        200 and status ok
+PASS blocked       6 paths answer 404
+PASS slash         307 to https://demo.cropcms.com/api/items
+PASS items         200 and a non-empty JSON list
+PASS no-draft      draft marker absent
+PASS retrieval     200 and 3 documents
+PASS closed        5432 8000 8081 refuse or time out
+10 passed, 0 failed, 0 skipped
+ALL PASS
+```
+
+Then run it once more in staging mode. The certificate is no longer a staging one, so exactly two rows must fail, `issuer` and `trust`, and the exit code is 1. This shows the check can tell the two apart (the stub tests of the script show this failure pattern; the real run is unconfirmed).
+
+```sh
+bash prod/outside-check.sh --staging demo.cropcms.com
+echo $?
+```
+
+```text
+FAIL issuer        expected a STAGING issuer; issuer: ...
+FAIL trust         expected curl exit 60 (untrusted), got 0
+8 passed, 2 failed, 0 skipped
+FAILED
+```
+
+If the strict run still reports a STAGING issuer, see the table below before doing anything on the server. If the laptop's resolver holds an old answer, use `--ip` as in step 12. Both tables hold only public facts, so they are safe to share.
+
+**Step 22, on the phone, on mobile data (Wi-Fi off).** Open `https://demo.cropcms.com/api/health` in the browser. Expect a padlock, no warning page, and a short JSON answer with `status` `ok`.
+
+**Step 23, on the laptop (hotspot): which ports answer.** The check is of the owner's own server only, on a short fixed list, with no timing options. The address stays in a shell variable and is never printed; each `nc` prints nothing, and the loop prints a port and an exit code (`0` means the port answered, `1` means it refused or timed out). Sign in again as in step 1 if the session has expired. On macOS `-G 5` bounds each connect to 5 seconds; on Linux write `-w 5`. Report only which ports answered.
+
+```sh
+export AWS_PROFILE=cropcms
+ip="$(cd infra && terraform output -raw elastic_ip)"
+for p in 22 5432 8000 8081 80 443; do nc -z -G 5 "$ip" "$p" >/dev/null 2>&1; echo "$p $?"; done
+```
+
+Expect `22 1`, `5432 1`, `8000 1` and `8081 1`, then `80 0` and `443 0`. Port 22 is limited to `ssh_cidr` in the security group, and the laptop's usual network is inside it, so there port 22 answers: that is why this step uses the hotspot, whose address is outside `ssh_cidr` (compare it with the file by eye, as in step 1). Ports 80 and 443 answering show that this network lets connections out, so a port that does not answer means something. UDP 443 (HTTP/3) is not scanned from outside, and `nmap` is neither installed nor needed.
+
+**Step 24, on the server: ground truth on the host.** The first command lists the listening sockets and masks every address except `0.0.0.0`, `*`, `[::]` and the `127.x` ones (replace by hand any other address that remains before you paste); the second prints `0`.
+
+```sh
+sudo ss -ltnup | sed -E '/ (0\.0\.0\.0|127\.[0-9.]+)(%[A-Za-z0-9]+)?:[0-9]+ /!s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/<ip>/g; s/\[[0-9a-fA-F:]*[0-9a-fA-F]\]/[<ip>]/g'
+sudo ss -ltn | grep -cE ':(5432|8000|8081) '
+```
+
+Expect listeners on TCP 80 and 443 and UDP 443 (held by Docker's proxy process or by Caddy), on TCP 22 (held by `sshd`, or by `systemd` when SSH is socket-activated), and the system resolver on a loopback address. A DHCP client or time-sync socket may also show. These process names and extras are predictions for this Ubuntu version, unconfirmed until the run; what must hold is that nothing listens on 8000, 8081 or 5432.
+
+**Step 25, on the server: the recreate check.** Recreating `cms` must not disturb Caddy or its certificate. Note the `STATUS` of `caddy` (for example `Up 20 minutes (healthy)`), recreate only `cms`, wait until it is healthy, and read the status again: the uptime of `caddy` must have kept counting, not restarted. Requests get a 502 for a few seconds while `cms` is replaced.
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env ps caddy
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --force-recreate --no-deps --wait cms
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env ps
+```
+
+Then on the laptop run the certificate and edge groups, strict. Expect six `PASS` rows (`issuer`, `trust`, `http-redirect`, `health`, `blocked`, `slash`), `6 passed, 0 failed, 0 skipped`, `ALL PASS`.
+
+```sh
+bash prod/outside-check.sh demo.cropcms.com --only tls,edge
+```
+
+**Step 26, on the server: a placeholder page.** Caddy serves `/opt/cms/site` at `/` (mounted read-only at `/srv`, with `/index.html` as the fallback), and the directory is empty. Put one line in it, then open `https://demo.cropcms.com/` in a browser (or run the `curl` below on the laptop; it prints `200`).
+
+```sh
+echo 'Crop CMS API. Health check at /api/health.' > /opt/cms/site/index.html
+```
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://demo.cropcms.com/
+```
+
+The `200` and the absence of any restart are predictions from the Caddyfile (`root * /srv`, then `try_files {path} /index.html` and `file_server`) and from the directory being a bind mount, unconfirmed until the run. The same fallback answers 200 with this page for any unknown path outside `/api`, so look at `/` only. The real front end replaces this file later.
+
+**Step 27, the reboot check, last.** Run it only when steps 20-26 passed. Reboot the server and wait about two minutes; `ssh` drops at once, and the same `ssh` line as in step 2 (from `infra/` on the laptop, `AWS_PROFILE` exported) logs in again.
+
+```sh
+sudo reboot
+```
+
+Then, on the server, without starting anything by hand: `uptime -p` shows a few minutes (the reboot happened); `systemctl is-enabled docker` prints `enabled`; `swapon --show` lists `/swapfile` of 1G (the `/etc/fstab` entry comes from the server's first-boot script); both services show `healthy` in `ps` (allow up to a minute, as `cms` has a start period of 30 seconds); the `grep -ciE` line prints `0`, since the certificate is in the volume and the reboot must not ask for a new one. Record `available` from `free -m`.
+
+```sh
+uptime -p
+systemctl is-enabled docker
+swapon --show
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env ps
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs --since 10m caddy | grep -ciE 'obtaining|obtained'
+free -m
+```
+
+That both services come back `healthy` on their own relies on `restart: unless-stopped` together with Docker being enabled at boot; the figures and the log wording are unconfirmed until the run. Finish on the laptop with the strict run of step 21 (all groups): it must still end `ALL PASS`.
+
+### If a production-certificate step fails
+
+| Situation | Seen as | Repair |
+|---|---|---|
+| Typo in the `ACME_CA` URL | issuance errors in the log; the strict run fails | Stop Caddy as in the stop rules, fix the line, then `up -d --no-deps --wait caddy` as in step 20. This is the repair start. The attempt may count as a failure. |
+| The staging certificate is still served after the switch | the strict `issuer` row says STAGING, and the log has no `certificate obtained successfully` | Wait two more minutes and read the log again. If Caddy still keeps the staging certificate, use the volume steps below (the repair start). |
+| Production issuance fails (DNS, port 80, wrong name) | a challenge failure in the log | Stop Caddy at once so it stops retrying. Each failed authorization uses the hourly failure allowance (5 per name per hour, one refilled every 12 minutes); wait 12 minutes for every failure the log shows, fix the cause, then the repair start. It is not a weekly slot. |
+| `too many certificates` for the exact set of names | log text with a retry time | Stop Caddy. The weekly limit refills one certificate per 34 hours and has no override. Put the staging line back and run `up -d --no-deps --wait caddy`, so the API answers (untrusted) meanwhile. `acme_ca` makes Let's Encrypt the only authority (see the `ACME_CA` row of [the variable table](operations.md#environment-variables)), and changing the set of names to get around the limit is deliberately not done. Re-plan the timing. |
+| 22 (from a network outside `ssh_cidr`), 5432 or 8000 answers | step 23 or 24 | Stop. Read the security group in the console (read-only) and the `ss` listing again. |
+| The server does not come back cleanly | a service is down, no swap, or SSH refused | Look at the instance status checks in the console and run `sudo journalctl -u docker`, then `up -d` from `/opt/cms/app` with the two flags. The data is on the database and in the volumes, so nothing is lost. |
+
+**The staging certificate persists.** Only while no production certificate exists, and as the repair start. Stop Caddy and copy the volume out first (the copy holds the certificate's private key: keep it on the server, never paste it; the first `docker run` downloads the small `busybox` image):
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env stop caddy
+docker run --rm -v cms_caddy_data:/data -v /opt/cms:/out busybox tar czf /out/caddy_data.tgz /data
+sudo chmod 600 /opt/cms/caddy_data.tgz
+docker run --rm -v cms_caddy_data:/data busybox ls /data/caddy/certificates
+```
+
+The listing shows one directory per authority. Remove only the one whose name contains `staging` (the staging log line named it `acme-staging-v02.api.letsencrypt.org-directory`; use the exact name the listing shows), then start Caddy and go back to the log check of step 20:
+
+```sh
+docker run --rm -v cms_caddy_data:/data busybox rm -r /data/caddy/certificates/acme-staging-v02.api.letsencrypt.org-directory
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --no-deps --wait caddy
+```
+
+Whether Caddy really keeps a staging certificate in storage after the switch is unconfirmed: the per-authority directory layout is expected from Caddy's behaviour but was not seen. Never delete the volume, never run `down -v`, and once a production certificate has been obtained never remove anything from the volume or recreate the certificate "to try again".
 
 ## The first admin and the demo member
 
