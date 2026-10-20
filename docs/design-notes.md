@@ -218,7 +218,8 @@ The browser reaches the API through one **same-origin reverse proxy**, not throu
 prefix stripped, which is what the frontend's Vite dev proxy does today.
 [`proxy/Caddyfile`](../proxy/Caddyfile) holds the config and
 [`proxy/check.sh`](../proxy/check.sh) asserts its routing; CI runs the script after the stack is up.
-The service is a testable stand-in: the host, TLS and public ports are not chosen yet (see
+The service is a testable stand-in for the production proxy, which
+[`docker-compose.prod.yaml`](../docker-compose.prod.yaml) runs on the live site (see
 [Production setup](#production-setup-done-and-still-open)).
 
 ### Why same-origin, and the CORS fallback
@@ -256,8 +257,9 @@ Caddy that shape this config:
 - The site address is `{$SITE_ADDRESS:http://:80}`. Compose passes the host's `SITE_ADDRESS` into
   the container (`${SITE_ADDRESS:-http://:80}`), so unset or empty it is plain HTTP on port 80.
   A domain value turns on Caddy's automatic HTTPS, which needs ports 80/443 reachable and DNS
-  pointing at the host; that mode was not run with a real certificate. `check.sh` asserts the
-  value reaches the container through compose, using a plain-HTTP address on another port.
+  pointing at the host; that mode ran with a real Let's Encrypt certificate on the live site
+  ([deploy](deploy.md)). `check.sh` asserts the value reaches the container through compose, using
+  a plain-HTTP address on another port.
 
 ### Traps
 
@@ -338,8 +340,8 @@ still serves them.
   logged in as a `member` can use `/chat`, bounded by the daily token budget, and can try login and
   invite-only signup.
 - **The real risk is a person pasting an editor or admin token into a public docs page.** Deletes
-  are hard deletes and there are no backups yet. That, and exposing the schema, is why the default
-  is closed. To expose the docs, delete the three `handle` blocks and start uvicorn with
+  are hard deletes and the only backup is the database's one-day automated one, which has never
+  been restored. That, and exposing the schema, is why the default is closed. To expose the docs, delete the three `handle` blocks and start uvicorn with
   `--root-path /api`; without it the docs page asks for `/openapi.json` and gets the site's
   `index.html`.
 - The prefix form also 404s `/api/docsx` and `/api/openapi.jsonx`, which are not routes of the app
@@ -348,7 +350,7 @@ still serves them.
 ### Production setup: done and still open
 
 - Public ports 80/443 with only the proxy public, DNS for the domain, and that domain as
-  `SITE_ADDRESS` so Caddy obtains the certificate (not tried with a real certificate); the
+  `SITE_ADDRESS` so Caddy obtains the certificate: done on the live site ([deploy](deploy.md)); the
   plain-HTTP default here is for local use.
 - Done in the `prod` image target: `--root-path /api`, which removes the trailing-slash limit above
   (the docs work through the proxy only together with deleting the three `handle` blocks in
@@ -359,11 +361,13 @@ still serves them.
   `prod/check.sh` also keeps unpublished.
 - Checked in CI by `prod/smoke.sh`: the `prod` stage builds, runs as a non-root user, and a
   trailing-slash redirect keeps `/api` and the scheme of a forwarded `X-Forwarded-Proto: https`
-  header. Still open: the same behind a real certificate.
+  header; the same behind a real certificate passed the strict outside check on the live site
+  ([deploy](deploy.md)).
 
 ### Not verified
 
-- TLS and certificates; Swagger UI in a browser; whether `dist/` is current.
+- Swagger UI in a browser; whether `dist/` is current. TLS and certificates are verified on the live
+  site; a real renewal has not been seen.
 - Editing `Caddyfile` in place on Linux: an in-place edit plus `caddy reload` was picked up on
   arm64 macOS Docker Desktop; CI shows only that the mount is read and served on Linux amd64.
 - The 120 s response timeout under load.

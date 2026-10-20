@@ -25,25 +25,26 @@ about, then hands each one over as a complete set.
 
 ## Status
 
-**Early and in progress.** A React frontend, [crop-cms-frontend](https://github.com/KyuHongCho/crop-cms-frontend), now consumes this API; nothing is deployed yet.
+**Early and in progress.** The API is live at https://demo.cropcms.com (the API paths start with `/api`), on one small AWS server behind a Let's Encrypt certificate, with a managed PostgreSQL database; the demo login is provided with the application. A React frontend, [crop-cms-frontend](https://github.com/KyuHongCho/crop-cms-frontend), consumes this API, but is not deployed there yet: the site shows a placeholder page at `/`.
 
 | Works today | Not built yet |
 |---|---|
 | Document store: 9 tables (5 content tables, plus `members`, `member_audit_events`, `member_invites` and `login_throttle`), sources recorded per document | Editing (`PATCH`) documents |
-| Members: invite-only signup, login (JWT), `/members/me`, login throttling — [members and budget](docs/operations.md#members-and-the-token-budget), [throttling](docs/operations.md#login-throttling) | Deployment: TLS, public ports and a production host |
-| `POST /chat`: classify, select topics, generate a cited answer; needs both provider keys, and a daily token budget applies — [details](docs/api.md#post-chat) | |
+| Members: invite-only signup, login (JWT), `/members/me`, login throttling — [members and budget](docs/operations.md#members-and-the-token-budget), [throttling](docs/operations.md#login-throttling) | Advisor tools over MCP |
+| `POST /chat`: classify, select topics, generate a cited answer; needs both provider keys, and a daily token budget applies — [details](docs/api.md#post-chat) | Conversation context and caching |
 | Embeddings for every document, offline-testable (`scripts/reindex.py`) — [operations](docs/operations.md#embeddings) | |
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them; document delete (`DELETE /items/{id}`) — [API](docs/api.md) | |
-| Database migrations (Alembic), exercised for real in CI — [operations](docs/operations.md#migrations) | |
+| Database migrations (Alembic), exercised for real in CI — [operations](docs/operations.md#migrations) | The frontend served from the server |
 | Health endpoints, `GET /health` and `GET /health/ready` — [API](docs/api.md); the `cms` healthcheck probes `/health` every 10 s — [operations](docs/operations.md#health-checks) | |
 | `POST /chat` crop labels when no crop is fixed; routing question set and manual live-eval script — [live eval](docs/live-eval.md) | |
 | Test suite on an isolated database, run in CI | |
 | Same-origin Caddy proxy (optional compose profile `proxy`), asserted by `proxy/check.sh` in CI — [why](docs/design-notes.md#how-the-browser-reaches-the-api) | |
+| Deployed at https://demo.cropcms.com: one EC2 server, Caddy with a Let's Encrypt certificate, RDS PostgreSQL, the corpus embedded; see [deploy](docs/deploy.md) | |
 | AI code review on pull requests (advisory) | |
 
-Next: deployment, then advisor tools over MCP, then conversation context and caching.
+Still to come: the frontend on the server, advisor tools over MCP, and conversation context and caching.
 
 ## Engineering highlights
 
@@ -152,7 +153,7 @@ curl localhost:8080/api/health               # the API, through the proxy: {"sta
 It serves a placeholder page at `http://127.0.0.1:8080/` and forwards `/api/*` to the API with the
 prefix stripped. `proxy/Caddyfile` is the config; its site address comes from the host's
 `SITE_ADDRESS` (unset or empty: `http://:80`, plain HTTP; a domain turns on HTTPS and needs ports
-80/443 and DNS, which this repo has not exercised with a real certificate). To serve the real
+80/443 and DNS, as on the live site below). To serve the real
 frontend build instead, point `SITE_DIR` at it and recreate the proxy
 (`../crop-cms-frontend/dist` is the sibling repo's build output):
 
@@ -165,8 +166,8 @@ SITE_DIR=../crop-cms-frontend/dist docker compose --profile proxy up -d --wait p
 `docker-compose.prod.yaml` is the production counterpart: a standalone file with only `cms` (the
 `prod` image target, no published port, no source mount) and `caddy` (ports 80 and 443), and no
 database service. `bash prod/check.sh` asserts that shape and `bash prod/smoke.sh` builds and runs
-the image; both run in CI. Nothing here has run it against a real server yet; what remains is
-outlined in [docs/deploy.md](docs/deploy.md).
+the image; both run in CI. The live site https://demo.cropcms.com runs this file on one small AWS
+server; the steps that deployed it and what each showed are in [docs/deploy.md](docs/deploy.md).
 
 Why same-origin, the Caddy behaviours that shape the config and what is not decided yet:
 [design notes](docs/design-notes.md#how-the-browser-reaches-the-api).
@@ -211,7 +212,8 @@ are in [operations](docs/operations.md#migrations).
 - [`docs/api.md`](docs/api.md) — every endpoint, and `POST /chat` in detail.
 - [`docs/operations.md`](docs/operations.md) — members and the token budget, login throttling,
   migrations, embeddings, topic selection, health checks and the environment variables.
-- [`docs/deploy.md`](docs/deploy.md) — an outline of what remains to run the app on the server.
+- [`docs/deploy.md`](docs/deploy.md) — the steps that deployed the app to the server, from a new server
+  to the first chat answer, and what they showed.
 - [`docs/live-eval.md`](docs/live-eval.md) — the manual live eval of `POST /chat` and its measured
   results.
 - [`docs/design-notes.md`](docs/design-notes.md) — the reasoning behind the decisions, trade-offs and
