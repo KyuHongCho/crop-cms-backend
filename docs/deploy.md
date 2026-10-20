@@ -24,7 +24,7 @@ Stop and ask rather than guess when any of these holds:
 - Production certificate starts: at most 2 in all, one planned (step 20) and one repair. Any failed production start means `docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env stop caddy` at once, then stop and ask; after a second failure, re-plan with the owner instead of trying a third time.
 - The Caddy log after step 20 says `too many certificates`: stop Caddy as above; the limit cannot be reset early (see the table in "Switching to the production certificate").
 - The strict run of step 21 still reports a STAGING issuer after the wait the step names: do not restart Caddy again and again; see the table.
-- From a network outside `ssh_cidr`, port 22, 5432 or 8000 answers (step 23), or `ss` shows a listener on 5432, 8000 or 8081 (step 24): stop and read the security group.
+- From a network outside `ssh_cidr`, port 22, 5432, 8000 or 8081 answers (step 23), or `ss` shows a listener on 5432, 8000 or 8081 (step 24): stop and read the security group.
 
 Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never recreate the certificate "to try again" after a production certificate was obtained, never run a compose command without `--env-file /opt/cms/.env`, never use `docker compose run` (the image's entrypoint is the web server, so the command that follows becomes its arguments), never run `alembic downgrade` except the rollback in "Database migration and seed", and never print the rendered configuration (`config` without `-q` shows every secret).
 
@@ -334,7 +334,7 @@ The limits that shape these steps, from [Let's Encrypt](https://letsencrypt.org/
 **The gates, before step 19 (the owner confirms each; if one fails, stop).**
 
 - Steps 1-18 passed, including the `10 passed, 0 failed, 0 skipped` of step 18.
-- The three lookups of step 5 (the first, second and fifth command of the gate there) still print the fixed address. Run them again now.
+- Run the gate block of step 5 again: its first, second and fifth commands must still print the fixed address.
 - The answers to the two questions of step 5 still hold. Count every production certificate for exactly `demo.cropcms.com` requested in the last 7 days against the 5; if unsure, wait.
 - The owner accepts at most 2 production starts, as the stop rules say.
 
@@ -480,7 +480,7 @@ That both services come back `healthy` on their own relies on `restart: unless-s
 | The staging certificate is still served after the switch | the strict `issuer` row says STAGING, and the log has no `certificate obtained successfully` | Wait two more minutes and read the log again. If Caddy still keeps the staging certificate, use the volume steps below (the repair start). |
 | Production issuance fails (DNS, port 80, wrong name) | a challenge failure in the log | Stop Caddy at once so it stops retrying. Each failed authorization uses the hourly failure allowance (5 per name per hour, one refilled every 12 minutes); wait 12 minutes for every failure the log shows, fix the cause, then the repair start. It is not a weekly slot. |
 | `too many certificates` for the exact set of names | log text with a retry time | Stop Caddy. The weekly limit refills one certificate per 34 hours and has no override. Put the staging line back and run `up -d --no-deps --wait caddy`, so the API answers (untrusted) meanwhile. `acme_ca` makes Let's Encrypt the only authority (see the `ACME_CA` row of [the variable table](operations.md#environment-variables)), and changing the set of names to get around the limit is deliberately not done. Re-plan the timing. |
-| 22 (from a network outside `ssh_cidr`), 5432 or 8000 answers | step 23 or 24 | Stop. Read the security group in the console (read-only) and the `ss` listing again. |
+| 22 (from a network outside `ssh_cidr`), 5432, 8000 or 8081 answers | step 23 or 24 | Stop. Read the security group in the console (read-only) and the `ss` listing again. |
 | The server does not come back cleanly | a service is down, no swap, or SSH refused | Look at the instance status checks in the console and run `sudo journalctl -u docker`, then `up -d` from `/opt/cms/app` with the two flags. The data is on the database and in the volumes, so nothing is lost. |
 
 **The staging certificate persists.** Only while no production certificate exists, and as the repair start. Stop Caddy and copy the volume out first (the copy holds the certificate's private key: keep it on the server, never paste it; the first `docker run` downloads the small `busybox` image):
