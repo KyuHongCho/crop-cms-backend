@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, were run once on 2026-10-19 on the real server, and every step gave its expected result. The steps from 19 on, in "Switching to the production certificate", are unproven until they are run: where a result is a prediction the text says so. The rest (the first admin and the demo member, redeploying) is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, were run on 2026-10-19 on the real server, and steps 19-27, in "Switching to the production certificate", on 2026-10-20; each step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network, and the site is live behind a Let's Encrypt production certificate. The steps from 28 on, in "The first admin and the demo member", are unproven until they are run: where a result is a prediction the text says so. Redeploying is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -25,6 +25,9 @@ Stop and ask rather than guess when any of these holds:
 - The Caddy log after step 20 says `too many certificates`: stop Caddy as above; the limit cannot be reset early (see the table in "Switching to the production certificate").
 - The strict run of step 21 still reports a STAGING issuer after the wait the step names: do not restart Caddy again and again; see the table.
 - From a network outside `ssh_cidr`, port 22, 5432, 8000 or 8081 answers (step 23), or `ss` shows a listener on 5432, 8000 or 8081 (step 24): stop and read the security group.
+- Before step 28, either provider console shows no monthly spend limit, or the owner cannot say, for each limit, whether it is enforced or only shown: do not start step 28. A limit that is only shown and has no decision recorded by the owner: do not send the question of step 34.
+- The chat question of step 34 has been asked three times: stop and ask, whatever the answers were.
+- A count in step 36 is above 0 (a token in the Caddy log, or member-insert SQL in the `cms` log): stop and ask; do not paste the lines.
 
 Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never recreate the certificate "to try again" after a production certificate was obtained, never run a compose command without `--env-file /opt/cms/.env`, never use `docker compose run` (the image's entrypoint is the web server, so the command that follows becomes its arguments), never run `alembic downgrade` except the rollback in "Database migration and seed", and never print the rendered configuration (`config` without `-q` shows every secret).
 
@@ -167,7 +170,7 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cadd
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs caddy | grep -iE 'certificate|acme|error' | sed -E 's/"(client_ip|remote_ip|remote_addr)":"[^"]*"/"\1":"<ip>"/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/<ip>/g'
 ```
 
-Expect the line `certificate obtained successfully` with `"issuer":"acme-staging-v02.api.letsencrypt.org-directory"`. Before it, Caddy registers a new ACME account and runs an `http-01` challenge, which the certificate authority's validation servers check with about 5 requests, each answered with `status 200`. The match on `error` also hits one harmless info line on the first start, "creating new account ... open /data/caddy/acme/.../default.json: no such file or directory".
+Expect the line `certificate obtained successfully` with `"issuer":"acme-staging-v02.api.letsencrypt.org-directory"`. Before it, Caddy registers a new ACME account and runs a challenge, which the certificate authority's validation servers check five times. The staging run validated with `http-01` (port 80), where each request was answered with `status 200`; the production run (step 20) validated with `tls-alpn-01` (port 443). Either may be chosen. The match on `error` also hits one harmless info line on the first start, "creating new account ... open /data/caddy/acme/.../default.json: no such file or directory".
 
 **Step 10, readiness from inside.** The proxy blocks `/health/ready` from outside, so ask the app directly. The first command prints `200` and is the first proof that the app role reaches the database over TLS; the second exits 0 and, on an empty database, prints no revision.
 
@@ -327,7 +330,7 @@ Stop if the first run fails anywhere but `issuer` and `trust`, or the second run
 
 ## Switching to the production certificate
 
-Steps 19-27 run after steps 1-18. They change `ACME_CA` from the staging address to the production one, so that Caddy asks Let's Encrypt for a certificate that browsers trust, then check the result from outside, check the open ports, and survive a reboot. Steps 19, 20 and 24-27 are typed on the server (from `/opt/cms/app`, except the edit of step 19), steps 21 and 23 on the laptop from the repository root, step 22 on the phone; steps 25 and 27 end with a run of the script on the laptop. Keep the phone hotspot on for steps 21-23: the laptop must be on a network that is not the server's and is outside `ssh_cidr`.
+Steps 19-27 run after steps 1-18. They change `ACME_CA` from the staging address to the production one, so that Caddy asks Let's Encrypt for a certificate that browsers trust, then check the result from outside, check the open ports, and survive a reboot. Steps 19, 20 and 24-27 are typed on the server (from `/opt/cms/app`, except the edit of step 19), steps 21 and 23 on the laptop from the repository root, step 22 on the phone; steps 25 and 27 end with a run of the script on the laptop. The strict runs of steps 21, 25 and 27 need only a network that is not the server's; the phone hotspot is needed only for step 23, because port 22 is open from the owner's usual network and the laptop must be outside `ssh_cidr` for that step.
 
 The limits that shape these steps, from [Let's Encrypt](https://letsencrypt.org/docs/rate-limits/) as read again on 2026-10-19: 5 certificates per 7 days for one exact set of names (so for `demo.cropcms.com`) and 50 per 7 days for one registered domain, neither resettable; separately, 5 authorization failures per name per account per hour, one of them refilled every 12 minutes. A failed attempt uses the hourly failure allowance; only an issued certificate uses one of the weekly 5. A production start is each time Caddy runs with the production line active while no production certificate is stored; there are at most two, the planned one in step 20 and one repair.
 
@@ -363,9 +366,9 @@ Wait about a minute, then read the certificate lines with the same masking as st
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs caddy | grep -iE 'certificate|acme|error' | sed -E 's/"(client_ip|remote_ip|remote_addr)":"[^"]*"/"\1":"<ip>"/g; s/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/<ip>/g'
 ```
 
-Expect, as on the staging run, the line `certificate obtained successfully`; its issuer field should name `acme-v02.api.letsencrypt.org-directory` and not contain `staging`. The production wording and the issuer field are predictions from the staging run, unconfirmed until the first run. Caddy creates a new account for the new authority, so the harmless "creating new account" line may appear again. If the log shows an error about a challenge or about too many certificates, go to the stop rules and stop Caddy at once. If after two minutes the log shows neither a success nor an error, run the command once more and go on to step 21, whose issuer row settles it.
+Expect, as on the staging run, the line `certificate obtained successfully`. On the real run it carried `"issuer":"acme-v02.api.letsencrypt.org-directory"`, with no `staging` in it. Caddy created a new account for the new authority: the harmless "creating new account" line did appear again. This run validated the name with `tls-alpn-01` (port 443) and the authority checked it five times from its servers; the staging run used `http-01` (port 80), and either may be chosen. The renewal information in the log gave a renewal window that starts about 59 days after the issuance (about 2026-12-18), and the certificate lasts about 90 days (`notAfter` 2027-01-18). Caddy renews by itself; a real renewal has not been seen yet, so that is unconfirmed. If the log shows an error about a challenge or about too many certificates, go to the stop rules and stop Caddy at once. If after two minutes the log shows neither a success nor an error, run the log command once more and go on to step 21, whose issuer row settles it.
 
-**Step 21, on the laptop (hotspot): the certificate seen from outside.** The strict run, with all four groups, must end `ALL PASS`; check the exit code with `echo $?` (it prints `0`). The issuer name after `CN=` and the expiry date are public and unconfirmed until the run.
+**Step 21, on the laptop, on a network that is not the server's: the certificate seen from outside.** The strict run, with all four groups, must end `ALL PASS`; check the exit code with `echo $?` (it prints `0`). The hotspot is not needed here. On a phone hotspot the run failed once with `curl exit 28`: the script gives each request 10 seconds, and the hotspot took 2.6 s to connect and 8.3 s to finish the handshake, so a slow hotspot can time out; run it again from the usual network, where it passed with 10 rows. The issuer and the expiry date are public; the real run printed the issuer row below.
 
 ```sh
 bash prod/outside-check.sh demo.cropcms.com
@@ -374,7 +377,7 @@ echo $?
 
 ```text
 outside-check demo.cropcms.com (strict)
-PASS issuer        issuer: C=US, O=Let's Encrypt, CN=...; notAfter: ...
+PASS issuer        issuer: C=US, O=Let's Encrypt, CN=YE2; notAfter: Jan 18 01:52:54 2027 GMT
 PASS trust         curl accepted the certificate without -k
 PASS http-redirect 308 to https://demo.cropcms.com/api/health
 PASS health        200 and status ok
@@ -388,7 +391,7 @@ PASS closed        5432 8000 8081 refuse or time out
 ALL PASS
 ```
 
-Then run it once more in staging mode. The certificate is no longer a staging one, so exactly two rows must fail, `issuer` and `trust`, and the exit code is 1. This shows the check can tell the two apart (the stub tests of the script show this failure pattern; the real run is unconfirmed).
+Then run it once more in staging mode. The certificate is no longer a staging one, so exactly two rows must fail, `issuer` and `trust`, and the exit code is 1. This shows the check can tell the two apart. The real run gave exactly that: `issuer` and `trust` FAIL, the other eight rows PASS, `8 passed, 2 failed, 0 skipped`, and exit code 1.
 
 ```sh
 bash prod/outside-check.sh --staging demo.cropcms.com
@@ -404,7 +407,7 @@ FAILED
 
 If the strict run still reports a STAGING issuer, see the table below before doing anything on the server. If the laptop's resolver holds an old answer, use `--ip` as in step 12. Both tables hold only public facts, so they are safe to share.
 
-**Step 22, on the phone, on mobile data (Wi-Fi off).** Open `https://demo.cropcms.com/api/health` in the browser. Expect a padlock, no warning page, and a short JSON answer with `status` `ok`.
+**Step 22, on the phone, on mobile data (Wi-Fi off).** Open `https://demo.cropcms.com/api/health` in the browser. Expect a padlock, no warning page, and a short JSON answer with `status` `ok`. On the run Safari showed a secure connection and the JSON with `status` `ok`.
 
 **Step 23, on the laptop (hotspot): which ports answer.** The check is of the owner's own server only, on a short fixed list, with no timing options. The address stays in a shell variable and is never printed; each `nc` prints nothing, and the loop prints a port and an exit code (`0` means the port answered, `1` means it refused or timed out). Sign in again as in step 1 if the session has expired. On macOS `-G 5` bounds each connect to 5 seconds; on Linux write `-w 5`. Report only which ports answered.
 
@@ -414,7 +417,7 @@ ip="$(cd infra && terraform output -raw elastic_ip)"
 for p in 22 5432 8000 8081 80 443; do nc -z -G 5 "$ip" "$p" >/dev/null 2>&1; echo "$p $?"; done
 ```
 
-Expect `22 1`, `5432 1`, `8000 1` and `8081 1`, then `80 0` and `443 0`. Port 22 is limited to `ssh_cidr` in the security group, and the laptop's usual network is inside it, so there port 22 answers: that is why this step uses the hotspot, whose address is outside `ssh_cidr` (compare it with the file by eye, as in step 1). Ports 80 and 443 answering show that this network lets connections out, so a port that does not answer means something. UDP 443 (HTTP/3) is not scanned from outside, and `nmap` is neither installed nor needed.
+Expect `22 1`, `5432 1`, `8000 1` and `8081 1`, then `80 0` and `443 0`; the run printed exactly these six lines. Port 22 is limited to `ssh_cidr` in the security group, and the laptop's usual network is inside it, so there port 22 answers: that is why this step uses the hotspot, whose address is outside `ssh_cidr` (compare it with the file by eye, as in step 1). Ports 80 and 443 answering show that this network lets connections out, so a port that does not answer means something. UDP 443 (HTTP/3) is not scanned from outside, and `nmap` is neither installed nor needed.
 
 **Step 24, on the server: ground truth on the host.** The first command lists the listening sockets and masks every address except `0.0.0.0`, `*`, `[::]` and the `127.x` ones (replace by hand any other address that remains before you paste); the second prints `0`.
 
@@ -423,7 +426,7 @@ sudo ss -ltnup | sed -E '/ (0\.0\.0\.0|127\.[0-9.]+)(%[A-Za-z0-9]+)?:[0-9]+ /!s/
 sudo ss -ltn | grep -cE ':(5432|8000|8081) '
 ```
 
-Expect listeners on TCP 80 and 443 and UDP 443 (held by Docker's proxy process or by Caddy), on TCP 22 (held by `sshd`, or by `systemd` when SSH is socket-activated), and the system resolver on a loopback address. A DHCP client or time-sync socket may also show. These process names and extras are predictions for this Ubuntu version, unconfirmed until the run; what must hold is that nothing listens on 8000, 8081 or 5432.
+Expect listeners on TCP 80 and 443 and UDP 443 (held by Docker's proxy process or by Caddy), on TCP 22 (held by `sshd`, or by `systemd` when SSH is socket-activated), and the system resolver on a loopback address. A DHCP client or time-sync socket may also show. On the run the listeners were `docker-proxy` on 80/tcp, 443/tcp and 443/udp (IPv4 and IPv6), `sshd` and `systemd` on 22, `systemd-resolve` on two loopback addresses, `chronyd`, and `systemd-network` (DHCP, UDP 68); the count of listeners on 5432, 8000 and 8081 was `0`. What must hold is that nothing listens on 8000, 8081 or 5432.
 
 **Step 25, on the server: the recreate check.** Recreating `cms` must not disturb Caddy or its certificate. Note the `STATUS` of `caddy` (for example `Up 20 minutes (healthy)`), recreate only `cms`, wait until it is healthy, and read the status again: the uptime of `caddy` must have kept counting, not restarted. Requests get a 502 for a few seconds while `cms` is replaced.
 
@@ -434,7 +437,7 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --forc
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env ps
 ```
 
-Then on the laptop run the certificate and edge groups, strict. Expect six `PASS` rows (`issuer`, `trust`, `http-redirect`, `health`, `blocked`, `slash`), `6 passed, 0 failed, 0 skipped`, `ALL PASS`.
+Then on the laptop run the certificate and edge groups, strict. Expect six `PASS` rows (`issuer`, `trust`, `http-redirect`, `health`, `blocked`, `slash`), `6 passed, 0 failed, 0 skipped`, `ALL PASS`. On the run the uptime of `caddy` kept counting (44 minutes, then 54) while `cms` was recreated, and the six rows passed.
 
 ```sh
 bash prod/outside-check.sh demo.cropcms.com --only tls,edge
@@ -450,7 +453,7 @@ echo 'Crop CMS API. Health check at /api/health.' > /opt/cms/site/index.html
 curl -s -o /dev/null -w '%{http_code}\n' https://demo.cropcms.com/
 ```
 
-The `200` and the absence of any restart are predictions from the Caddyfile (`root * /srv`, then `try_files {path} /index.html` and `file_server`) and from the directory being a bind mount, unconfirmed until the run. The same fallback answers 200 with this page for any unknown path outside `/api`, so look at `/` only. The real front end replaces this file later.
+The `curl` printed `200` on the run, as the Caddyfile predicts (`root * /srv`, then `try_files {path} /index.html` and `file_server`; the directory is a bind mount, so no restart is needed). The same fallback answers 200 with this page for any unknown path outside `/api`, so look at `/` only. The real front end replaces this file later.
 
 **Step 27, the reboot check, last.** Run it only when steps 20-26 passed. Reboot the server and wait about two minutes; `ssh` drops at once, and the same `ssh` line as in step 2 (from `infra/` on the laptop, `AWS_PROFILE` exported) logs in again.
 
@@ -458,7 +461,7 @@ The `200` and the absence of any restart are predictions from the Caddyfile (`ro
 sudo reboot
 ```
 
-Then, on the server, without starting anything by hand: `uptime -p` shows a few minutes (the reboot happened); `systemctl is-enabled docker` prints `enabled`; `swapon --show` lists `/swapfile` of 1G (the `/etc/fstab` entry comes from the server's first-boot script); both services show `healthy` in `ps` (allow up to a minute, as `cms` has a start period of 30 seconds); the `grep -ciE` line prints `0`, since the certificate is in the volume and the reboot must not ask for a new one. Record `available` from `free -m`.
+Then, on the server, without starting anything by hand: `uptime -p` shows a few minutes (the reboot happened); `systemctl is-enabled docker` prints `enabled`; `swapon --show` lists `/swapfile` of 1G (the `/etc/fstab` entry comes from the server's first-boot script); both services show `healthy` in `ps` (allow up to a minute, as `cms` has a start period of 30 seconds); the `grep -ciE` line prints `0`, since the certificate is in the volume and the reboot must not ask for a new one (it can be above 0 only if the command runs within ten minutes of step 20, because `--since 10m` counts back from the moment the command runs). Record `available` from `free -m`.
 
 ```sh
 uptime -p
@@ -470,7 +473,7 @@ docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs --since
 free -m
 ```
 
-That both services come back `healthy` on their own relies on `restart: unless-stopped` together with Docker being enabled at boot; the figures and the log wording are unconfirmed until the run. Finish on the laptop with the strict run of step 21 (all groups): it must still end `ALL PASS`.
+That both services come back `healthy` on their own relies on `restart: unless-stopped` together with Docker being enabled at boot. On the run `uptime -p` said "up 1 minute", Docker was `enabled`, `/swapfile` was 1024M, both services were `healthy` without any command, the obtain/obtained count was `0`, and `free -m` showed 484 MiB available with swap at 0. Finish on the laptop with the strict run of step 21 (all groups): it must still end `ALL PASS`, and on the run it did.
 
 ### If a production-certificate step fails
 
@@ -478,8 +481,8 @@ That both services come back `healthy` on their own relies on `restart: unless-s
 |---|---|---|
 | Typo in the `ACME_CA` URL | issuance errors in the log; the strict run fails | Stop Caddy as in the stop rules, fix the line, then `up -d --no-deps --wait caddy` as in step 20. This is the repair start. The attempt may count as a failure. |
 | The staging certificate is still served after the switch | the strict `issuer` row says STAGING, and the log has no `certificate obtained successfully` | Wait two more minutes and read the log again. If Caddy still keeps the staging certificate, use the volume steps below (the repair start). |
-| Production issuance fails (DNS, port 80, wrong name) | a challenge failure in the log | Stop Caddy at once so it stops retrying. Each failed authorization uses the hourly failure allowance (5 per name per hour, one refilled every 12 minutes); wait 12 minutes for every failure the log shows, fix the cause, then the repair start. It is not a weekly slot. |
-| `too many certificates` for the exact set of names | log text with a retry time | Stop Caddy. The weekly limit refills one certificate per 34 hours and has no override. Put the staging line back and run `up -d --no-deps --wait caddy`, so the API answers (untrusted) meanwhile. `acme_ca` makes Let's Encrypt the only authority (see the `ACME_CA` row of [the variable table](operations.md#environment-variables)), and changing the set of names to get around the limit is deliberately not done. Re-plan the timing. |
+| Production issuance fails (DNS, port 80 or 443, wrong name) | a challenge failure in the log | Stop Caddy at once so it stops retrying. Each failed authorization uses the hourly failure allowance (5 per name per hour, one refilled every 12 minutes); wait 12 minutes for every failure the log shows, fix the cause, then the repair start. It is not a weekly slot. |
+| `too many certificates` for the exact set of names | log text with a retry time | Stop Caddy. The exact-set limit (5 per 7 days for exactly these names) refills one certificate per 34 hours and has no override; the registered-domain limit (50 per 7 days) has an override request, per the Let's Encrypt page. Put the staging line back and run `up -d --no-deps --wait caddy`, so the API answers (untrusted) meanwhile. `acme_ca` makes Let's Encrypt the only authority (see the `ACME_CA` row of [the variable table](operations.md#environment-variables)), and changing the set of names to get around the limit is deliberately not done. Re-plan the timing. |
 | 22 (from a network outside `ssh_cidr`), 5432, 8000 or 8081 answers | step 23 or 24 | Stop. Read the security group in the console (read-only) and the `ss` listing again. |
 | The server does not come back cleanly | a service is down, no swap, or SSH refused | Look at the instance status checks in the console and run `sudo journalctl -u docker`, then `up -d` from `/opt/cms/app` with the two flags. The data is on the database and in the volumes, so nothing is lost. |
 
@@ -504,7 +507,193 @@ Whether Caddy really keeps a staging certificate in storage after the switch is 
 
 ## The first admin and the demo member
 
-The first admin and the shared demo member are created after the app is up; invites, roles and the starting budget are in [members and the token budget](operations.md#members-and-the-token-budget).
+The first admin and the shared demo member are created after the app is up; invites, roles and the starting budget are in [members and the token budget](operations.md#members-and-the-token-budget). Steps 28-37 create the admin and the demo member and put one question to the chat. Each step says where it is typed: on the server (bash, from `/opt/cms/app`) or on the laptop (zsh or bash, on any network that reaches the site; the hotspot is not needed). The laptop steps run in one terminal, in order, because the shell variables carry from one step to the next.
+
+**How the secrets are handled.** A password or an invite code is read at a silent prompt (`read -rs`); an e-mail address is read at a visible one (`read -r`) and is never written in this document. The JSON body is built by `python3` from exported variables and sent from standard input (`curl --data @-`), and the `Authorization` header is handed to `curl` as a config stream (`-K <(...)`), so no secret is ever an argument of a command: none is in the shell history or on the command line of a process (a running `python3` does hold the exported variables in its environment, which is why `ps e` output is never pasted). A token is held in a shell variable only. A token lives 30 minutes: when a request answers `401`, log in again with the matching login block under "If a step of this section fails". Each laptop command prints only a status code (`000` means no answer at all) or a few non-secret fields, never a response body (a `422` body echoes back the values you sent).
+
+**Do not paste into a chat or a ticket (this section):** invite codes, passwords, tokens, the admin's and the demo member's e-mail addresses, any response body, and the output of `unlock_login` (its error stream names the database host). Safe to share: HTTP status codes, the row count printed in steps 30 and 35, `tokens_budget_daily` and `tokens_used_today`, the time of the chat call, the `abstained` and `truncated` values, the number of documents and their citation keys (`S1`, ...), `free -m` and `docker compose ps`. The text of the chat answer may be shared only if the owner chooses.
+
+**The gate, before step 28 (the owner reads and states; nothing is typed).** The chat call of step 34 is the only paid call of this section: one Anthropic call to classify the question, one to write the answer, and one OpenAI call to embed the question. The provider limits were last stated before the database steps, so state them again now. Both provider consoles (OpenAI and Anthropic) must show a monthly spend limit, and for each the owner says whether the limit is enforced (the provider refuses calls at the limit) or only shown (it informs, and the spending goes on). A limit that is shown but not enforced is a decision the owner records, with the reason, before step 34; it is never assumed to hold. A figure or a statement from an earlier day is not a reading. If a limit is missing or unreadable, or the owner cannot say whether it is enforced, stop (see the stop rules).
+
+**Step 28, on the server: the invite for the admin.** `make_invite` prints the code once and stores only its hash, so copy it from the terminal (select it with the mouse) and paste it only at the silent prompt of step 29. It is one line of 43 characters (letters, digits, `-` and `_`), valid for one day and good for one signup. An invite makes a `member`, never an admin: step 30 promotes.
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -m scripts.make_invite --days 1
+```
+
+**Step 29, on the laptop: sign up the admin.** Use your own address and a password from your password manager (8 to 128 characters). The command prints the status code only: expect `201`. The address is stored in lower case.
+
+```sh
+printf 'Invite code: '; read -rs INVITE_CODE; echo
+printf 'Admin e-mail: '; read -r MEMBER_EMAIL
+printf 'Admin password: '; read -rs MEMBER_PASSWORD; echo
+export INVITE_CODE MEMBER_EMAIL MEMBER_PASSWORD
+python3 -c 'import json,os;print(json.dumps({"email":os.environ["MEMBER_EMAIL"],"password":os.environ["MEMBER_PASSWORD"],"invite_code":os.environ["INVITE_CODE"]}))' | curl -s -o /dev/null -w '%{http_code}\n' -H 'content-type: application/json' --data @- https://demo.cropcms.com/api/members/signup
+unset INVITE_CODE
+```
+
+**Step 30, on the server: make that member the admin.** The API never grants the admin role, so one `UPDATE` does it, from inside the running `cms` container. The address is typed at the prompt and reaches the container through standard input; the same letter case as in step 29 is not needed, because the command lower-cases it as signup did. It prints the number of rows changed: expect `1`. `0` means no member has that address (a typo, or step 29 did not print `201`): run this step again.
+
+```sh
+cd /opt/cms/app
+printf 'Admin e-mail: '; read -r ADMIN_EMAIL
+printf '%s\n' "$ADMIN_EMAIL" | docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -c 'import sys; from sqlalchemy import text; from app.auth.invite import normalise_email; from app.db.migrate_db import engine; c = engine.connect(); r = c.execute(text("UPDATE members SET role = :r WHERE email = :e"), {"r": "admin", "e": normalise_email(sys.stdin.readline())}); c.commit(); print(r.rowcount)'
+```
+
+**Step 31, on the laptop: log in as the admin and make the invite for the demo member.** The first command keeps the token in `ADMIN_TOKEN` and prints only its length: a number above 100. The second asks for a one-day invite for a plain `member` and keeps the code in `DEMO_INVITE`; it prints the length, `43`. A length of `0` means the request failed: see the table below.
+
+```sh
+ADMIN_TOKEN=$(python3 -c 'import json,os;print(json.dumps({"email":os.environ["MEMBER_EMAIL"],"password":os.environ["MEMBER_PASSWORD"]}))' | curl -s -H 'content-type: application/json' --data @- https://demo.cropcms.com/api/members/login | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))')
+printf '%s\n' "${#ADMIN_TOKEN}"
+DEMO_INVITE=$(curl -s -K <(printf 'header = "Authorization: Bearer %s"\n' "$ADMIN_TOKEN") -H 'content-type: application/json' --data '{"role":"member","expires_in_days":1}' https://demo.cropcms.com/api/members/invites | python3 -c 'import json,sys;print(json.load(sys.stdin).get("code",""))')
+printf '%s\n' "${#DEMO_INVITE}"
+```
+
+**Step 32, on the laptop: sign up the shared demo member.** The address is a role-style one on your own domain; it needs no mailbox. The password comes from your password manager, is never written in the repo, the chat or a command line, and is shared by you alone with the people you let try the demo. Expect `201`.
+
+```sh
+printf 'Demo e-mail: '; read -r MEMBER_EMAIL
+printf 'Demo password: '; read -rs MEMBER_PASSWORD; echo
+INVITE_CODE=$DEMO_INVITE
+export INVITE_CODE MEMBER_EMAIL MEMBER_PASSWORD
+python3 -c 'import json,os;print(json.dumps({"email":os.environ["MEMBER_EMAIL"],"password":os.environ["MEMBER_PASSWORD"],"invite_code":os.environ["INVITE_CODE"]}))' | curl -s -o /dev/null -w '%{http_code}\n' -H 'content-type: application/json' --data @- https://demo.cropcms.com/api/members/signup
+unset INVITE_CODE DEMO_INVITE
+```
+
+**Step 33, on the laptop: log in as the demo member and read the budget.** The second command prints `tokens_budget_daily` and `tokens_used_today` and nothing else: expect `100000 0`. The last line clears the e-mail and password; to log in again later, use the demo member's login block under "If a step of this section fails". The server stamps the budget from `TOKENS_BUDGET_DAILY` when the member signs up; `20000 0` means `cms` was started before that line was in `/opt/cms/.env` (see the table).
+
+```sh
+DEMO_TOKEN=$(python3 -c 'import json,os;print(json.dumps({"email":os.environ["MEMBER_EMAIL"],"password":os.environ["MEMBER_PASSWORD"]}))' | curl -s -H 'content-type: application/json' --data @- https://demo.cropcms.com/api/members/login | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))')
+printf '%s\n' "${#DEMO_TOKEN}"
+curl -s -K <(printf 'header = "Authorization: Bearer %s"\n' "$DEMO_TOKEN") https://demo.cropcms.com/api/members/me | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("tokens_budget_daily"),d.get("tokens_used_today"))'
+unset MEMBER_EMAIL MEMBER_PASSWORD
+```
+
+**Step 34, one chat question (the paid call; the owner sends it).** The decision about a limit that is only shown must already be recorded (the gate). On the server, read the memory before the call:
+
+```sh
+free -m
+```
+
+Then, on the laptop, put exactly one question as the demo member. `curl` prints the status and the time of the call (`time_total`, in seconds) and writes the answer to a private temporary file; the `python3` line prints the non-secret fields, then the answer text for you to read. Expect `status 200`, `abstained` `null`, `truncated` `false`, a non-empty `documents` list and keys such as `S1`. Caddy waits up to 120 seconds for the answer, and the command gives up after 150. The time and the exact shape of a real answer are unconfirmed until the run.
+
+```sh
+CHAT_OUT=$(mktemp)
+curl -s --max-time 150 -o "$CHAT_OUT" -w 'status %{http_code}, time_total %{time_total} s\n' -K <(printf 'header = "Authorization: Bearer %s"\n' "$DEMO_TOKEN") -H 'content-type: application/json' --data '{"question":"how hot should basil be?"}' https://demo.cropcms.com/api/chat
+python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(json.dumps({"abstained":d.get("abstained"),"truncated":d.get("truncated"),"documents":len(d.get("documents",[])),"keys":[x["key"] for x in d.get("documents",[])]}));print(d.get("answer") or d.get("detail"))' "$CHAT_OUT"
+rm -f "$CHAT_OUT"
+```
+
+Then read the budget again: `tokens_used_today` must be above 0, and `tokens_budget_daily` is still `100000`. A second question is allowed only if the first looks odd or slow, and three in all is the most. Then, on the server, read `free -m` again and record both `available` figures.
+
+```sh
+curl -s -K <(printf 'header = "Authorization: Bearer %s"\n' "$DEMO_TOKEN") https://demo.cropcms.com/api/members/me | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("tokens_budget_daily"),d.get("tokens_used_today"))'
+```
+
+```sh
+free -m
+```
+
+**Step 35, the published-only count.** On the server this prints the number of published documents, and on the laptop the number of documents the public list returns; the two numbers must be equal (61 on a freshly seeded database: the seed has 62 documents, and the unpublished draft is in neither number). Equal numbers show that the list holds published documents only; the value on the real server is unconfirmed until the run.
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -c 'from sqlalchemy import text; from app.db.migrate_db import engine; c = engine.connect(); print(c.execute(text("SELECT count(*) FROM items WHERE published")).scalar())'
+```
+
+```sh
+curl -s https://demo.cropcms.com/api/items | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))'
+```
+
+**Step 36, log hygiene, then clear the secrets.** On the server, both commands print a count and no log line: the first counts requests in the Caddy log that carry a token after the word `Bearer` (a `401` answer shows the bare word `Bearer` in its `WWW-Authenticate` header, which does not match), the second counts SQL text of a member insert in the `cms` log. Both must print `0`. Caddy writes the `Authorization` header of a request as `REDACTED` in its request log (seen in a local test of this Caddyfile); on the real server that is unconfirmed until the run, and these counts are the check.
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs caddy | grep -c 'Bearer [A-Za-z0-9_-]'
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs cms | grep -ci 'insert into members'
+unset ADMIN_EMAIL
+```
+
+Then, on the laptop, remove every secret from the shell, and close the terminal:
+
+```sh
+unset ADMIN_TOKEN DEMO_TOKEN DEMO_INVITE INVITE_CODE MEMBER_EMAIL MEMBER_PASSWORD CHAT_OUT
+```
+
+**Step 37, on the server: the unlock command, written down.** Anyone who knows the demo member's address can lock the account with ten wrong logins within 900 seconds (the answer is then `429`, even for the right password); that is accepted, and this is the way out ([the lock and its recovery](operations.md#login-throttling)). Do not run it now. It prints `unlocked` or `nothing to unlock`, and an error line that names the database host (do not paste it); an admin's `POST /api/members/{id}/unlock` does the same. The address is an argument of this command (the script reads no standard input), so it shows in a process listing while the command runs; the shared demo address is not a secret.
+
+```sh
+cd /opt/cms/app
+printf 'Locked e-mail: '; read -r LOCKED_EMAIL
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T cms python -m scripts.unlock_login "$LOCKED_EMAIL"
+unset LOCKED_EMAIL
+```
+
+### What the chat costs and what it needs in memory
+
+One question is one paid call to each provider. The classifier answers at most 256 tokens and the generator at most 1024 (`app/chat/llm.py`), and the measured median is 2771 tokens per question on the previous model (`docs/live-eval.md`; the current default has not been measured). At the listed Haiku 5.5 price of $0.50 per million output tokens, which was read on 2026-10-12 and is unverified since, one question costs about $0.002 even if every token were billed at the output rate; the embedding of the question adds a few hundred tokens at $0.02 per million. The demo member's cap of 100000 tokens a day is therefore at most about $0.05 a day (concurrent requests can overshoot the cap), and the provider limits of the gate are the second bound.
+
+Each login hashes the password with Argon2, about 64 MiB, and at most four hashes run at once, so a burst of logins stays near 325 MiB; that is a figure from a laptop and unconfirmed on the server. The steps hash four passwords, one after the other (two signups, two logins). Compare the `available` figures of `free -m` before and after step 34 with the 484 MiB of step 27; they are unconfirmed until the run.
+
+### If a step of this section fails
+
+| Situation | Seen as | Repair |
+|---|---|---|
+| Signup `400` | step 29 or 32 prints `400` | The invite is unknown, used or expired, or the address is already registered. Make a new invite (step 28, or step 31 for the demo member); if the address is registered, the member exists, so go on. |
+| Signup `422` | `422` | A field is refused: the password is under 8 characters, or the code is under 20. Never paste the body. |
+| Step 30 prints `0` | no row changed | Wrong address, or step 29 failed: repeat step 30 with the address of step 29. |
+| Admin login prints a length of `0` | step 31 | Wrong address or password (one `401` answer covers both), a lock (`429`), or an app error (an empty `SECRET_KEY` in `/opt/cms/.env` gives `500`). Each wrong login counts toward the lock, so retry once at most: repeat the first two lines of step 31, because `MEMBER_EMAIL` and `MEMBER_PASSWORD` are still set after step 29. If they were cleared or the terminal was replaced, use the admin's login block below the table. |
+| Demo login prints a length of `0` | step 33 | Wrong address or password (one `401` answer covers both), a deleted member, a lock (`429`), or an app error (an empty `SECRET_KEY` in `/opt/cms/.env` gives `500`). Each wrong login counts toward the lock, so retry once at most, with the demo member's login block below the table, because step 33 cleared the variables. |
+| Login or any call answers `429` | status `429` | The account is locked (ten wrong logins in 900 seconds), or the chat budget is spent. For the lock use step 37; the chat budget resets when the day changes in the database. |
+| Token calls answer `401` | status `401` | The token is older than 30 minutes: log in again with the matching block below the table (the demo member's for `DEMO_TOKEN`, the admin's for `ADMIN_TOKEN`). |
+| Step 32 failed after it cleared `DEMO_INVITE` | the signup printed anything but `201` | Make a new demo invite first: run the last two lines of step 31 (they need `ADMIN_TOKEN`; if it is unset or older than 30 minutes, run the admin's login block below the table first), then repeat step 32. |
+| `tokens_budget_daily` is `20000` | step 33 | Log in as the admin and raise this member's budget to 100000 (the blocks below). For members who sign up later, first run the `up -d --no-deps --wait` command of step 20 with `cms` in place of `caddy`, so the new value is read. |
+| Chat `503` | `status 503` | A provider key is missing or invalid, or a provider limit is reached; the cause is in the `cms` log, not in the answer. Do not retry in a loop. Step 13 shows whether the OpenAI key is there. |
+| Chat `200` with `abstained` set | `abstained` is not `null` | The question matched no topic: not an outage. Check that step 17 still reports `0 to embed` before a second question. |
+| Chat `413` | `status 413` | Not expected for this corpus; stop and ask. |
+| Wrong role, or a wrong demo account | the wrong member shows in the list | Delete it as admin (the block below), which is audited, then make a new invite. There is no route that changes a password: to rotate the demo password, delete the member and sign up again with a new invite. |
+
+To log in as the demo member again (after step 33 cleared the variables, or when the token is older than 30 minutes), type the address and password again. The block keeps only the token in `DEMO_TOKEN`, clears the e-mail and password, and prints the token's length (a number above 100; `0` means the login failed).
+
+```sh
+printf 'Demo e-mail: '; read -r MEMBER_EMAIL
+printf 'Demo password: '; read -rs MEMBER_PASSWORD; echo
+export MEMBER_EMAIL MEMBER_PASSWORD
+DEMO_TOKEN=$(python3 -c 'import json,os;print(json.dumps({"email":os.environ["MEMBER_EMAIL"],"password":os.environ["MEMBER_PASSWORD"]}))' | curl -s -H 'content-type: application/json' --data @- https://demo.cropcms.com/api/members/login | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))')
+printf '%s\n' "${#DEMO_TOKEN}"
+unset MEMBER_EMAIL MEMBER_PASSWORD
+```
+
+To find a member's number, raise a budget or delete a member, log in as the admin again; the first block does that and lists the members. The list shows each member's number, role, whether the member is active, and the address (on your screen only). An admin cannot delete themselves, and the last admin cannot be deleted.
+
+```sh
+printf 'Admin e-mail: '; read -r MEMBER_EMAIL
+printf 'Admin password: '; read -rs MEMBER_PASSWORD; echo
+export MEMBER_EMAIL MEMBER_PASSWORD
+ADMIN_TOKEN=$(python3 -c 'import json,os;print(json.dumps({"email":os.environ["MEMBER_EMAIL"],"password":os.environ["MEMBER_PASSWORD"]}))' | curl -s -H 'content-type: application/json' --data @- https://demo.cropcms.com/api/members/login | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))')
+curl -s -K <(printf 'header = "Authorization: Bearer %s"\n' "$ADMIN_TOKEN") https://demo.cropcms.com/api/members | python3 -c 'import json,sys;[print(m["id"],m["role"],m["is_active"],m["email"]) for m in json.load(sys.stdin)]'
+```
+
+To raise a budget to 100000, type the number at the prompt (the answer is `200`):
+
+```sh
+printf 'Member number: '; read -r MEMBER_ID
+curl -s -o /dev/null -w '%{http_code}\n' -X PATCH -K <(printf 'header = "Authorization: Bearer %s"\n' "$ADMIN_TOKEN") -H 'content-type: application/json' --data '{"tokens_budget_daily":100000}' https://demo.cropcms.com/api/members/"$MEMBER_ID"
+```
+
+To delete a wrong member (the answer is `204`), type its number at the prompt:
+
+```sh
+printf 'Member number: '; read -r MEMBER_ID
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE -K <(printf 'header = "Authorization: Bearer %s"\n' "$ADMIN_TOKEN") https://demo.cropcms.com/api/members/"$MEMBER_ID"
+```
+
+When done, clear the shell again:
+
+```sh
+unset ADMIN_TOKEN MEMBER_EMAIL MEMBER_PASSWORD MEMBER_ID
+```
 
 ## Redeploying
 
