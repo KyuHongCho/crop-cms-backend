@@ -277,7 +277,7 @@ Once a member exists, never run it: undoing the migrations would delete the memb
 
 The public address is checked from a machine outside the server's network, and only ports 80 and 443 should answer.
 
-**Step 12, on the laptop, from the repository root, on a network that is not the server's** (a phone hotspot is enough, but a slow one can make a request time out, see "If something fails" at the end). `prod/outside-check.sh` sends only GET requests, logs in nowhere, makes no paid call and needs only `curl`, `openssl` and `nc`. It runs every selected check, prints one row each (`PASS`, `FAIL`, or `SKIP` with its reason), ends with `ALL PASS` or `FAILED`, and exits 1 if any row failed and 2 on a usage error. The domain and the flags may come in any order. The groups are `tls` (certificate issuer, trust, the HTTP redirect, `/api/health`), `edge` (blocked paths, the trailing-slash redirect), `data` (the item list, the unpublished draft, one retrieval) and `ports` (5432, 8000 and 8081 must not answer). Until the database is filled, leave `data` out with `--only`. Always include `tls` in a strict run: without it, an untrusted certificate shows as plain `FAIL` rows (a status of `000` or a `curl exit 60`) instead of one `trust` failure with the rest skipped. A `closed` PASS means only that nothing answered from this network, not that the ports are shut: a mistyped domain or a network that blocks outbound ports passes too, so the check on the server itself (`ss -ltnup`) stays the proof.
+**Step 12, on the laptop, from the repository root, on a network that is not the server's** (a phone hotspot is enough, but a slow one can make a request time out, see "If something fails" at the end). `prod/outside-check.sh` sends only GET requests, logs in nowhere, makes no paid call and needs only `curl`, `openssl` and `nc`. It runs every selected check, prints one row each (`PASS`, `FAIL`, or `SKIP` with its reason), ends with `ALL PASS` or `FAILED`, and exits 1 if any row failed and 2 on a usage error. The domain and the flags may come in any order. The groups are `tls` (certificate issuer, trust, the HTTP redirect, `/api/health`), `edge` (blocked paths, the trailing-slash redirect), `data` (the item list, the unpublished draft, one retrieval) and `ports` (5432, 8000 and 8081 must not answer). A fifth group, `spa`, is opt-in: it runs only when named, so a run without `--only` still prints the ten rows of the other four groups, and its four rows (in the table after the output below) read the front end the server serves. Alone on a staging certificate it needs `--staging`, because `trust` does not run then. Until the database is filled, leave `data` out with `--only`. Always include `tls` in a strict run: without it, an untrusted certificate shows as plain `FAIL` rows (a status of `000` or a `curl exit 60`) instead of one `trust` failure with the rest skipped. A `closed` PASS means only that nothing answered from this network, not that the ports are shut: a mistyped domain or a network that blocks outbound ports passes too, so the check on the server itself (`ss -ltnup`) stays the proof.
 
 The first run is strict, as the production certificate will be checked. The server still has the staging certificate, so it must fail on `issuer` and `trust` and nowhere else, and the rows that would need `-k` are skipped:
 
@@ -327,6 +327,17 @@ ALL PASS
 ```
 
 Stop if the first run fails anywhere but `issuer` and `trust`, or the second run shows any `FAIL`. If the laptop's resolver still holds an old answer for the domain, add `--ip "$(cd infra && terraform output -raw elastic_ip)"` to point both `curl` and `openssl` at the server directly. The table holds only public facts (issuer, expiry, status codes), so it is safe to share.
+
+The opt-in `spa` group (`--only spa`) checks the front end the server serves, again with GET requests only, no login and no paid call. It prints these rows after any other selected group:
+
+| Row | Result | What it shows |
+|---|---|---|
+| `shell` | PASS | `/` is 200 with `Content-Type` `text/html`, and the page holds `id="root"` and `<script type="module"`; a page without `id="root"` (such as the placeholder) fails |
+| `deep-link` | PASS | `/library/spa-check`, a made-up route, is 200 and byte-for-byte the same page as `/`; it compares the two pages and does not judge them, so `shell` is the row that rejects a wrong page |
+| `asset-js` | PASS | the first `src="/assets/...js"` in the page is fetched: 200 and `Content-Type` `text/javascript` or `application/javascript`; a page that names no such file, or a type of `text/html`, `application/octet-stream` or none, fails |
+| `asset-css` | PASS | the first `href="/assets/...css"` in the page is fetched: 200 and `Content-Type` `text/css`; the same failures as `asset-js` |
+
+The type is checked because the proxy answers a missing file under `/assets/` with 200 and the page itself, so the status alone cannot tell a built file from a fallback.
 
 ## Switching to the production certificate
 
