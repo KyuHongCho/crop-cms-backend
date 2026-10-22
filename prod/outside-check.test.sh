@@ -269,7 +269,7 @@ ok_if "--staging --only spa: four requests, all with -k" \
   test "$(grep -c '^curl' "$STUB_LOG")" -eq 4 -a "$(grep '^curl' "$STUB_LOG" | grep -c ' -k ')" -eq 4
 GROUPS_ORDER=$SPA_ROWS t "strict --only spa against a staging certificate: every row FAILs" 1 "shell=FAIL deep-link=FAIL asset-js=FAIL asset-css=FAIL" S_TRUST_EXIT=60 -- "$D" --only spa
 GROUPS_ORDER="issuer trust http-redirect health shell deep-link asset-js asset-css" t "strict --only tls,spa, trust fails: spa rows SKIP" 1 "trust=FAIL health=SKIP shell=SKIP deep-link=SKIP asset-js=SKIP asset-css=SKIP" S_TRUST_EXIT=60 -- "$D" --only tls,spa
-ok_if "that run made no request for the spa paths" test "$(grep '^curl' "$STUB_LOG" | grep -c -e 'spa-check' -e '/assets/' -e 'example.com/ ')" -eq 0
+ok_if "that run made no request for the spa paths" test "$(grep '^curl' "$STUB_LOG" | grep -c -e 'spa-check' -e '/assets/' -e 'example\.com/$')" -eq 0
 run S_TRUST_EXIT=60 -- "$D" --ip 192.0.2.7 --only spa
 ok_if "--ip: the address is not printed by the spa rows, passing or failing" test "$(grep -c 192.0.2.7 "$tmp/out")" -eq 0
 run S_SHELL_BODY='<p>x</p>' -- "$D" --ip 192.0.2.7 --only spa
