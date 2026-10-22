@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Checks a deployed domain from outside: GET requests only, no login, no paid call, curl, openssl and nc only.
 # Prints one row per check and exits 1 if any row failed, 2 on bad usage.
+# The spa group is opt-in; with --only spa alone on a staging certificate, trust is not run, so pass --staging.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
 usage() {
-  echo "usage: $0 <domain> [--staging] [--ip <ipv4>] [--only tls,edge,data,ports]" >&2
+  echo "usage: $0 <domain> [--staging] [--ip <ipv4>] [--only tls,edge,data,ports,spa]" >&2
+  echo "  spa is opt-in: it runs only when named. --only spa alone on a staging certificate needs --staging." >&2
   exit 2
 }
 
@@ -31,7 +33,7 @@ case $only in "" | ,* | *, | *,,*) usage ;; esac
 rest=$only
 while [ -n "$rest" ]; do
   group=${rest%%,*}
-  case $group in tls | edge | data | ports) ;; *) usage ;; esac
+  case $group in tls | edge | data | ports | spa) ;; *) usage ;; esac
   if [ "$rest" = "$group" ]; then rest=""; else rest=${rest#*,}; fi
 done
 want() { case ",$only," in *",$1,"*) return 0 ;; esac; return 1; }
@@ -194,6 +196,56 @@ check_closed() {
   done
   if [ -z "$open" ]; then row PASS closed "5432 8000 8081 refuse or time out"; else row FAIL closed "answering:$open"; fi
 }
+ctype() { # the bare media type of the last response, lowercase, parameters dropped
+  tr -d '\r' <"$tmp/h" | awk 'tolower($0) ~ /^content-type:/ { sub(/^[^:]*:/, ""); sub(/;.*/, ""); gsub(/[ \t]/, ""); print tolower($0); exit }'
+}
+shell_code=none
+check_shell() {
+  needs_https shell || return
+  get "$base/"
+  shell_code=$code
+  cp "$tmp/b" "$tmp/shell"
+  local ct
+  ct=$(ctype)
+  if [ "$code" = 200 ] && [ "$ct" = text/html ] && grep -qF 'id="root"' "$tmp/shell" && grep -qF '<script type="module"' "$tmp/shell"; then
+    row PASS shell "200 text/html with the app root and a module script"
+  else
+    row FAIL shell "got $code ${ct:-no content type} (curl exit $crc), expected 200 text/html with id=\"root\" and a module script"
+  fi
+}
+check_deep_link() {
+  needs_https deep-link || return
+  get "$base/library/spa-check"
+  if [ "$shell_code" != 200 ]; then
+    row FAIL deep-link "no 200 shell body to compare with"
+  elif [ "$code" = 200 ] && cmp -s "$tmp/shell" "$tmp/b"; then
+    row PASS deep-link "200 and the same page as /"
+  else
+    row FAIL deep-link "got $code (curl exit $crc), not the same page as /"
+  fi
+}
+check_asset() { # name, attribute, extension, accepted media types: the shell must name a file served as itself
+  needs_https "$1" || return
+  local path ct
+  if [ "$shell_code" != 200 ]; then
+    row FAIL "$1" "no 200 shell body to read the .$3 name from"
+    return
+  fi
+  path=$(grep -Eo "$2=\"/assets/[A-Za-z0-9._/-]*\\.$3\"" "$tmp/shell" | head -n 1 | sed 's/^[a-z]*="//; s/"$//')
+  if [ -z "$path" ]; then
+    row FAIL "$1" "the shell names no /assets/*.$3 file"
+    return
+  fi
+  get "$base$path"
+  ct=$(ctype)
+  if [ "$code" = 200 ] && [ -n "$ct" ] && case " $4 " in *" $ct "*) true ;; *) false ;; esac; then
+    row PASS "$1" "200 $ct for $path"
+  else
+    row FAIL "$1" "got $code ${ct:-no content type} (curl exit $crc) for $path, expected 200 and one of: $4"
+  fi
+}
+check_asset_js() { check_asset asset-js src js "text/javascript application/javascript"; }
+check_asset_css() { check_asset asset-css href css "text/css"; }
 
 echo "outside-check $domain ($([ "$staging" -eq 1 ] && echo staging || echo strict))"
 if want tls; then
@@ -213,6 +265,12 @@ if want data; then
 fi
 if want ports; then
   check_closed
+fi
+if want spa; then
+  check_shell
+  check_deep_link
+  check_asset_js
+  check_asset_css
 fi
 
 echo "$passes passed, $fails failed, $skips skipped"
