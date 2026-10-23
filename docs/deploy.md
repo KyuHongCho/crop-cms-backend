@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Redeploying is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-45 put the frontend on the server; they are written and have not been run. Redeploying a later backend release is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -28,6 +28,7 @@ Stop and ask rather than guess when any of these holds:
 - Before step 28, either provider console shows no monthly spend limit, or the owner cannot say, for each limit, whether it is enforced or only shown: do not start step 28. A limit that is only shown and has no decision recorded by the owner: do not send the question of step 34.
 - The chat question of step 34 has been asked three times: stop and ask, whatever the answers were.
 - A count in step 36 is above 0 (a token in the Caddy log, or member-insert SQL in the `cms` log): stop and ask; do not paste the lines.
+- Any stop rule of [Deploying the frontend](#stop-rules-for-the-frontend-deploy): do not copy, record or prune further.
 
 Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never recreate the certificate "to try again" after a production certificate was obtained, never run a compose command without `--env-file /opt/cms/.env`, never use `docker compose run` (the image's entrypoint is the web server, so the command that follows becomes its arguments), never run `alembic downgrade` except the rollback in "Database migration and seed", and never print the rendered configuration (`config` without `-q` shows every secret).
 
@@ -709,6 +710,259 @@ When done, clear the shell again:
 unset ADMIN_TOKEN MEMBER_EMAIL MEMBER_PASSWORD MEMBER_ID
 ```
 
+## Deploying the frontend
+
+Steps 38-45 put the built app of the `crop-cms-frontend` repository on the server, check it, and rehearse the way back. No container changes: Caddy serves `/opt/cms/site` (mounted read-only at `/srv`), so a deploy only copies files into that directory.
+
+**Status: written, not yet run.** Read on the real server on 2026-10-22: `rsync` is `/usr/bin/rsync`; `/opt/cms/site` is `drwxr-xr-x ubuntu ubuntu` and holds only `index.html` (43 bytes, mode 664, the placeholder of step 26); the Caddy container runs as root (`id -u` prints `0`). So the `rsync` path below applies and needs no `sudo`; [the tar fallback](#if-the-server-has-no-rsync) stays untested. Not yet confirmed: that the server's `rsync` writes each file under a temporary name and renames it (so `index.html` is never half written), that the `ssh` forms of steps 41 (b) and (d) work, and that GNU `comm` on the server accepts the pipes of steps 41 (d), 41 (e) and 45. What was run, against a scratch copy on the laptop only (a local `rsync`, and a local shell in place of `ssh`): the guards of step 38, the history loop and the two saves of step 39, the dry run and the copy of step 40, the checks 41 (a) to (e), the script-name check of step 42, and steps 44 and 45. Not run at all: `nvm`, `npm` and the build, the `terraform` and `aws` lines of steps 38 and 40, the first block of step 39, the `stat`, `df` and `docker` lines of 41 (f), and `prod/outside-check.sh` and the `curl` of step 42 against the live site. No step has run against the server.
+
+How it works. The build happens on the laptop from a clean, pulled `main`; the copy is `rsync` over SSH, because SSH is open only from `ssh_cidr`, so CI cannot deploy. The copies are chained with `&&` in this order: `assets/` (hashed names: a file with a new name is new, and one with an old name has the old contents), then `favicon.svg`, then `index.html` last, so a failed copy stops the next one and a visitor gets either the old page with its old files or the new page with its new files. Old files are never deleted in a normal deploy: a stale tab keeps working and a rollback is one file swap. The server keeps `/opt/cms/index-history/`, outside the served directory: one copy of each page (`index.html`) that has been live, named for the commit of the build it contains (`index.b857200.html`; `index.placeholder.html` for the first one), a list of what those pages name, and an append-only `deployed.log` (UTC time and commit per deploy).
+
+Every laptop command uses the variables defined in these steps (`INFRA`, `FRONT`, `SSH_KEY`, `SITE_HOST`, `SHA`) and none contains a `<...>` placeholder, so it pastes into zsh and bash. Use one laptop terminal for steps 38-42, so the variables stay set. A failed connection must not look like a clean result, so the copies and check 41 (a) print their exit code, and check 41 (d) ends with a line of its own.
+
+**Step 38, on the laptop: build.** Start in `infra/` (the terminal of step 1, with `AWS_PROFILE` exported). The first block finds the frontend checkout next to this repository (type its path instead if yours is elsewhere, for example `FRONT=/Users/you/code/crop-cms-frontend`), moves to a clean, pulled `main` and stores the build's 7-character commit in `SHA`, which names the build everywhere below. `git status --porcelain` must print nothing and the last line prints the 7 characters: write them down.
+
+```sh
+unset SHA
+INFRA=$(pwd)
+FRONT=$(cd ../../crop-cms-frontend && pwd)
+test -n "$FRONT" && cd "$FRONT" && git switch main && git pull --ff-only && git status --porcelain && SHA=$(git rev-parse --short=7 HEAD) && echo "$SHA"
+```
+
+```sh
+nvm use
+npm ci
+npm run build
+```
+
+Then the guards. In order, they print the number of files (96 at commit b857200; write it down), the size in kilobytes, `none` (the bundle holds no secret or local address), `1` (the number of script files) and the names of the two files the page loads (`index-BfahRFuG.js` and `index-C9vu6WXt.css` at commit b857200; write them down). On macOS `wc` pads its number with spaces.
+
+```sh
+find dist -type f | wc -l
+du -sk dist
+grep -rlE 'VITE_|127\.0\.0\.1|localhost:8000' dist || echo none
+find dist/assets -name '*.js' | wc -l
+ls dist/assets | grep -E '^index-'
+```
+
+Stop if the checkout is not clean, if the `grep` prints a file name instead of `none`, or if the script count is not `1`. The count matters because the list of names that step 41 (c) builds reads only the page and the stylesheets: a second script file (a code-split chunk) would not be on it, and checks 41 (d) and 45 would report a live file as unreferenced.
+
+**Step 39, on the server: read-only checks, then make sure the live page is saved.** Log in as in step 2. The first block prints: the path of `rsync` (`/usr/bin/rsync`; if nothing prints, use [the fallback](#if-the-server-has-no-rsync)); the directory (`drwxr-xr-x ... ubuntu ubuntu`, so no `sudo` is needed); the contents (on the first deploy only `index.html`); and the disk, the memory and Docker's usage, to compare with step 41 (f). Stop if `df` shows more than 85 percent used.
+
+```sh
+command -v rsync
+ls -ld /opt/cms/site
+ls -la /opt/cms/site
+df -h /
+du -sk /opt/cms/site
+docker system df
+free -m
+```
+
+The history folder comes next. The loop prints a line for each history file whose bytes equal the live page, so it prints one line when the live page is already saved, two when two history files hold identical bytes (fine), and none when it is not saved. On the first deploy the folder is empty and the live page is the placeholder, so nothing prints.
+
+```sh
+H=/opt/cms/index-history
+mkdir -p "$H"
+ls -la "$H"
+for f in "$H"/index.*.html; do [ -e "$f" ] && cmp -s "$f" /opt/cms/site/index.html && echo "live page is saved as $f"; done
+```
+
+If the loop printed nothing, save the live page. On the first deploy (the folder was empty), run this; it refuses if `index.placeholder.html` exists or the live page is an app build:
+
+```sh
+H=/opt/cms/index-history
+if [ ! -e "$H/index.placeholder.html" ] && ! grep -q 'id="root"' /opt/cms/site/index.html; then cp -p /opt/cms/site/index.html "$H/index.placeholder.html" && echo "saved as index.placeholder.html"; else echo "STOP: this is not the first deploy"; fi
+```
+
+On a later deploy, a page with no history file means someone changed it by hand or an earlier run was interrupted; do not guess its build, save it under the time instead:
+
+```sh
+H=/opt/cms/index-history
+cp -p /opt/cms/site/index.html "$H/index.unsaved-$(date -u +%Y%m%dT%H%M%SZ).html"
+```
+
+**Step 40, on the laptop: dry run, then copy.** `terraform output` needs the AWS profile as in step 2 (run the `aws login` line of step 1 again if the session has expired). The key file is the one of step 2: its name is your choice, so use yours in place of `cropcms_ed25519_v2`. The server address stays in `SITE_HOST` and is never printed: the last line prints `SITE_HOST is set` and nothing else.
+
+```sh
+export AWS_PROFILE=cropcms
+cd "$INFRA"
+SSH_KEY=~/.ssh/cropcms_ed25519_v2
+SITE_HOST=ubuntu@"$(terraform output -raw elastic_ip)"
+test "${#SITE_HOST}" -gt 7 && echo "SITE_HOST is set"
+```
+
+The dry run changes nothing and has no `--delete`, so it cannot remove a file. `-c` compares contents, so a font file that the build rewrote unchanged (with a new modification time) is not sent again. The dry run lists the files that would be copied, each as a line starting with `>f` (all 96 on the first deploy; on a later one the new script and stylesheet, and the page), with a line for each new directory (lines starting `.f` or `.d` only set a time and copy nothing), and ends with `exit: 0`. Stop if any line says `deleting` or the exit code is not `0`.
+
+```sh
+rsync -rltcn --itemize-changes -e "ssh -i $SSH_KEY" "$FRONT/dist/" "$SITE_HOST:/opt/cms/site/"; echo "exit: $?"
+```
+
+The copy is one chained line. It must end with `exit: 0`; `--stats` prints the number of files and bytes sent (write them down, with the clock time the copy took). Any other code means a copy failed and the copies after it did not run; in particular, if the last line is not `exit: 0`, `index.html` was not copied. A failed `ssh` or `rsync` prints the server address, which this document says never to paste: paste only the exit code.
+
+```sh
+rsync -rltc --stats -e "ssh -i $SSH_KEY" "$FRONT/dist/assets/" "$SITE_HOST:/opt/cms/site/assets/" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/favicon.svg" "$SITE_HOST:/opt/cms/site/favicon.svg" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/index.html" "$SITE_HOST:/opt/cms/site/index.html"; echo "exit: $?"
+```
+
+**Step 41, verify, then record.** Six parts, each with its limit. (a) and (b) are on the laptop, (c) on the server, (d) on the laptop, (e) and (f) on the server.
+
+*(a) Laptop, content check.* It compares file contents (`-c`, modification times are ignored). It prints `exit: 0` and `no file differs` (that line is printed only when the exit code is `0`); any line starting with `>` is a file of the build that is missing or different on the server. It does not see extra files on the server; that is (d).
+
+```sh
+CHECK=$(rsync -rlcn --itemize-changes -e "ssh -i $SSH_KEY" "$FRONT/dist/" "$SITE_HOST:/opt/cms/site/"); RC=$?; echo "exit: $RC"
+printf '%s\n' "$CHECK" | grep '^>' || test "$RC" -ne 0 || echo "no file differs"
+```
+
+*(b) Laptop, record the page under the build's name,* only after (a) passed. The commit comes from `SHA` (set in step 38), so nothing is typed. The block first checks that the checkout still sits at that commit; on the server the script refuses a name that is not 7 hexadecimal characters, and refuses a name whose history file already exists with different bytes (the name belongs to another build, or `SHA` is stale). It prints `saved as index.` followed by the commit and `.html`, and adds a line with the UTC time and the commit to `deployed.log`.
+
+```sh
+if [ "$SHA" = "$(git -C "$FRONT" rev-parse --short=7 HEAD)" ]; then
+ssh -i "$SSH_KEY" "$SITE_HOST" bash -s "$SHA" <<'EOF'
+SHA=$1
+H=/opt/cms/index-history
+case "$SHA" in
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  *) echo "STOP: the build name is not 7 hex characters"; exit 1 ;;
+esac
+if [ -e "$H/index.$SHA.html" ] && ! cmp -s "$H/index.$SHA.html" /opt/cms/site/index.html; then
+  echo "STOP: index.$SHA.html exists and differs from the live page"; exit 1
+fi
+cp -p /opt/cms/site/index.html "$H/index.$SHA.html" && echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $SHA" >> "$H/deployed.log" && echo "saved as index.$SHA.html"
+EOF
+else
+echo "STOP: the frontend checkout is no longer at the build's commit"
+fi
+```
+
+*(c) Server, the list of names the history refers to.* It collects every `/assets/...` name in the live page and in every history page, adds every name those stylesheets load (the fonts), then `./index.html` and `./favicon.svg`, in C order. The last command prints the number of names: 96 after the first deploy of a build with 96 files. It is the list that (d), (e) and the prune of step 45 compare against.
+
+```sh
+H=/opt/cms/index-history
+cd /opt/cms/site
+grep -ho '/assets/[A-Za-z0-9._-]*' index.html "$H"/index.*.html | LC_ALL=C sort -u > "$H/referenced.top"
+grep -ho '/assets/[A-Za-z0-9._-]*' $(grep '\.css$' "$H/referenced.top" | sed 's#^/##') </dev/null | cat "$H/referenced.top" - | sed 's#^/#./#' | LC_ALL=C sort -u > "$H/referenced.txt"
+printf './index.html\n./favicon.svg\n' >> "$H/referenced.txt"
+LC_ALL=C sort -u -o "$H/referenced.txt" "$H/referenced.txt"
+wc -l "$H/referenced.txt"
+```
+
+*(d) Laptop, extras check.* The laptop sends its sorted list of the build's files to the server, which prints the files that are on the server, not in the build and not in the list of (c). It must print nothing except its last line, `extras check finished`; without that line the check did not run to the end. Empty means every extra file is an asset of the live build or of a build whose page is in the history. It does not show that an extra file's content is unchanged since its own deploy ((a) covers only the current build's files). Every `sort` and `comm` runs with `LC_ALL=C` on both sides, because in another locale the sort orders differ and `comm` then prints false names (in check (e), the two `index-` files).
+
+```sh
+(cd "$FRONT/dist" && find . -type f | LC_ALL=C sort) | ssh -i "$SSH_KEY" "$SITE_HOST" 'H=/opt/cms/index-history; T=$(mktemp) && (cd /opt/cms/site && find . -type f | LC_ALL=C sort > "$T") && LC_ALL=C comm -13 - "$T" | LC_ALL=C comm -23 - "$H/referenced.txt" && echo "extras check finished"; rm -f "$T"'
+```
+
+*(e) Server, rollback-safe check.* It prints the names in the list of (c) that are not on disk. It must print nothing: every remembered build's files are present by name (not necessarily intact).
+
+```sh
+H=/opt/cms/index-history
+cd /opt/cms/site && find . -type f | LC_ALL=C sort | LC_ALL=C comm -13 - "$H/referenced.txt"
+```
+
+*(f) Server, measurements.* The file count equals step 38's number on the first deploy (a later deploy leaves the earlier builds' files in place, so it is higher). The second count must be `0`: no file lacks read permission for everyone. The placeholder is mode 664 and the build 644; both pass, and the Caddy container runs as root anyway. Record the file count, `df` before (step 39) and after, the site's `du`, rsync's byte count and the time the copy took. `docker system df` must be unchanged: no image is built.
+
+```sh
+find /opt/cms/site -type f | wc -l
+find /opt/cms/site -type f ! -perm -444 | wc -l
+stat -c '%U:%G %a' /opt/cms/site /opt/cms/site/index.html
+df -h /
+du -sk /opt/cms/site
+docker system df
+```
+
+**Step 42, on the laptop, from the repository root: from outside.** Step 40 left the terminal in `infra/`, so `cd ..` first. The first command must end with `ALL PASS` (four rows: `shell`, `deep-link`, `asset-js`, `asset-css`; see the table under step 12). The second reads the live page and compares the script it names with the one in the build: it prints `the live page names this build's script`, or a `STOP`.
+
+```sh
+cd ..
+bash prod/outside-check.sh demo.cropcms.com --only spa
+test "$(curl -s https://demo.cropcms.com/ | grep -o '/assets/index-[A-Za-z0-9_-]*\.js')" = "/assets/$(ls "$FRONT/dist/assets" | grep -E '^index-.*\.js$')" && echo "the live page names this build's script" || echo "STOP: the live page names another script"
+```
+
+**Step 43, the owner's browser checklist.** Use a private window, so a placeholder page cached earlier is not shown (the proxy sends no `Cache-Control` header for the page, so a browser that loaded the placeholder, or any earlier build, can keep showing it for hours; after a later deploy use a private window or a hard reload too). Do it on a laptop and on a phone, in light and in dark. The questions are paid calls of about 4,000 tokens each: ask one per device, not more (step 34 shows what the budget allows).
+
+| Check | You should see |
+|---|---|
+| Open `https://demo.cropcms.com/` | the login page, not the line "Crop CMS API. Health check at /api/health." |
+| Paste the e-mail and password of the demo member made in step 32, from where you keep them. At most two wrong attempts in all: ten wrong logins within 900 seconds lock the account for everyone (step 37). | the Ask page with "Signed in as" and "Tokens used today: N / M" |
+| Ask one question, for example the one of step 34 | the wait (about 18 seconds on the first real question, with "Waiting for the answer..."), then an answer with citations and a "Sources" heading; "Tokens used today" has gone up |
+| Open Library; open a crop and a topic; reload the page on `/library/basil/watering-needs` | the crops, then the topic, and the reload still loads the app (the deep link works) |
+| Choose Dark in the account menu, then reload | the choice stays, with no flash of the light page |
+| Wait 30 minutes, then do anything that calls the server | back to the login page with the session notice |
+| Open the browser console during all of the above | no errors |
+
+Record the device, the browser and the result of each row. Optional: the passes of `docs/manual-checks.md` in the frontend repository in Safari and Firefox (Firefox has not been tested), and a pass with a screen reader.
+
+**Step 44, on the server: rehearse the rollback once.** A rollback copies a history page beside `index.html` and renames it over the live page, so it is one atomic swap and no asset is touched. The block takes the build name from `SHA`; for the rehearsal the name is `placeholder`. For a later rollback set `SHA` to the build's 7 characters (`ls /opt/cms/index-history` and `deployed.log` list the builds, in order) and check afterwards that step 41 (e) still prints nothing. The page is copied without `-p`, so its modification time is now.
+
+```sh
+H=/opt/cms/index-history
+SHA=placeholder
+if [ -f "$H/index.$SHA.html" ]; then cp "$H/index.$SHA.html" /opt/cms/site/.index.tmp && mv -f /opt/cms/site/.index.tmp /opt/cms/site/index.html && echo "live page is now index.$SHA.html"; else echo "STOP: $H/index.$SHA.html does not exist"; ls "$H"; fi
+```
+
+On the laptop, `curl -s https://demo.cropcms.com/` now prints the placeholder line. Before the link is sent to anyone, a minute of placeholder is acceptable. Then put the build back with the `index.html` copy of step 40 on its own (on the laptop, in the terminal of steps 38-42):
+
+```sh
+rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/index.html" "$SITE_HOST:/opt/cms/site/index.html"; echo "exit: $?"
+```
+
+Check `exit: 0`, then step 41 (a), then the history block of step 39 (it sets `H`), whose loop must print the line for the build's history file. Do not repeat 41 (b): the build's page is already saved.
+
+**Step 45, on the server: prune, only when needed.** Never in a normal deploy. Run it only when `du -sk /opt/cms/site` is above 51200 (50 MB) or `df` shows more than 85 percent used. Run step 41 (c) first, so the list of names is current; the listing below reads it as (c) last left it. It lists the files under `assets/` that no live or history page, and no stylesheet they load, names. To forget a build, delete its history file first and run step 41 (c) again: its files are then unreferenced. Read the list before anything is removed; the first block prints its length and the names.
+
+```sh
+H=/opt/cms/index-history
+cd /opt/cms/site && find ./assets -type f | LC_ALL=C sort | LC_ALL=C comm -23 - "$H/referenced.txt" > "$H/prune.txt"
+wc -l "$H/prune.txt"
+cat "$H/prune.txt"
+```
+
+Only if every name in the list is a file you mean to lose, remove them, then run step 41 (c), (d) and (e) again; (e) must still print nothing. Files outside `assets/` are never in this list; remove an extra from (d) by hand after reading it.
+
+```sh
+H=/opt/cms/index-history
+cd /opt/cms/site && while IFS= read -r f; do rm -f -- "$f"; done < "$H/prune.txt"
+```
+
+### Deploying a later frontend build
+
+About ten commands, no container change. File counts are not compared with a fixed number: (a) and (d) of step 41 are the comparisons.
+
+1. Step 38, in a terminal in `infra/`: the build and its guards. Write down the commit.
+2. Step 39 on the server: the loop must print a line (the live page is saved); if it prints nothing, save the page as the step says.
+3. Step 40: variables, dry run, then the chained copy (`exit: 0`).
+4. Step 41 (a) to (f): (a), then (b), then (c) on the server, (d), (e) and (f).
+5. Step 42: `--only spa` and the script-name check. Repeat the first four rows of step 43 in a private window, once on a laptop.
+
+To go back to an earlier build, use the block of step 44 with that build's name, then check 41 (e), step 42's first command and the live page's script name against that build's script.
+
+### Stop rules for the frontend deploy
+
+Stop and ask rather than guess when any of these holds:
+
+- `rsync` is missing on the server (step 39): use [the fallback](#if-the-server-has-no-rsync).
+- The checkout of step 38 is not clean or not on `main`, the `grep` guard prints a file name, or the script count is not `1`.
+- `df -h /` shows more than 85 percent used (step 39).
+- The dry run lists a line with `deleting`, or any `rsync` or `ssh` exit code is not `0`: run no other copy, and paste only the exit code, because the error text names the server address.
+- Check 41 (a) prints a line starting with `>`, check 41 (d) prints any line before `extras check finished` (or does not print that line), or check 41 (e) prints a line.
+- The count of unreadable files in step 41 (f) is not `0`, or `docker system df` changed.
+- Step 42 does not end with `ALL PASS`, or the script name is another one.
+- The prune list of step 45 names the script or the stylesheet that the live page loads, or anything you want to keep able to roll back to: delete nothing and read the history folder again.
+
+Paste only public data: exit codes, file counts, sizes, `df` and the hashed file names of the build. Never the server address, the key or the demo credentials.
+
+### If the server has no rsync
+
+Untested: this path was not needed, because the server has `rsync`. Use it also if the laptop's `rsync` misbehaves against the server. The first command streams the build to a new folder (it fails if the folder exists, so remove an old `/opt/cms/site.new` only after reading what is in it); the second block runs on the server and moves the files in the same order as step 40, assets first and `index.html` last, each `mv` a rename on one file system. Then go on with step 41. The `mkdir -p` covers the first deploy, where `assets/` does not exist.
+
+```sh
+COPYFILE_DISABLE=1 tar -C "$FRONT/dist" -cf - . | ssh -i "$SSH_KEY" "$SITE_HOST" 'mkdir /opt/cms/site.new && tar -C /opt/cms/site.new -xf -'; echo "exit: $?"
+```
+
+```sh
+mkdir -p /opt/cms/site/assets && cp -a /opt/cms/site.new/assets/. /opt/cms/site/assets/ && mv -f /opt/cms/site.new/favicon.svg /opt/cms/site/ && mv -f /opt/cms/site.new/index.html /opt/cms/site/ && rm -rf /opt/cms/site.new
+```
+
 ## What was verified on the server
 
 Measured on the real server (1 GiB of RAM, 904 MiB usable, and 1023 MiB of swap) while running the steps of this document, on 2026-10-19 (steps 1-18) and 2026-10-20 (steps 19-36).
@@ -734,7 +988,7 @@ Not confirmed:
 
 ## Redeploying
 
-A later release has to be deployed without losing the certificates kept in the `cms_caddy_data` volume. Measure `df -h /` and `docker system df` before and after the rebuild, as in the disk budget under [Memory and disk](#memory-and-disk).
+A later build of the frontend is deployed as in [Deploying a later frontend build](#deploying-a-later-frontend-build); it changes no container. A later release of the backend has to be deployed without losing the certificates kept in the `cms_caddy_data` volume. Measure `df -h /` and `docker system df` before and after the rebuild, as in the disk budget under [Memory and disk](#memory-and-disk).
 
 ## If something fails
 
