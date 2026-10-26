@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-45 put the frontend on the server; they are written and have not been run. Redeploying a later backend release is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-45 put the frontend on the server; steps 38-44 ran on 2026-10-23 to 2026-10-26, and the app is live at the same address. Step 45 was not run, and [Deploying the frontend](#deploying-the-frontend) lists the rest that is still unconfirmed. Redeploying a later backend release is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -465,7 +465,7 @@ echo 'Crop CMS API. Health check at /api/health.' > /opt/cms/site/index.html
 curl -s -o /dev/null -w '%{http_code}\n' https://demo.cropcms.com/
 ```
 
-The `curl` printed `200` on the run, as the Caddyfile predicts (`root * /srv`, then `try_files {path} /index.html` and `file_server`; the directory is a bind mount, so no restart is needed). The same fallback answers 200 with this page for any unknown path outside `/api`, so look at `/` only. The real front end replaces this file later.
+The `curl` printed `200` on the run, as the Caddyfile predicts (`root * /srv`, then `try_files {path} /index.html` and `file_server`; the directory is a bind mount, so no restart is needed). The same fallback answers 200 with this page for any unknown path outside `/api`, so look at `/` only. Step 40 later replaced it with the real front end; the placeholder is kept as `index.placeholder.html` in the history folder.
 
 **Step 27, the reboot check, last.** Run it only when steps 20-26 passed. Reboot the server and wait about two minutes; `ssh` drops at once, and the same `ssh` line as in step 2 (from `infra/` on the laptop, `AWS_PROFILE` exported) logs in again.
 
@@ -646,7 +646,7 @@ unset LOCKED_EMAIL
 
 ### What the chat costs and what it needs in memory
 
-One question is one paid call to each provider. The classifier answers at most 256 tokens and the generator at most 1024 (`app/chat/llm.py`), and the measured median is 2771 tokens per question on the previous model (`docs/live-eval.md`; the current default has not been measured here, but the first real question counted 4021 tokens, so about 24 such questions fit in the 100000 a day). At the listed Haiku 5.5 price of $0.50 per million output tokens, which was read on 2026-10-12 and is unverified since, one question costs about $0.002 even if every token were billed at the output rate; the embedding of the question adds a few hundred tokens at $0.02 per million. The demo member's cap of 100000 tokens a day is therefore at most about $0.05 a day (concurrent requests can overshoot the cap), and the provider limits of the gate are the second bound. The cost per question is not confirmed: the month's total on the provider's usage page was accounted for by the earlier live-evaluation runs, and the first real question had not appeared on the page yet, so its cost stays an unverified estimate.
+One question is one paid call to each provider. The classifier answers at most 256 tokens and the generator at most 1024 (`app/chat/llm.py`), and the measured median is 2771 tokens per question on the previous model (`docs/live-eval.md`; the current default has not been measured here, but the first real question counted 4021 tokens, so about 24 such questions fit in the 100000 a day). At the listed Haiku 5.5 price of $0.50 per million output tokens, which was read on 2026-10-12 and is unverified since, one question costs about $0.002 even if every token were billed at the output rate; the embedding of the question adds a few hundred tokens at $0.02 per million. The demo member's cap of 100000 tokens a day is therefore at most about $0.05 a day (concurrent requests can overshoot the cap), and the provider limits of the gate are the second bound. The cost per question is not confirmed: the month's total on the provider's usage page was accounted for by the earlier live-evaluation runs, and the usage rows after the first real question showed only "under one cent" for each provider, so its cost stays an unverified estimate.
 
 Each login hashes the password with Argon2, about 64 MiB, and at most four hashes run at once, so a burst of logins stays near 325 MiB; that is a figure from a laptop and unconfirmed on the server. The steps hash four passwords, one after the other (two signups, two logins). On the real server `available` was 519 MiB before step 34 and 392 MiB after it (484 MiB after the reboot of step 27).
 
@@ -714,13 +714,13 @@ unset ADMIN_TOKEN MEMBER_EMAIL MEMBER_PASSWORD MEMBER_ID
 
 Steps 38-45 put the built app of the `crop-cms-frontend` repository on the server, check it, and rehearse the way back. No container changes: Caddy serves `/opt/cms/site` (mounted read-only at `/srv`), so a deploy only copies files into that directory.
 
-**Status: written, not yet run.** Read on the real server on 2026-10-22: `rsync` is `/usr/bin/rsync`; `/opt/cms/site` is `drwxr-xr-x ubuntu ubuntu` and holds only `index.html` (43 bytes, mode 664, the placeholder of step 26); the Caddy container runs as root (`id -u` prints `0`). So the `rsync` path below applies and needs no `sudo`; [the tar fallback](#if-the-server-has-no-rsync) stays untested. Not yet confirmed: that the server's `rsync` writes each file under a temporary name and renames it (so `index.html` is never half written), that the `ssh` forms of steps 41 (b) and (d) work, and that GNU `comm` on the server accepts the pipes of steps 41 (d), 41 (e) and 45. What was run, against a scratch copy on the laptop only (a local `rsync`, and a local shell in place of `ssh`): the guards of step 38, the history loop and the two saves of step 39, the dry run and the copy of step 40, the checks 41 (a) to (e), the script-name check of step 42, and steps 44 and 45. Not run at all: `nvm`, `npm` and the build, the `terraform` and `aws` lines of steps 38 and 40, the first block of step 39, the `stat`, `df` and `docker` lines of 41 (f), and `prod/outside-check.sh` and the `curl` of step 42 against the live site. No step has run against the server.
+**Status: run on the real server.** Steps 38-44 were run by the owner (the build on 2026-10-23, the checks and the rollback rehearsal by 2026-10-26), and https://demo.cropcms.com serves the real frontend (build commit `b857200`). The first run found five defects in this text, now fixed in it: a laptop with no `nvm`, the direction of the `rsync` itemize symbol on a push (`<f`, not `>f`), the commit guard of step 41 (b) that fired when the frontend checkout had moved to another branch, the mode of `index.html` in step 41 (f), and the session-expiry row of step 43. The corrected blocks of steps 38 and 41 (a) and (b) were tested on a scratch copy only, not on the server. Not run: step 45, and [the tar fallback](#if-the-server-has-no-rsync). Not confirmed: that the server's `rsync` writes each file under a temporary name and renames it. The measurements and the browser results are under [What was verified on the server](#what-was-verified-on-the-server).
 
 How it works. The build happens on the laptop from a clean, pulled `main`; the copy is `rsync` over SSH, because SSH is open only from `ssh_cidr`, so CI cannot deploy. The copies are chained with `&&` in this order: `assets/` (hashed names: a file with a new name is new, and one with an old name has the old contents), then `favicon.svg`, then `index.html` last, so a failed copy stops the next one and a visitor gets either the old page with its old files or the new page with its new files. Old files are never deleted in a normal deploy: a stale tab keeps working and a rollback is one file swap. The server keeps `/opt/cms/index-history/`, outside the served directory: one copy of each page (`index.html`) that has been live, named for the commit of the build it contains (`index.b857200.html`; `index.placeholder.html` for the first one), a list of what those pages name, and an append-only `deployed.log` (UTC time and commit per deploy).
 
 Every laptop command uses the variables defined in these steps (`INFRA`, `FRONT`, `SSH_KEY`, `SITE_HOST`, `SHA`) and none contains a `<...>` placeholder, so it pastes into zsh and bash. Use one laptop terminal for steps 38-42, so the variables stay set. A failed connection must not look like a clean result, so the copies and check 41 (a) print their exit code, and check 41 (d) ends with a line of its own.
 
-**Step 38, on the laptop: build.** Start in `infra/` (the terminal of step 1, with `AWS_PROFILE` exported). The first block finds the frontend checkout next to this repository (type its path instead if yours is elsewhere, for example `FRONT=/Users/you/code/crop-cms-frontend`), moves to a clean, pulled `main` and stores the build's 7-character commit in `SHA`, which names the build everywhere below. `git status --porcelain` must print nothing and the last line prints the 7 characters: write them down.
+**Step 38, on the laptop: build.** Start in `infra/` (the terminal of step 1, with `AWS_PROFILE` exported). The first block finds the frontend checkout next to this repository (type its path instead if yours is elsewhere, for example `FRONT=/Users/you/code/crop-cms-frontend`), moves to a clean, pulled `main` and stores the build's 7-character commit in `SHA`, which names the build everywhere below. `git status --porcelain` must print nothing and the last line prints the 7 characters: write them down. `SHA` must stay the value printed here; never compute it again from the checkout later, which may by then be on another branch.
 
 ```sh
 unset SHA
@@ -729,10 +729,16 @@ FRONT=$(cd ../../crop-cms-frontend && pwd)
 test -n "$FRONT" && cd "$FRONT" && git switch main && git pull --ff-only && git status --porcelain && SHA=$(git rev-parse --short=7 HEAD) && echo "$SHA"
 ```
 
+The build needs the Node version in the frontend's `.nvmrc`. The block runs `nvm use` if `nvm` is installed (the owner's laptop has none), then builds only if `node -v` equals the version in `.nvmrc`; otherwise it prints a `STOP` with both versions: stop and ask, and do not build with another Node. The block stops with a `STOP` if `FRONT` is empty or not a folder; otherwise it removes `dist/` first, so after a Node `STOP` (or a failed `npm ci` or build) no old build is left for the guards below to pass; they then print `No such file or directory` errors and counts of `0` (a `none` printed beside those errors means nothing), which is also a stop. A carriage return at the end of `.nvmrc` is ignored. `npm ci` may print `EBADENGINE` warnings (development tools that want a newer Node than `.nvmrc`) and a count of vulnerabilities; neither blocks the build, and `npm audit fix` must not be run, because it would change the lockfile.
+
 ```sh
-nvm use
-npm ci
-npm run build
+if test -n "$FRONT" && cd "$FRONT"; then
+  rm -rf ./dist
+  if command -v nvm >/dev/null 2>&1; then nvm use; fi
+  if [ "v$(tr -d 'v \r\n' < .nvmrc)" = "$(node -v)" ]; then npm ci && npm run build; else echo "STOP: node $(node -v) is not the version in .nvmrc, $(cat .nvmrc)"; fi
+else
+  echo "STOP: FRONT is not set to the frontend folder"
+fi
 ```
 
 Then the guards. In order, they print the number of files (96 at commit b857200; write it down), the size in kilobytes, `none` (the bundle holds no secret or local address), `1` (the number of script files) and the names of the two files the page loads (`index-BfahRFuG.js` and `index-C9vu6WXt.css` at commit b857200; write them down). On macOS `wc` pads its number with spaces.
@@ -745,7 +751,7 @@ find dist/assets -name '*.js' | wc -l
 ls dist/assets | grep -E '^index-'
 ```
 
-Stop if the checkout is not clean, if the `grep` prints a file name instead of `none`, or if the script count is not `1`. The count matters because the list of names that step 41 (c) builds reads only the page and the stylesheets: a second script file (a code-split chunk) would not be on it, and checks 41 (d) and 45 would report a live file as unreferenced.
+Stop if the block printed `STOP` or the build failed, if the checkout is not clean, if the `grep` prints a file name instead of `none`, or if the script count is not `1`. The count matters because the list of names that step 41 (c) builds reads only the page and the stylesheets: a second script file (a code-split chunk) would not be on it, and checks 41 (d) and 45 would report a live file as unreferenced.
 
 **Step 39, on the server: read-only checks, then make sure the live page is saved.** Log in as in step 2. The first block prints: the path of `rsync` (`/usr/bin/rsync`; if nothing prints, use [the fallback](#if-the-server-has-no-rsync)); the directory (`drwxr-xr-x ... ubuntu ubuntu`, so no `sudo` is needed); the contents (on the first deploy only `index.html`); and the disk, the memory and Docker's usage, to compare with step 41 (f). Stop if `df` shows more than 85 percent used.
 
@@ -782,7 +788,7 @@ H=/opt/cms/index-history
 cp -p /opt/cms/site/index.html "$H/index.unsaved-$(date -u +%Y%m%dT%H%M%SZ).html"
 ```
 
-**Step 40, on the laptop: dry run, then copy.** `terraform output` needs the AWS profile as in step 2 (run the `aws login` line of step 1 again if the session has expired). The key file is the one of step 2: its name is your choice, so use yours in place of `cropcms_ed25519_v2`. The server address stays in `SITE_HOST` and is never printed: the last line prints `SITE_HOST is set` and nothing else.
+**Step 40, on the laptop: dry run, then copy.** `terraform output` needs the AWS profile as in step 2 (run the `aws login` line of step 1 again if the session has expired). The key file is the one of step 2: its name is your choice, so use yours in place of `cropcms_ed25519_v2`. The server address stays in `SITE_HOST` and is never printed: the last line prints `SITE_HOST is set` and nothing else. If the key has a passphrase, load it into the agent with `ssh-add "$SSH_KEY"` right after this block, before the dry run; the first real copy failed because it was not loaded.
 
 ```sh
 export AWS_PROFILE=cropcms
@@ -792,13 +798,13 @@ SITE_HOST=ubuntu@"$(terraform output -raw elastic_ip)"
 test "${#SITE_HOST}" -gt 7 && echo "SITE_HOST is set"
 ```
 
-The dry run changes nothing and has no `--delete`, so it cannot remove a file. `-c` compares contents, so a font file that the build rewrote unchanged (with a new modification time) is not sent again. The dry run lists the files that would be copied, each as a line starting with `>f` (all 96 on the first deploy; on a later one the new script and stylesheet, and the page), with a line for each new directory (lines starting `.f` or `.d` only set a time and copy nothing), and ends with `exit: 0`. Stop if any line says `deleting` or the exit code is not `0`.
+The dry run changes nothing and has no `--delete`, so it cannot remove a file. `-c` compares contents, so a font file that the build rewrote unchanged (with a new modification time) is not sent again. The dry run lists the files that would be copied, each as a line starting with `<f` (all 96 on the first deploy; on a later one the new script and stylesheet, and the page; a push prints `<`, where a copy between two folders on one machine prints `>`), with a line for each new directory (lines starting `.f` or `.d` only set a time and copy nothing), and ends with `exit: 0`. Stop if any line says `deleting` or the exit code is not `0`.
 
 ```sh
 rsync -rltcn --itemize-changes -e "ssh -i $SSH_KEY" "$FRONT/dist/" "$SITE_HOST:/opt/cms/site/"; echo "exit: $?"
 ```
 
-The copy is one chained line. It must end with `exit: 0`; `--stats` prints the number of files and bytes sent (write them down, with the clock time the copy took). Any other code means a copy failed and the copies after it did not run; in particular, if the last line is not `exit: 0`, `index.html` was not copied. A failed `ssh` or `rsync` prints the server address, which this document says never to paste: paste only the exit code.
+The copy is one chained line. It must end with `exit: 0`; `--stats` prints the number of files and bytes sent (write them down, with the clock time the copy took). Any other code means a copy failed and the copies after it did not run; in particular, if the last line is not `exit: 0`, `index.html` was not copied. If a copy or a login fails, paste only the `exit:` number: the error line can contain the server address, which this document says never to paste. On the real run the agent was not loaded: `assets/` copied, the next `rsync` failed with exit 255 and `index.html` was not copied, and the same line ended `exit: 0` after `ssh-add`.
 
 ```sh
 rsync -rltc --stats -e "ssh -i $SSH_KEY" "$FRONT/dist/assets/" "$SITE_HOST:/opt/cms/site/assets/" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/favicon.svg" "$SITE_HOST:/opt/cms/site/favicon.svg" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/index.html" "$SITE_HOST:/opt/cms/site/index.html"; echo "exit: $?"
@@ -806,32 +812,34 @@ rsync -rltc --stats -e "ssh -i $SSH_KEY" "$FRONT/dist/assets/" "$SITE_HOST:/opt/
 
 **Step 41, verify, then record.** Six parts, each with its limit. (a) and (b) are on the laptop, (c) on the server, (d) on the laptop, (e) and (f) on the server.
 
-*(a) Laptop, content check.* It compares file contents (`-c`, modification times are ignored). It prints `exit: 0` and `no file differs` (that line is printed only when the exit code is `0`); any line starting with `>` is a file of the build that is missing or different on the server. It does not see extra files on the server; that is (d).
+*(a) Laptop, content check.* It compares file contents (`-c`, modification times are ignored). It prints `exit: 0` and `no file differs` (that line is printed only when the exit code is `0`); any line starting with `<` is a file of the build that is missing or different on the server (the block also catches `>`, which a copy between two folders on one machine prints). It does not see extra files on the server; that is (d).
 
 ```sh
 CHECK=$(rsync -rlcn --itemize-changes -e "ssh -i $SSH_KEY" "$FRONT/dist/" "$SITE_HOST:/opt/cms/site/"); RC=$?; echo "exit: $RC"
-printf '%s\n' "$CHECK" | grep '^>' || test "$RC" -ne 0 || echo "no file differs"
+printf '%s\n' "$CHECK" | grep '^[<>]' || test "$RC" -ne 0 || echo "no file differs"
 ```
 
-*(b) Laptop, record the page under the build's name,* only after (a) passed. The commit comes from `SHA` (set in step 38), so nothing is typed. The block first checks that the checkout still sits at that commit; on the server the script refuses a name that is not 7 hexadecimal characters, and refuses a name whose history file already exists with different bytes (the name belongs to another build, or `SHA` is stale). It prints `saved as index.` followed by the commit and `.html`, and adds a line with the UTC time and the commit to `deployed.log`.
+*(b) Laptop, record the page under the build's name,* only after (a) passed. The commit comes from `SHA`, the value step 38 printed (never compute it again from the checkout, which may be on another branch by now), so nothing is typed. The laptop sends the SHA-256 of `dist/index.html` with it, and the script on the server refuses unless the live page has the same SHA-256, so the guard rests on the files and not on the state of the checkout. The script also refuses a name that is not 7 lowercase hexadecimal characters (an unset `SHA` is refused too; the letters are listed one by one, because in some locales the range `a-f` also matches capitals), and a name whose history file already exists with different bytes (the name belongs to another build, or `SHA` is stale). It prints `saved as index.` followed by the commit and `.html`, and adds a line with the UTC time and the commit to `deployed.log`. The laptop hashes with `shasum -a 256` and the Ubuntu server with `sha256sum`; both print the 64 hexadecimal characters first, and `cut` keeps only those.
 
 ```sh
-if [ "$SHA" = "$(git -C "$FRONT" rev-parse --short=7 HEAD)" ]; then
-ssh -i "$SSH_KEY" "$SITE_HOST" bash -s "$SHA" <<'EOF'
+DIST_SUM=$(shasum -a 256 "$FRONT/dist/index.html" | cut -d' ' -f1)
+ssh -i "$SSH_KEY" "$SITE_HOST" bash -s "$SHA" "$DIST_SUM" <<'EOF'
 SHA=$1
+DIST_SUM=$2
 H=/opt/cms/index-history
 case "$SHA" in
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  [0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef]) ;;
   *) echo "STOP: the build name is not 7 hex characters"; exit 1 ;;
 esac
+LIVE_SUM=$(sha256sum /opt/cms/site/index.html | cut -d' ' -f1)
+if [ -z "$DIST_SUM" ] || [ "$LIVE_SUM" != "$DIST_SUM" ]; then
+  echo "STOP: the live page is not the same file as dist/index.html"; exit 1
+fi
 if [ -e "$H/index.$SHA.html" ] && ! cmp -s "$H/index.$SHA.html" /opt/cms/site/index.html; then
   echo "STOP: index.$SHA.html exists and differs from the live page"; exit 1
 fi
 cp -p /opt/cms/site/index.html "$H/index.$SHA.html" && echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $SHA" >> "$H/deployed.log" && echo "saved as index.$SHA.html"
 EOF
-else
-echo "STOP: the frontend checkout is no longer at the build's commit"
-fi
 ```
 
 *(c) Server, the list of names the history refers to.* It collects every `/assets/...` name in the live page and in every history page, adds every name those stylesheets load (the fonts), then `./index.html` and `./favicon.svg`, in C order. The last command prints the number of names: 96 after the first deploy of a build with 96 files. It is the list that (d), (e) and the prune of step 45 compare against.
@@ -859,7 +867,7 @@ H=/opt/cms/index-history
 cd /opt/cms/site && find . -type f | LC_ALL=C sort | LC_ALL=C comm -13 - "$H/referenced.txt"
 ```
 
-*(f) Server, measurements.* The file count equals step 38's number on the first deploy (a later deploy leaves the earlier builds' files in place, so it is higher). The second count must be `0`: no file lacks read permission for everyone. The placeholder is mode 664 and the build 644; both pass, and the Caddy container runs as root anyway. Record the file count, `df` before (step 39) and after, the site's `du`, rsync's byte count and the time the copy took. `docker system df` must be unchanged: no image is built.
+*(f) Server, measurements.* The file count equals step 38's number on the first deploy (a later deploy leaves the earlier builds' files in place, so it is higher). The second count must be `0`: no file lacks read permission for everyone. On the real run `index.html` kept the placeholder's mode (`ubuntu:ubuntu 664`), because `rsync -rlt` without `-p` leaves an existing file's mode alone; a file the copy creates takes the build's mode. Both pass the check, and the Caddy container runs as root anyway. Record the file count, `df` before (step 39) and after, the site's `du`, rsync's byte count and the time the copy took. `docker system df` must be unchanged: no image is built.
 
 ```sh
 find /opt/cms/site -type f | wc -l
@@ -887,8 +895,10 @@ test "$(curl -s https://demo.cropcms.com/ | grep -o '/assets/index-[A-Za-z0-9_-]
 | Ask one question, for example the one of step 34 | the wait (about 18 seconds on the first real question, with "Waiting for the answer..."), then an answer with citations and a "Sources" heading; "Tokens used today" has gone up |
 | Open Library; open a crop and a topic; reload the page on `/library/basil/watering-needs` | the crops, then the topic, and the reload still loads the app (the deep link works) |
 | Choose Dark in the account menu, then reload | the choice stays, with no flash of the light page |
-| Wait 30 minutes, then do anything that calls the server | back to the login page with the session notice |
+| 30 minutes after the login, reload the page (or ask a question) | back to the login page with "Your session expired. Please log in again." |
 | Open the browser console during all of the above | no errors |
+
+The token lives a fixed 30 minutes from the login, with no refresh, and the frontend ends the session when a call that checks the token answers 401. Clicking Library does not do that, because the Library reads (`/crops`, `/items`, `/retrieval/...`) are public, and the Ask page makes no call when it opens; a reload asks `/members/me`, and the first question would be refused before the paid call (read from the code, not tried). An iPhone returned to the login page after 30 minutes in a background tab without the notice. The notice is state held in memory, set only by a 401 during that page load, so the tab's `sessionStorage` (which holds the token) was most likely gone; this is not verified, and it is a note for the frontend, not a deploy defect.
 
 Record the device, the browser and the result of each row. Optional: the passes of `docs/manual-checks.md` in the frontend repository in Safari and Firefox (Firefox has not been tested), and a pass with a screen reader.
 
@@ -941,10 +951,10 @@ To go back to an earlier build, use the block of step 44 with that build's name,
 Stop and ask rather than guess when any of these holds:
 
 - `rsync` is missing on the server (step 39): use [the fallback](#if-the-server-has-no-rsync).
-- The checkout of step 38 is not clean or not on `main`, the `grep` guard prints a file name, or the script count is not `1`.
+- The build block of step 38 prints `STOP` (Node differs, or `FRONT` is not set), the build fails, the checkout of step 38 is not clean or not on `main`, the `grep` guard prints a file name, or the script count is not `1`.
 - `df -h /` shows more than 85 percent used (step 39).
 - The dry run lists a line with `deleting`, or any `rsync` or `ssh` exit code is not `0`: run no other copy, and paste only the exit code, because the error text names the server address.
-- Check 41 (a) prints a line starting with `>`, check 41 (d) prints any line before `extras check finished` (or does not print that line), or check 41 (e) prints a line.
+- Check 41 (a) prints a line starting with `<` or `>`, check 41 (d) prints any line before `extras check finished` (or does not print that line), or check 41 (e) prints a line.
 - The count of unreadable files in step 41 (f) is not `0`, or `docker system df` changed.
 - Step 42 does not end with `ALL PASS`, or the script name is another one.
 - The prune list of step 45 names the script or the stylesheet that the live page loads, or anything you want to keep able to roll back to: delete nothing and read the history folder again.
@@ -965,7 +975,7 @@ mkdir -p /opt/cms/site/assets && cp -a /opt/cms/site.new/assets/. /opt/cms/site/
 
 ## What was verified on the server
 
-Measured on the real server (1 GiB of RAM, 904 MiB usable, and 1023 MiB of swap) while running the steps of this document, on 2026-10-19 (steps 1-18) and 2026-10-20 (steps 19-36).
+Measured on the real server (1 GiB of RAM, 904 MiB usable, and 1023 MiB of swap) while running the steps of this document, on 2026-10-19 (steps 1-18), 2026-10-20 (steps 19-36) and between 2026-10-23 and 2026-10-26 (steps 38-44; these dates are from the times of the build's files and the owner's notes).
 
 - **Software.** Docker 29.9.1 and Docker Compose v5.6.0.
 - **Image build.** 1m13s on the 1 GiB host. The lowest `available` figure was 433 MiB, swap use at most 47 MiB, CPU steal (`st`) at most 4, and the out-of-memory count in `dmesg` 0. The CPU credit balance was 288 before the build and still 288 about a day later (the cap for this size is believed to be 288, unconfirmed).
@@ -975,14 +985,25 @@ Measured on the real server (1 GiB of RAM, 904 MiB usable, and 1023 MiB of swap)
 - **Certificates.** The staging issuer was `C=US, O=Let's Encrypt, CN=(STAGING) Artificial Amaranth YE1` (challenge `http-01`). The production issuer is `C=US, O=Let's Encrypt, CN=YE2`, issued on 2026-10-20 (challenge `tls-alpn-01`), `notAfter` Jan 18 01:52:54 2027 GMT. Port 80 redirects with status 308. The renewal window starts about 2026-12-18 (from the renewal information in the log); a real renewal has not been seen.
 - **From outside.** The strict run of `prod/outside-check.sh` passed all 10 rows (`ALL PASS`) from the usual network. On a phone hotspot the first strict run failed with `curl exit 28`: the script gives each request 10 s, and the hotspot took 2.6 s to connect and 8.3 s to finish the TLS handshake. With `--staging` against the production certificate exactly `issuer` and `trust` fail. Ports 5432, 8000, 8081 and 22 (from a network outside `ssh_cidr`) are closed, and 80 and 443 are open. On the host, `ss` lists `docker-proxy` on 80/tcp, 443/tcp and 443/udp (IPv4 and IPv6), `sshd` and `systemd` on 22, `systemd-resolve`, `chronyd` and `systemd-network`.
 - **Recreate and reboot.** Recreating `cms` left the uptime of `caddy` counting (44 to 54 minutes). After the reboot Docker was enabled, `/swapfile` was 1024M, both services were healthy without any command, and no new certificate was requested.
-- **The first chat question.** Status 200 in `time_total` 18.149 s, `abstained` null, `truncated` false, 7 documents (`S1` to `S7`). `tokens_used_today` was 4021 afterwards against a budget of 100000, so about 24 such questions a day fit on the shared account. Both provider spend limits were confirmed to be enforced before the paid call.
+- **The first chat question.** Status 200 in `time_total` 18.149 s, `abstained` null, `truncated` false, 7 documents (`S1` to `S7`). `tokens_used_today` was 4021 afterwards against a budget of 100000, so about 24 such questions a day fit on the shared account. Both provider spend limits were confirmed to be enforced before the paid call. The usage rows of the providers showed under one cent each after it, consistent with the estimate of at most about $0.002 a question; the exact cost is not confirmed.
 - **Log hygiene.** Both counts of step 36 were 0.
+- **The frontend build (step 38, laptop).** Commit `b857200`, built on 2026-10-23 (from the times of the files in `dist/`). `dist/` held 96 files (`du -sk` 3612), the `grep` for `VITE_`, `127.0.0.1` and `localhost:8000` printed `none`, and there was exactly one `.js` file: the script `index-BfahRFuG.js` and the stylesheet `index-C9vu6WXt.css`. Node v22.11.0 equalled the frontend's `.nvmrc` at that time. The owner's `npm ci` output showed `EBADENGINE` warnings (development tools want Node 22.13 or newer while the laptop had v22.11.0) and "10 vulnerabilities"; neither blocked the build.
+- **Before the copy (step 39, server).** `rsync` was `/usr/bin/rsync`; `/opt/cms/site` was `drwxr-xr-x ubuntu ubuntu` and held only the 43-byte `index.html`, saved as `index.placeholder.html`. `df -h /`: 8.7G, 6.9G used, 1.9G available, 80 percent. `du -sk /opt/cms/site`: 8. `docker system df`: images 2 (1.925 GB), containers 2, volumes 2, build cache 15 entries (1.837 GB, 1.278 MB reclaimable). `free -m`: total 904, used 375, free 114, available 528, swap 205 of 1023.
+- **The copy (step 40, laptop to server).** The dry run listed 96 file lines, one `.d..t.... ./` and `cd+++++++ assets/`, no `deleting`, and ended `exit: 0`. The first real chain stopped by itself: `assets/` copied (94 files, 3,489,527 bytes) and the second `rsync` failed with the connection closed (exit 255), because the key has a passphrase and the ssh agent was not loaded. `index.html` was not copied, and a public `curl` right after the failure showed the site still serving the placeholder (43 bytes, status 200). After `ssh-add` the same chain ended `exit: 0`. The time the copy took was not recorded.
+- **Checks (step 41).** (a) `exit: 0` and `no file differs`. (b) The first attempt stopped on the old checkout guard, because the owner's frontend checkout had moved to another branch (`chore/node-22.23.4`, commit `3ae00d4`) after the build while `dist/` still held the `b857200` build; (a) had shown that the server equalled `dist/`, and the block run without the guard printed `saved as index.b857200.html`. The exact UTC time is in `deployed.log` on the server; it was between 2026-10-25 and 2026-10-26. (c) 96 names in `referenced.txt`. (d) only `extras check finished`. (e) nothing. (f) 96 files, 0 without read permission, `ubuntu:ubuntu 755` for `/opt/cms/site` and `664` for `index.html` (the page kept the placeholder's mode); `df -h /` 8.7G, 7.0G used, 1.8G available, 81 percent; `du -sk /opt/cms/site` 3628; `docker system df` unchanged from step 39. The `ssh` forms of (b) (the earlier form, without the checksum) and (d), and GNU `comm` in (c), (d) and (e), worked.
+- **From outside (step 42, `--only spa`).** Four `PASS` rows (`shell` 200 `text/html` with the app root and a module script; `deep-link` 200 and the same page as `/`; `asset-js` 200 `text/javascript` for `/assets/index-BfahRFuG.js`; `asset-css` 200 `text/css` for `/assets/index-C9vu6WXt.css`), `4 passed, 0 failed, 0 skipped`, `ALL PASS`, exit 0, and `the live page names this build's script`. This is the first run of the `spa` rows against the real site, which answered over HTTP/2 (a `curl -sI` after the copy showed `HTTP/2 200`, and the page's title is `Crop CMS`); before it only a stub with HTTP/2-style lowercase header names and CRLF line endings had covered them. After the rollback rehearsal the live page's bytes equalled `dist/index.html` (SHA-256 starting `2593a2cc91d5bf76` for both, 900 bytes).
+- **The browser checklist (step 43).** Rows 1 to 5 and 7 passed on a MacBook (Chrome, private window) and an iPhone (Safari), in light and dark, and the dark choice stayed. Row 6 (session expiry), reported by the owner on the MacBook (Chrome, private window): after more than 30 minutes on `/library/basil/optimal-temperature` without a refresh, the Ask tab opened, then the Library tab opened (back to that topic page), and only a page reload gave the login page with "Your session expired. Please log in again." That neither tab calls a route that checks the token is read from the code. The row's text was corrected in step 43. On the iPhone, Safari returned to the login page without the notice after more than 30 minutes in a background tab (not verified why; see the note under step 43).
+- **The rollback (step 44).** Rehearsed once, between 2026-10-25 and 2026-10-26: the block printed `live page is now index.placeholder.html`, `curl -s https://demo.cropcms.com/` printed the placeholder line, the `rsync -lt` copy of `index.html` printed `exit: 0`, step 41 (a) printed `exit: 0` and `no file differs`, and the history loop printed `live page is saved as /opt/cms/index-history/index.b857200.html`. The placeholder was served until the copy-back; how long that was was not recorded.
+- **Step 45** was not run; the numbers (`du -sk` 3628 and `df` 81 percent) were below the thresholds that the step names (51200 and 85 percent).
 
 Not confirmed:
 
 - A real certificate renewal (expected from Caddy's behaviour and the renewal window above).
 - The memory burst of several Argon2 hashes on the server (the 325 MiB figure is from a laptop).
-- The cost of a chat question. The estimate in [the section on chat costs](#what-the-chat-costs-and-what-it-needs-in-memory) comes from listed prices that are unverified since 2026-10-12. The month's total on the provider's usage page was accounted for by the earlier live-evaluation runs, and the first real question had not appeared on the page yet, so its real cost is not read from the provider and the cost per question is not confirmed.
+- The exact cost of a chat question. The estimate in [the section on chat costs](#what-the-chat-costs-and-what-it-needs-in-memory) comes from listed prices that are unverified since 2026-10-12, and the usage rows showed only "under one cent" for each provider.
+- That the server's `rsync` writes each file under a temporary name and renames it, so that `index.html` is never half written (no observation was made).
+- [The tar fallback](#if-the-server-has-no-rsync) (untested), and step 45, the prune (not run on the server; the rehearsal was on a scratch copy only).
+- The cause of the iPhone's login page without the notice after 30 minutes (see the note under step 43).
 - The CPU credit cap of 288 for this size.
 - How much one rebuild adds to the disk (see the budget under Memory and disk).
 
