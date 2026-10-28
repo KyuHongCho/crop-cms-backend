@@ -25,7 +25,7 @@ about, then hands each one over as a complete set.
 
 ## Status
 
-**Early and in progress.** The API is live at https://demo.cropcms.com (the API paths start with `/api`), on one small AWS server behind a Let's Encrypt certificate, with a managed PostgreSQL database; the demo login is provided with the application. A React frontend, [crop-cms-frontend](https://github.com/KyuHongCho/crop-cms-frontend), consumes this API, but is not deployed there yet: the site shows a placeholder page at `/`.
+**Early and in progress.** The API is live at https://demo.cropcms.com (the API paths start with `/api`), on one small AWS server behind a Let's Encrypt certificate, with a managed PostgreSQL database; the demo login is provided with the application. A React frontend, [crop-cms-frontend](https://github.com/KyuHongCho/crop-cms-frontend), consumes this API and is deployed on the same site: https://demo.cropcms.com serves it at `/`, and [docs/deploy.md](docs/deploy.md#deploying-the-frontend) records how it was put there and what was checked.
 
 | Works today | Not built yet |
 |---|---|
@@ -36,15 +36,15 @@ about, then hands each one over as a complete set.
 | Vector topic selection — `python -m scripts.ask "<question>"` | |
 | Topic-set retrieval — `GET /retrieval/{crop_slug}/{topic}` | |
 | Category delete that refiles documents instead of deleting them; document delete (`DELETE /items/{id}`) — [API](docs/api.md) | |
-| Database migrations (Alembic), exercised for real in CI — [operations](docs/operations.md#migrations) | The frontend served from the server |
+| Database migrations (Alembic), exercised for real in CI — [operations](docs/operations.md#migrations) | |
 | Health endpoints, `GET /health` and `GET /health/ready` — [API](docs/api.md); the `cms` healthcheck probes `/health` every 10 s — [operations](docs/operations.md#health-checks) | |
 | `POST /chat` crop labels when no crop is fixed; routing question set and manual live-eval script — [live eval](docs/live-eval.md) | |
 | Test suite on an isolated database, run in CI | |
 | Same-origin Caddy proxy (optional compose profile `proxy`), asserted by `proxy/check.sh` in CI — [why](docs/design-notes.md#how-the-browser-reaches-the-api) | |
-| Deployed at https://demo.cropcms.com: one EC2 server, Caddy with a Let's Encrypt certificate, RDS PostgreSQL, the corpus embedded; see [deploy](docs/deploy.md) | |
+| Deployed at https://demo.cropcms.com: one EC2 server, Caddy with a Let's Encrypt certificate, RDS PostgreSQL, the corpus embedded, and the frontend served from the same server; see [deploy](docs/deploy.md) | |
 | AI code review on pull requests (advisory) | |
 
-Still to come: the frontend on the server, advisor tools over MCP, and conversation context and caching.
+Still to come: advisor tools over MCP, and conversation context and caching.
 
 ## Engineering highlights
 
