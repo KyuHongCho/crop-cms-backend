@@ -1064,7 +1064,7 @@ date -u +%H:%M:%S
 docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env ps caddy
 ```
 
-**Step 51, on the server: certificate and resources after.** The recreated container has a fresh log, so the first command (the form of the reboot check in step 27, run within ten minutes of step 50) counts the lines that say Caddy is obtaining or has obtained a certificate: it must print `0`, since the certificate is in the volume. It counts attempts and not only successes, because a failed or rate-limited attempt logs `obtaining` and never `obtained`, and it still counts against the limits. The volume list must still include `cms_caddy_data`. Record Caddy's memory, the disk and the memory of the host to compare with step 11 and with the figures under [What was verified on the server](#what-was-verified-on-the-server). Paste only the count and the numbers.
+**Step 51, on the server: certificate and resources after.** The recreated container has a fresh log, so the first command (the form of the reboot check in step 27, run within ten minutes of step 50) counts the lines that say Caddy is obtaining or has obtained a certificate: it must print `0`, since the certificate is in the volume. It counts attempts and not only successes, because a failed or rate-limited attempt logs `obtaining` and never `obtained`, and it still counts against the limits. A renewal logs `renewing` and `renewed` instead and is not counted. The volume list must still include `cms_caddy_data`. Record Caddy's memory, the disk and the memory of the host to compare with step 11 and with the figures under [What was verified on the server](#what-was-verified-on-the-server). Paste only the count and the numbers.
 
 ```sh
 cd /opt/cms/app
@@ -1075,7 +1075,7 @@ df -h /
 free -m
 ```
 
-**Step 52, on the laptop, from the repository root: look after.** The first command must end with `ALL PASS` and show the same `notAfter` as before the recreate: `Jan 18 01:52:54 2027 GMT`, as recorded under [What was verified on the server](#what-was-verified-on-the-server); a different date means a new certificate was obtained.
+**Step 52, on the laptop, from the repository root: look after.** The first command must end with `ALL PASS`. Its `notAfter` is expected to be `Jan 18 01:52:54 2027 GMT`, as recorded under [What was verified on the server](#what-was-verified-on-the-server). A different date with a step 51 count of `0` means Caddy renewed the certificate, which it does inside the renewal window (from about 2026-12-18) and can do at the moment it starts: that is not a stop; write the new date down. A different date with a step 51 count above `0` means a certificate was obtained anew: stop.
 
 ```sh
 bash prod/outside-check.sh demo.cropcms.com --only tls
@@ -1097,7 +1097,7 @@ Stop and ask rather than guess when any of these holds:
 - `git pull --ff-only` fails, `git diff --stat` lists `docker-compose.prod.yaml`, or the `grep` of step 48 prints nothing.
 - Step 49 prints the `STOP` line instead of `VALID`, or the image tag differs from the one in `docker-compose.prod.yaml`: do not start step 50; fix the file, or use [the undo section](#if-the-caddy-change-must-be-undone).
 - After step 50, `ps` does not show `caddy` as `healthy`, or the loop is still printing `000` after a minute: use [the rollback](#if-the-caddy-change-must-be-undone), once.
-- The count in step 51 is not `0` (any obtaining or obtained line is an attempt, even a failed one), `cms_caddy_data` is missing from the volume list, or the `notAfter` of step 52 changed: do not recreate again and do not touch the volume (never `down -v`); a new certificate counts against the limits under "Switching to the production certificate".
+- The count in step 51 is not `0` (any obtaining or obtained line is an attempt, even a failed one), or `cms_caddy_data` is missing from the volume list: do not recreate again and do not touch the volume (never `down -v`); a new certificate counts against the limits under "Switching to the production certificate".
 - The block of step 46 after the rollout shows `no-cache` on the script or on `/assets/nope.js`, or does not show it on `/`.
 
 ### If the Caddy change must be undone
