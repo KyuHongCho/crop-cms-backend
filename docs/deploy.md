@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-44 put the frontend on the server and checked it; they ran on 2026-10-23 to 2026-10-26, and the app is live at the same address. Step 45 (the prune) was not run, and [Deploying the frontend](#deploying-the-frontend) lists the rest that is still unconfirmed. Redeploying a later backend release is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-44 put the frontend on the server and checked it; they ran on 2026-10-23 to 2026-10-26, and the app is live at the same address. Step 45 (the prune) was not run, and [Deploying the frontend](#deploying-the-frontend) lists the rest that is still unconfirmed. Steps 46-52 change the running Caddy configuration; they are written and were not run on the server ([Changing the Caddy configuration](#changing-the-caddy-configuration)). Redeploying a later backend release is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -29,6 +29,7 @@ Stop and ask rather than guess when any of these holds:
 - The chat question of step 34 has been asked three times: stop and ask, whatever the answers were.
 - A count in step 36 is above 0 (a token in the Caddy log, or member-insert SQL in the `cms` log): stop and ask; do not paste the lines.
 - Any stop rule of [Deploying the frontend](#stop-rules-for-the-frontend-deploy): do not copy, record or prune further.
+- Any stop rule of [Changing the Caddy configuration](#stop-rules-for-the-caddy-change): do not recreate `caddy` a second time.
 
 Never run `down -v` or delete the `cms_caddy_data` volume (the certificates are in it), never recreate the certificate "to try again" after a production certificate was obtained, never run a compose command without `--env-file /opt/cms/.env`, never use `docker compose run` (the image's entrypoint is the web server, so the command that follows becomes its arguments), never run `alembic downgrade` except the rollback in "Database migration and seed", and never print the rendered configuration (`config` without `-q` shows every secret).
 
@@ -886,7 +887,7 @@ bash prod/outside-check.sh demo.cropcms.com --only spa
 test "$(curl -s https://demo.cropcms.com/ | grep -o '/assets/index-[A-Za-z0-9_-]*\.js')" = "/assets/$(ls "$FRONT/dist/assets" | grep -E '^index-.*\.js$')" && echo "the live page names this build's script" || echo "STOP: the live page names another script"
 ```
 
-**Step 43, the owner's browser checklist.** Use a private window, so a placeholder page cached earlier is not shown (the proxy sends no `Cache-Control` header for the page, so a browser that loaded the placeholder, or any earlier build, can keep showing it for hours; after a later deploy use a private window or a hard reload too). Do it on a laptop and on a phone, in light and in dark. The questions are paid calls of about 4,000 tokens each: ask one per device, not more (step 34 shows what the budget allows).
+**Step 43, the owner's browser checklist.** Use a private window, so a placeholder page cached earlier is not shown (until the Caddy change of [steps 46-52](#changing-the-caddy-configuration) is rolled out, the proxy sends no `Cache-Control` header for the page, so a browser that loaded the placeholder, or any earlier build, can keep showing it for hours, and after a later deploy a private window or a hard reload is needed too; after the rollout the header is `no-cache` and the browser asks the server before it reuses the page; a copy stored before the rollout has no `no-cache`, so the first visit after the rollout may still need a hard reload or a private window; this is read from the HTTP caching rules and was not tested in a browser). Do it on a laptop and on a phone, in light and in dark. The questions are paid calls of about 4,000 tokens each: ask one per device, not more (step 34 shows what the budget allows).
 
 | Check | You should see |
 |---|---|
@@ -942,7 +943,7 @@ About ten commands, no container change. File counts are not compared with a fix
 2. Step 39 on the server: the loop must print a line (the live page is saved); if it prints nothing, save the page as the step says.
 3. Step 40: variables, dry run, then the chained copy (`exit: 0`).
 4. Step 41 (a) to (f): (a), then (b), then (c) on the server, (d), (e) and (f).
-5. Step 42: `--only spa` and the script-name check. Repeat the first four rows of step 43 in a private window, once on a laptop.
+5. Step 42: `--only spa` and the script-name check. Repeat the first four rows of step 43 once on a laptop, in a private window until the Caddy change of [steps 46-52](#changing-the-caddy-configuration) is rolled out (afterwards a normal window should show the new build on a reload, except that a copy stored before the rollout may need one hard reload; read from the HTTP caching rules, not yet observed).
 
 To go back to an earlier build, use the block of step 44 with that build's name, then check 41 (e), step 42's first command and the live page's script name against that build's script.
 
@@ -971,6 +972,153 @@ COPYFILE_DISABLE=1 tar -C "$FRONT/dist" -cf - . | ssh -i "$SSH_KEY" "$SITE_HOST"
 
 ```sh
 mkdir -p /opt/cms/site/assets && cp -a /opt/cms/site.new/assets/. /opt/cms/site/assets/ && mv -f /opt/cms/site.new/favicon.svg /opt/cms/site/ && mv -f /opt/cms/site.new/index.html /opt/cms/site/ && rm -rf /opt/cms/site.new
+```
+
+## Changing the Caddy configuration
+
+Steps 46-52 put a changed `proxy/Caddyfile` into the running `caddy` container. The first change is one line: the proxy sends `Cache-Control: no-cache` for the page and for every other path that is not under `/assets/`, so a browser that comes back after a redeploy asks the server whether the page changed before it reuses its stored copy (an unchanged page answers `304` with no body). Without the header a browser may reuse the stored page for a time it picks from the file's age (heuristic freshness), and `rsync -t` makes that age count from the build time; how long that is in a given browser was not measured. The hashed files under `/assets/` get no header, because their names change with their contents. The API keeps its own headers (`/api/health` sends `Cache-Control: no-store`).
+
+**Status: written, not yet run on the server.** Run on the laptop only: the new Caddyfile in a throwaway `caddy:2.11.7-alpine` container (plain HTTP on a local port, no `cms`, a copy of a built frontend with the file names of the live build), where `/`, a deep link, `/favicon.svg`, `/favicon.ico` and `/robots.txt` answered with `Cache-Control: no-cache` and the script, the stylesheet, `/assets/nope.js` and the proxy's own 404s answered with none; the `caddy validate` of step 49 on the new file, with `SITE_ADDRESS=demo.cropcms.com` and no network; the new assertions of `proxy/check.sh` as hand-typed copies of its expressions against that container (the script itself drives the dev stack and was not run); the `STOP` and `VALID` lines of steps 47, 48 and 49 and the rollback blocks, in a scratch clone with a stub `docker` (not the real one); the log pattern of step 51 on throwaway Caddy containers with no network, one with an unreachable authority and one on plain HTTP; and `bash prod/check.sh` and `bash infra/check.sh --static` on this text. Not run: every command of steps 46-52 on the server, the rollback, and any browser. Not confirmed: that `git pull` replaces `proxy/Caddyfile` with a new file so that the container keeps the old one (step 48 shows which), that the certificate survives the recreate, how many seconds the proxy is silent, and what Caddy's memory is afterwards.
+
+How it works. Caddy reads `/etc/caddy/Caddyfile` only when it starts, and the file is mounted as a single file (`docker-compose.prod.yaml`), so a merge and a `git pull` change nothing that visitors see. Recreating only `caddy` (`--no-deps` leaves `cms` as it is) is the whole rollout. `caddy reload` is not used: if the pull gave the file a new inode, the container still holds the old one and a reload would read the old text (see [the single-file mount](design-notes.md#traps)). The certificates are in the `cms_caddy_data` volume, which a recreate keeps; never run `down -v`. For a few seconds between the stop of the old container and the health of the new one nothing answers on ports 80 and 443. Steps 46 and 52 are on the laptop, steps 47, 48, 49 and 51 on the server, and step 50 is one server command plus a loop in a second laptop terminal. Use one server terminal for steps 47-51, so that `PREV` stays set from step 47 to step 48.
+
+**Step 46, on the laptop: look before.** Any terminal. It prints the status line and the `Cache-Control` header (if there is one) for the page, a deep link, the favicon, the script the page names, a missing file under `/assets/` and the API. Before the rollout expect `200` and no `cache-control` line for the first five paths, and `cache-control: no-store` for `/api/health`. Write the output down. It sends GET requests: a `HEAD` of the API route is refused.
+
+```sh
+JS=$(curl -s https://demo.cropcms.com/ | grep -o '/assets/index-[A-Za-z0-9_-]*\.js')
+test -n "$JS" || echo "STOP: the page names no script"
+for p in / /library/basil/watering-needs /favicon.svg "$JS" /assets/nope.js /api/health; do
+  echo "$p"
+  curl -s -o /dev/null -D - "https://demo.cropcms.com$p" | tr -d '\r' | grep -iE '^(HTTP/|cache-control:)'
+done
+```
+
+**Step 47, on the server: record the commit and keep the current Caddyfile.** Log in as in step 2. The block copies nothing and prints a `STOP` line if the working tree is not clean (the rollback leaves it dirty on purpose, see [the undo section](#if-the-caddy-change-must-be-undone)), if the commit name is not 7 lowercase hexadecimal characters (the letters are listed one by one, because in some locales the range `a-f` also matches capitals), or if a backup of that name already exists with other contents. Otherwise it keeps a copy named for the commit it came from, outside the repository, and prints the 7 characters and then the same hash twice. Write the 7 characters down. After a `STOP`, go no further.
+
+```sh
+cd /opt/cms/app
+PREV=$(git rev-parse --short=7 HEAD)
+DIRTY=$(git status --porcelain)
+BACKUP="/opt/cms/Caddyfile.$PREV"
+case "$PREV" in
+  [0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef]) NAME_OK=yes ;;
+  *) NAME_OK=no ;;
+esac
+if [ -n "$DIRTY" ]; then
+  echo "STOP: the working tree is not clean:"; echo "$DIRTY"
+elif [ "$NAME_OK" != yes ]; then
+  echo "STOP: the commit name is not 7 lowercase hex characters"
+elif [ -e "$BACKUP" ] && ! cmp -s "$BACKUP" proxy/Caddyfile; then
+  echo "STOP: $BACKUP exists and differs from proxy/Caddyfile"
+else
+  cp -p proxy/Caddyfile "$BACKUP" && echo "$PREV" && sha256sum proxy/Caddyfile "$BACKUP"
+fi
+```
+
+**Step 48, on the server: pull, then compare with what the container sees.** The block first checks that `PREV` still holds the 7 characters of step 47 and that the backup of step 47 exists; if not it prints one `STOP` line and does not pull. `git diff --stat` must list `proxy/Caddyfile` and not `docker-compose.prod.yaml` (a changed compose file would be applied to `caddy` by the recreate too: stop and read it first). The `grep` must print the `header @shell Cache-Control no-cache` line. Then the host and the container hash the file. Different hashes confirm the trap: the container still holds the old file, and only a recreate mounts the new one. Equal hashes mean the container already sees the new file; Caddy has still loaded the old text, so go on in both cases.
+
+```sh
+cd /opt/cms/app
+case "$PREV" in
+  [0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef][0-9abcdef]) NAME_OK=yes ;;
+  *) NAME_OK=no ;;
+esac
+if [ "$NAME_OK" = yes ] && [ -f "/opt/cms/Caddyfile.$PREV" ]; then
+  git pull --ff-only
+  git diff --stat "$PREV" HEAD -- proxy docker-compose.prod.yaml
+  grep -n 'Cache-Control' proxy/Caddyfile
+  sha256sum proxy/Caddyfile
+  docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env exec -T caddy sha256sum /etc/caddy/Caddyfile
+else
+  echo "STOP: PREV is not the 7 characters of step 47, or its backup is missing; do not pull"
+fi
+```
+
+**Step 49, on the server: validate the new file with the live environment.** A fresh container with no network reads the pulled file, so a typo is found before the live container is touched. The values are those of the live site (the domain and the production authority); the image must be the one `docker-compose.prod.yaml` names, which the first command prints. The second command prints `Valid configuration` and then the line `VALID: go on to step 50`; if it prints `STOP: do not recreate` instead (a configuration error, or `docker run` could not start, for example because the image is missing), do not start step 50: fix the file, or use [the undo section](#if-the-caddy-change-must-be-undone), which puts the backup of step 47 back.
+
+```sh
+cd /opt/cms/app
+grep 'image: caddy' docker-compose.prod.yaml
+docker run --rm --pull never --network none \
+  -e SITE_ADDRESS=demo.cropcms.com \
+  -e ACME_CA=https://acme-v02.api.letsencrypt.org/directory \
+  -v /opt/cms/app/proxy/Caddyfile:/etc/caddy/Caddyfile:ro \
+  caddy:2.11.7-alpine caddy validate --config /etc/caddy/Caddyfile \
+  && echo "VALID: go on to step 50" \
+  || echo "STOP: do not recreate; fix the file, or use the undo section"
+```
+
+**Step 50, on the server: recreate `caddy`,** only after the `VALID` line of step 49. To measure the silence, first start this loop in a second laptop terminal (it prints the time and the status code of `/` once a second; `000` means no answer) and stop it with Ctrl-C after the server command has finished and the codes are `200` again. Count the `000` lines.
+
+```sh
+while true; do printf '%s %s\n' "$(date -u +%H:%M:%S)" "$(curl -s -o /dev/null -m 2 -w '%{http_code}' https://demo.cropcms.com/)"; sleep 1; done
+```
+
+On the server, one recreate, with the time before and after. `--wait` returns when the container is healthy; `ps` must then show `caddy` as `healthy`.
+
+```sh
+cd /opt/cms/app
+date -u +%H:%M:%S
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --force-recreate --no-deps --wait caddy
+date -u +%H:%M:%S
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env ps caddy
+```
+
+**Step 51, on the server: certificate and resources after.** The recreated container has a fresh log, so the first command (the form of the reboot check in step 27, run within ten minutes of step 50) counts the lines that say Caddy is obtaining or has obtained a certificate: it must print `0`, since the certificate is in the volume. It counts attempts and not only successes, because a failed or rate-limited attempt logs `obtaining` and never `obtained`, and it still counts against the limits. The volume list must still include `cms_caddy_data`. Record Caddy's memory, the disk and the memory of the host to compare with step 11 and with the figures under [What was verified on the server](#what-was-verified-on-the-server). Paste only the count and the numbers.
+
+```sh
+cd /opt/cms/app
+docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env logs --since 10m caddy | grep -ciE 'obtaining|obtained'
+docker volume ls | grep caddy
+docker stats --no-stream
+df -h /
+free -m
+```
+
+**Step 52, on the laptop, from the repository root: look after.** The first command must end with `ALL PASS` and show the same `notAfter` as before the recreate: `Jan 18 01:52:54 2027 GMT`, as recorded under [What was verified on the server](#what-was-verified-on-the-server); a different date means a new certificate was obtained.
+
+```sh
+bash prod/outside-check.sh demo.cropcms.com --only tls
+```
+
+Then run the block of step 46 again: `cache-control: no-cache` for `/`, `/library/basil/watering-needs` and `/favicon.svg`; no `cache-control` line for the script and for `/assets/nope.js`; `cache-control: no-store` for `/api/health`. Then the front end checks of step 42, which must end `ALL PASS`:
+
+```sh
+bash prod/outside-check.sh demo.cropcms.com --only spa
+```
+
+In a normal (not private) browser window, a reload after a later deploy should now show the new build; that was not observed here. A copy of the page that a browser stored before the rollout carries no `no-cache`, so the first visit after the rollout may need a hard reload (or a private window) and later visits should not; this is read from the HTTP caching rules, not tested in a browser.
+
+### Stop rules for the Caddy change
+
+Stop and ask rather than guess when any of these holds:
+
+- Step 47 prints a `STOP` line, or the two hashes that step 47 itself prints differ (the host and container hashes of step 48 are expected to differ).
+- `git pull --ff-only` fails, `git diff --stat` lists `docker-compose.prod.yaml`, or the `grep` of step 48 prints nothing.
+- Step 49 prints the `STOP` line instead of `VALID`, or the image tag differs from the one in `docker-compose.prod.yaml`: do not start step 50; fix the file, or use [the undo section](#if-the-caddy-change-must-be-undone).
+- After step 50, `ps` does not show `caddy` as `healthy`, or the loop is still printing `000` after a minute: use [the rollback](#if-the-caddy-change-must-be-undone), once.
+- The count in step 51 is not `0` (any obtaining or obtained line is an attempt, even a failed one), `cms_caddy_data` is missing from the volume list, or the `notAfter` of step 52 changed: do not recreate again and do not touch the volume (never `down -v`); a new certificate counts against the limits under "Switching to the production certificate".
+- The block of step 46 after the rollout shows `no-cache` on the script or on `/assets/nope.js`, or does not show it on `/`.
+
+### If the Caddy change must be undone
+
+Use it when a stop rule above says so. Set `PREV` to the 7 characters step 47 printed (the example value is refused if no backup has that name). The copy writes into the existing file, then the same recreate as step 50 starts the old text. Afterwards run the block of step 46: the first five paths must show no `cache-control` line again.
+
+```sh
+cd /opt/cms/app
+PREV=0000000
+if [ -f "/opt/cms/Caddyfile.$PREV" ]; then
+  cp "/opt/cms/Caddyfile.$PREV" /opt/cms/app/proxy/Caddyfile && docker compose -f docker-compose.prod.yaml --env-file /opt/cms/.env up -d --force-recreate --no-deps --wait caddy
+else
+  echo "STOP: no backup named Caddyfile.$PREV"; ls /opt/cms/Caddyfile.*
+fi
+```
+
+The working tree now differs from git on that one file, and the repository still says the new text, so any later recreate of `caddy` would apply the new text again until a revert is merged on `main`. When that revert is merged, restore the repository's version of the file before step 47, because step 47 stops on a dirty tree (and a changed file would block the pull of step 48 too), then run steps 47 to 52 as usual. `git checkout -- proxy/Caddyfile` restores the file only; never run `git checkout` with a commit on `/opt/cms/app`, which would detach `HEAD`.
+
+```sh
+git -C /opt/cms/app checkout -- proxy/Caddyfile
+git -C /opt/cms/app status --porcelain
 ```
 
 ## What was verified on the server
@@ -1002,6 +1150,7 @@ Not confirmed:
 - The memory burst of several Argon2 hashes on the server (the 325 MiB figure is from a laptop).
 - The exact cost of a chat question. The estimate in [the section on chat costs](#what-the-chat-costs-and-what-it-needs-in-memory) comes from listed prices that are unverified since 2026-10-12, and the usage rows showed only "under one cent" for each provider.
 - That the server's `rsync` writes each file under a temporary name and renames it, so that `index.html` is never half written (no observation was made).
+- The Caddy change of [steps 46-52](#changing-the-caddy-configuration) (written, not run on the server): that `git pull` gives the single-file mount a new inode, that the certificate survives the recreate, how long the proxy is silent, Caddy's memory afterwards, the rollback, and how a browser behaves once the page carries `no-cache`.
 - [The tar fallback](#if-the-server-has-no-rsync) (untested), and step 45, the prune (not run on the server; the rehearsal was on a scratch copy only).
 - The cause of the iPhone's login page without the notice after 30 minutes (see the note under step 43).
 - The CPU credit cap of 288 for this size.
@@ -1009,7 +1158,7 @@ Not confirmed:
 
 ## Redeploying
 
-A later build of the frontend is deployed as in [Deploying a later frontend build](#deploying-a-later-frontend-build); it changes no container. A later release of the backend has to be deployed without losing the certificates kept in the `cms_caddy_data` volume. Measure `df -h /` and `docker system df` before and after the rebuild, as in the disk budget under [Memory and disk](#memory-and-disk).
+A later build of the frontend is deployed as in [Deploying a later frontend build](#deploying-a-later-frontend-build); it changes no container. A change to `proxy/Caddyfile` reaches visitors only through the recreate of `caddy` in [Changing the Caddy configuration](#changing-the-caddy-configuration). A later release of the backend has to be deployed without losing the certificates kept in the `cms_caddy_data` volume. Measure `df -h /` and `docker system df` before and after the rebuild, as in the disk budget under [Memory and disk](#memory-and-disk).
 
 ## If something fails
 
