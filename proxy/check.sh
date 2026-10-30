@@ -95,6 +95,22 @@ code=$(status_of /assets/missing.js)
 [ "$code" = 200 ] && grep -q "$MARKER" "$BODY"
 check "a missing asset falls back to the placeholder" $?
 
+# The API sets its own Cache-Control (no-store on /api/health), so only no-cache is excluded there.
+# The token may sit anywhere in the value, so "no-cache, must-revalidate" is caught by the negatives too.
+nocache() { tr -d '\r' <"$HDRS" | grep -qiE '^cache-control:.*no-cache'; }
+code=$(status_of /)
+[ "$code" = 200 ] && nocache
+check "/ carries Cache-Control: no-cache" $?
+code=$(status_of /some/client/route)
+[ "$code" = 200 ] && nocache
+check "a client route carries Cache-Control: no-cache" $?
+code=$(status_of /assets/missing.js)
+[ "$code" = 200 ] && ! nocache
+check "a missing asset does not carry Cache-Control: no-cache" $?
+code=$(status_of /api/health)
+[ "$code" = 200 ] && ! nocache
+check "/api/health does not carry Cache-Control: no-cache" $?
+
 # validate and the header probe run inside the compose container, so they apply
 # only to the default local proxy, not whatever PROXY_URL points at.
 case "${BASE%/}" in http://127.0.0.1:8080 | http://localhost:8080) local_proxy=1 ;; *) local_proxy=0 ;; esac

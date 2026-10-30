@@ -43,7 +43,11 @@
 		}
 	}
 
+	# Without this a browser may reuse index.html for hours after a redeploy (heuristic
+	# freshness); the hashed files under /assets/ never change, so they keep the default.
 	handle {
+		@shell not path /assets/*
+		header @shell Cache-Control no-cache
 		try_files {path} /index.html
 		file_server
 	}
