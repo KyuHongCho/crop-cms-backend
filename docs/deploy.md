@@ -943,7 +943,7 @@ About ten commands, no container change. File counts are not compared with a fix
 2. Step 39 on the server: the loop must print a line (the live page is saved); if it prints nothing, save the page as the step says.
 3. Step 40: variables, dry run, then the chained copy (`exit: 0`).
 4. Step 41 (a) to (f): (a), then (b), then (c) on the server, (d), (e) and (f).
-5. Step 42: `--only spa` and the script-name check. Repeat the first four rows of step 43 once on a laptop, in a private window before the Caddy change of [steps 46-52](#changing-the-caddy-configuration) was rolled out (it was, on 2026-10-31; since then a normal window should show the new build on a reload, except that a copy stored before the rollout may need one hard reload; read from the HTTP caching rules, not yet observed).
+5. Step 42: `--only spa` and the script-name check. Repeat the first four rows of step 43 once on a laptop, in a private window as in step 43.
 
 To go back to an earlier build, use the block of step 44 with that build's name, then check 41 (e), step 42's first command and the live page's script name against that build's script.
 
