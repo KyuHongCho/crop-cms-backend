@@ -2,7 +2,7 @@
 
 ## What this document covers and its status
 
-Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-44 put the frontend on the server and checked it; they ran on 2026-10-23 to 2026-10-26, and the app is live at the same address. Step 45 (the prune) was not run, and [Deploying the frontend](#deploying-the-frontend) lists the rest that is still unconfirmed. Steps 46-52 change the running Caddy configuration; they ran on the real server on 2026-10-31, and the site now sends `Cache-Control: no-cache` for the page ([Changing the Caddy configuration](#changing-the-caddy-configuration)). Redeploying a later backend release is still an outline.
+Steps 1-18, from a fresh server to a running stack behind a Let's Encrypt staging certificate with the database filled, ran on 2026-10-19 on the real server. Steps 19-36 ran on 2026-10-20: the switch to the production certificate (19-27), then the first admin, the shared demo member, one real chat question, the published-only count and the log check (28-36). Every step ended as expected, except that the first run of step 21, from a phone hotspot, timed out and then passed from the usual network. Step 37 is a written-down recovery command and was not run. The site is live at https://demo.cropcms.com behind a Let's Encrypt production certificate. [What was verified on the server](#what-was-verified-on-the-server) lists the measurements and what is still unconfirmed. Steps 38-44 put the frontend on the server and checked it; they ran on 2026-10-23 to 2026-10-26, and the app is live at the same address. Step 45 (the prune) was not run, and [Deploying the frontend](#deploying-the-frontend) lists the rest that is still unconfirmed. The copy of `robots.txt` in step 40 and the check of it in step 42 were added after that run and have not been run on the server. Steps 46-52 change the running Caddy configuration; they ran on the real server on 2026-10-31, and the site now sends `Cache-Control: no-cache` for the page ([Changing the Caddy configuration](#changing-the-caddy-configuration)). Redeploying a later backend release is still an outline.
 
 The commands are shown in fenced blocks, and `bash prod/check.sh` lints them: a `docker compose` command must carry `-f docker-compose.prod.yaml` and `--env-file /opt/cms/.env` (only `docker compose version` is exempt); there is no `compose run`, no `down -v`, no `--force-recreate` without `--no-deps` and no `config` without `-q`; `read` never gets a `-p` flag; and every fence closes. A block marked `text` is output and is not linted. Commands for the laptop work in zsh and bash; commands for the server are written for bash.
 
@@ -715,9 +715,9 @@ unset ADMIN_TOKEN MEMBER_EMAIL MEMBER_PASSWORD MEMBER_ID
 
 Steps 38-45 put the built app of the `crop-cms-frontend` repository on the server, check it, and rehearse the way back. No container changes: Caddy serves `/opt/cms/site` (mounted read-only at `/srv`), so a deploy only copies files into that directory.
 
-**Status: run on the real server.** Steps 38-44 were run by the owner, except the outside check of step 42, which an AI assistant ran for the owner (the build on 2026-10-23, the checks and the rollback rehearsal by 2026-10-26), and https://demo.cropcms.com serves the real frontend (build commit `b857200`). The first run found five defects in this text, now fixed in it: a laptop with no `nvm`, the direction of the `rsync` itemize symbol on a push (`<f`, not `>f`), the commit guard of step 41 (b) that fired when the frontend checkout had moved to another branch, the mode of `index.html` in step 41 (f), and the session-expiry row of step 43. The corrected blocks of steps 38 and 41 (a) and (b) were tested on a scratch copy only, not on the server. Not run: step 45, and [the tar fallback](#if-the-server-has-no-rsync). Not confirmed: that the server's `rsync` writes each file under a temporary name and renames it. The measurements and the browser results are under [What was verified on the server](#what-was-verified-on-the-server).
+**Status: run on the real server.** Steps 38-44 were run by the owner, except the outside check of step 42, which an AI assistant ran for the owner (the build on 2026-10-23, the checks and the rollback rehearsal by 2026-10-26), and https://demo.cropcms.com serves the real frontend (build commit `b857200`). The first run found five defects in this text, now fixed in it: a laptop with no `nvm`, the direction of the `rsync` itemize symbol on a push (`<f`, not `>f`), the commit guard of step 41 (b) that fired when the frontend checkout had moved to another branch, the mode of `index.html` in step 41 (f), and the session-expiry row of step 43. The corrected blocks of steps 38 and 41 (a) and (b) were tested on a scratch copy only, not on the server. Not run: step 45, and [the tar fallback](#if-the-server-has-no-rsync). The handling of `robots.txt` (the copy in step 40 and in the fallback, the check in step 42) is written and was checked on scratch copies on the laptop only (a local `rsync` between two folders, a local web server); it was not run on the server, and the live `/robots.txt` still answers with the page (observed on 2026-11-03: `200`, `text/html`, 900 bytes). Not confirmed: that the server's `rsync` writes each file under a temporary name and renames it. The measurements and the browser results are under [What was verified on the server](#what-was-verified-on-the-server).
 
-How it works. The build happens on the laptop from a clean, pulled `main`; the copy is `rsync` over SSH, because SSH is open only from `ssh_cidr`, so CI cannot deploy. The copies are chained with `&&` in this order: `assets/` (hashed names: a file with a new name is new, and one with an old name has the old contents), then `favicon.svg`, then `index.html` last, so a failed copy stops the next one and a visitor gets either the old page with its old files or the new page with its new files. Old files are never deleted in a normal deploy: a stale tab keeps working and a rollback is one file swap. The server keeps `/opt/cms/index-history/`, outside the served directory: one copy of each page (`index.html`) that has been live, named for the commit of the build it contains (`index.b857200.html`; `index.placeholder.html` for the first one), a list of what those pages name, and an append-only `deployed.log` (UTC time and commit per deploy).
+How it works. The build happens on the laptop from a clean, pulled `main`; the copy is `rsync` over SSH, because SSH is open only from `ssh_cidr`, so CI cannot deploy. The copies are chained with `&&` in this order: `assets/` (hashed names: a file with a new name is new, and one with an old name has the old contents), then `favicon.svg`, then `robots.txt`, then `index.html` last, so a failed copy stops the next one and a visitor gets either the old page with its old files or the new page with its new files. Old files are never deleted in a normal deploy: a stale tab keeps working and a rollback is one file swap. The server keeps `/opt/cms/index-history/`, outside the served directory: one copy of each page (`index.html`) that has been live, named for the commit of the build it contains (`index.b857200.html`; `index.placeholder.html` for the first one), a list of what those pages name, and an append-only `deployed.log` (UTC time and commit per deploy).
 
 Every laptop command uses the variables defined in these steps (`INFRA`, `FRONT`, `SSH_KEY`, `SITE_HOST`, `SHA`) and none contains a `<...>` placeholder, so it pastes into zsh and bash. Use one laptop terminal for steps 38-42, so the variables stay set. A failed connection must not look like a clean result, so the copies and check 41 (a) print their exit code, and check 41 (d) ends with a line of its own.
 
@@ -799,21 +799,21 @@ SITE_HOST=ubuntu@"$(terraform output -raw elastic_ip)"
 test "${#SITE_HOST}" -gt 7 && echo "SITE_HOST is set"
 ```
 
-The dry run changes nothing and has no `--delete`, so it cannot remove a file. `-c` compares contents, so a font file that the build rewrote unchanged (with a new modification time) is not sent again. The dry run lists the files that would be copied, each as a line starting with `<f` (all 96 on the first deploy; on a later one the new script and stylesheet, and the page; a push prints `<`, where a copy between two folders on one machine prints `>`), with a line for each new directory (lines starting `.f` or `.d` only set a time and copy nothing), and ends with `exit: 0`. Stop if any line says `deleting` or the exit code is not `0`.
+The dry run changes nothing and has no `--delete`, so it cannot remove a file. `-c` compares contents, so a font file that the build rewrote unchanged (with a new modification time) is not sent again. The dry run lists the files that would be copied, each as a line starting with `<f` (all of them on the first deploy, 96 at commit b857200; on a later one the new script, the new stylesheet and the page, and `robots.txt` the first time a build that has it is deployed, as at commit `fe6614b`, plus the fonts only if the build changed them; a scratch copy listed exactly those four files, and the list on the server has not been seen; a push prints `<`, where a copy between two folders on one machine prints `>`), with a line for each new directory (lines starting `.f` or `.d` only set a time and copy nothing), and ends with `exit: 0`. Stop if any line says `deleting` or the exit code is not `0`.
 
 ```sh
 rsync -rltcn --itemize-changes -e "ssh -i $SSH_KEY" "$FRONT/dist/" "$SITE_HOST:/opt/cms/site/"; echo "exit: $?"
 ```
 
-The copy is one chained line. It must end with `exit: 0`; `--stats` prints the number of files and bytes sent (write them down, with the clock time the copy took). Any other code means a copy failed and the copies after it did not run; in particular, if the last line is not `exit: 0`, `index.html` was not copied. If a copy or a login fails, paste only the `exit:` number: the error line can contain the server address, which this document says never to paste. On the real run `ssh-add` had not been run in that terminal: `assets/` copied, the next `rsync` failed with exit 255 and `index.html` was not copied, and the same line ended `exit: 0` after `ssh-add`. The cause was not established.
+The copy is one chained line. It must end with `exit: 0`; `--stats` prints the number of files and bytes sent (write them down, with the clock time the copy took). Any other code means a copy failed and the copies after it did not run; in particular, if the last line is not `exit: 0`, `index.html` was not copied. The order is `assets/`, `favicon.svg`, `robots.txt`, `index.html`; a checkout older than the build that added `robots.txt` has no such file, and then the third `rsync` exits `23` and `index.html` is not copied (seen on scratch copies with the laptop's `rsync`, not on the server); the Caddy rule that serves the page for any unknown path also serves it for `/robots.txt` until the file is on the server. If a copy or a login fails, paste only the `exit:` number: the error line can contain the server address, which this document says never to paste. On the real run `ssh-add` had not been run in that terminal: `assets/` copied, the next `rsync` failed with exit 255 and `index.html` was not copied, and the same line ended `exit: 0` after `ssh-add`. The cause was not established.
 
 ```sh
-rsync -rltc --stats -e "ssh -i $SSH_KEY" "$FRONT/dist/assets/" "$SITE_HOST:/opt/cms/site/assets/" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/favicon.svg" "$SITE_HOST:/opt/cms/site/favicon.svg" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/index.html" "$SITE_HOST:/opt/cms/site/index.html"; echo "exit: $?"
+rsync -rltc --stats -e "ssh -i $SSH_KEY" "$FRONT/dist/assets/" "$SITE_HOST:/opt/cms/site/assets/" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/favicon.svg" "$SITE_HOST:/opt/cms/site/favicon.svg" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/robots.txt" "$SITE_HOST:/opt/cms/site/robots.txt" && rsync -lt -e "ssh -i $SSH_KEY" "$FRONT/dist/index.html" "$SITE_HOST:/opt/cms/site/index.html"; echo "exit: $?"
 ```
 
 **Step 41, verify, then record.** Six parts, each with its limit. (a) and (b) are on the laptop, (c) on the server, (d) on the laptop, (e) and (f) on the server.
 
-*(a) Laptop, content check.* It compares file contents (`-c`, modification times are ignored). It prints `exit: 0` and `no file differs` (that line is printed only when the exit code is `0`); any line starting with `<` is a file of the build that is missing or different on the server (the block also catches `>`, which a copy between two folders on one machine prints). It does not see extra files on the server; that is (d).
+*(a) Laptop, content check.* It compares file contents (`-c`, modification times are ignored). It prints `exit: 0` and `no file differs` (that line is printed only when the exit code is `0`); any line starting with `<` is a file of the build that is missing or different on the server (a `<f+++++++ robots.txt`, a new file, means the file is not on the server, so the chain of step 40 did not copy it; the block also catches `>`, which a copy between two folders on one machine prints). It does not see extra files on the server; that is (d).
 
 ```sh
 CHECK=$(rsync -rlcn --itemize-changes -e "ssh -i $SSH_KEY" "$FRONT/dist/" "$SITE_HOST:/opt/cms/site/"); RC=$?; echo "exit: $RC"
@@ -843,7 +843,7 @@ cp -p /opt/cms/site/index.html "$H/index.$SHA.html" && echo "$(date -u +%Y-%m-%d
 EOF
 ```
 
-*(c) Server, the list of names the history refers to.* It collects every `/assets/...` name in the live page and in every history page, adds every name those stylesheets load (the fonts), then `./index.html` and `./favicon.svg`, in C order. The last command prints the number of names: 96 after the first deploy of a build with 96 files. It is the list that (d), (e) and the prune of step 45 compare against.
+*(c) Server, the list of names the history refers to.* It collects every `/assets/...` name in the live page and in every history page, adds every name those stylesheets load (the fonts), then `./index.html` and `./favicon.svg`, in C order. `robots.txt` is left off on purpose: no page names it, and (d) already subtracts the build's own files, so a `robots.txt` that a later build drops shows up there as an extra to read. The last command prints the number of names: 96 after the first deploy of a build with 96 files (b857200, which had no `robots.txt`); with `robots.txt` in the build, a first deploy gives a count one below the file count of step 38 (inferred from this logic and a scratch copy, not seen on the server; a later deploy also lists the earlier builds' names). It is the list that (d), (e) and the prune of step 45 compare against.
 
 ```sh
 H=/opt/cms/index-history
@@ -887,13 +887,32 @@ bash prod/outside-check.sh demo.cropcms.com --only spa
 test "$(curl -s https://demo.cropcms.com/ | grep -o '/assets/index-[A-Za-z0-9_-]*\.js')" = "/assets/$(ls "$FRONT/dist/assets" | grep -E '^index-.*\.js$')" && echo "the live page names this build's script" || echo "STOP: the live page names another script"
 ```
 
+Then `robots.txt`, with `curl` only (a `GET`; `FRONT` is still set from step 38). The first command prints the status line, the content type and the two lines of the file, and nothing else. The second compares the live file with the build's, byte for byte apart from trailing newlines.
+
+```sh
+curl -s -i https://demo.cropcms.com/robots.txt | tr -d '\r' | grep -iE '^(HTTP|content-type:|user-agent:|disallow:)'
+test "$(curl -s https://demo.cropcms.com/robots.txt)" = "$(cat "$FRONT/dist/robots.txt")" && echo "robots.txt is this build's file" || echo "STOP: robots.txt is not this build's file"
+```
+
+Expected, not yet seen on the live site:
+
+```text
+HTTP/2 200
+content-type: text/plain; charset=utf-8
+User-agent: *
+Disallow:
+robots.txt is this build's file
+```
+
+The content type was seen on a local Caddy of the same image as the server's (`text/plain; charset=utf-8` for `/robots.txt`); the status line and the type on the live site after the copy are inferred. A scratch run of the two commands against a local web server printed the two lines and `robots.txt is this build's file` for the file, and `STOP` when the path answered with other content. Before the copy of step 40 the live site answers `200` with the page for this path (a public `GET` on 2026-11-03 returned `HTTP/2 200`, `content-type: text/html; charset=utf-8`, `cache-control: no-cache` and 900 bytes): the two lines are missing, so the `STOP` prints. If `STOP` prints after the copy of step 40, the file did not reach the server: run step 41 (a).
+
 **Step 43, the owner's browser checklist.** Use a private window, so a placeholder page cached earlier is not shown (until the Caddy change of [steps 46-52](#changing-the-caddy-configuration) was rolled out on 2026-10-31, the proxy sent no `Cache-Control` header for the page, so a browser that loaded the placeholder, or any earlier build, could keep showing it for hours, and after a later deploy a private window or a hard reload was needed too; after the rollout the header is `no-cache` and the browser asks the server before it reuses the page; a copy stored before the rollout has no `no-cache`, so the first visit after the rollout may still need a hard reload or a private window; this is read from the HTTP caching rules and was not tested in a browser). Do it on a laptop and on a phone, in light and in dark. The questions are paid calls of about 4,000 tokens each: ask one per device, not more (step 34 shows what the budget allows).
 
 | Check | You should see |
 |---|---|
-| Open `https://demo.cropcms.com/` | the login page, not the line "Crop CMS API. Health check at /api/health." |
+| Open `https://demo.cropcms.com/` | the login page, not the line "Crop CMS API. Health check at /api/health." Expected, read from the frontend's code and tests and not yet seen on the live site: under the title one line, "Ask crop-growing questions and read answers with the source documents alongside them.", and a demo hint, "Trying the demo? The email and password came with the application message. Paste them rather than typing: repeated wrong attempts lock a login for a while." |
 | Paste the e-mail and password of the demo member made in step 32, from where you keep them. At most two wrong attempts in all: ten wrong logins within 900 seconds lock the account for everyone (step 37). | the Ask page with "Signed in as" and "Tokens used today: N / M" |
-| Ask one question, for example the one of step 34 | the wait (about 18 seconds on the first real question, with "Waiting for the answer..."), then an answer with citations and a "Sources" heading; "Tokens used today" has gone up |
+| Ask one question, for example the one of step 34 | the wait (about 18 seconds on the first real question, with "Waiting for the answer..."; expected, read from the frontend's code and tests and not yet seen on the live site: at about 8 seconds the line changes once to "Still working on your answer. This can take a while."), then an answer with citations and a "Sources" heading; "Tokens used today" has gone up |
 | Open Library; open a crop and a topic; reload the page on `/library/basil/watering-needs` | the crops, then the topic, and the reload still loads the app (the deep link works) |
 | Choose Dark in the account menu, then reload | the choice stays, with no flash of the light page |
 | 30 minutes after the login, reload the page (or ask a question) | back to the login page with "Your session expired. Please log in again." |
@@ -943,7 +962,7 @@ About ten commands, no container change. File counts are not compared with a fix
 2. Step 39 on the server: the loop must print a line (the live page is saved); if it prints nothing, save the page as the step says.
 3. Step 40: variables, dry run, then the chained copy (`exit: 0`).
 4. Step 41 (a) to (f): (a), then (b), then (c) on the server, (d), (e) and (f).
-5. Step 42: `--only spa` and the script-name check. Repeat the first four rows of step 43 once on a laptop, in a private window as in step 43.
+5. Step 42: `--only spa`, the script-name check and the two `robots.txt` commands. Repeat the first four rows of step 43 once on a laptop, in a private window as in step 43.
 
 To go back to an earlier build, use the block of step 44 with that build's name, then check 41 (e), step 42's first command and the live page's script name against that build's script.
 
@@ -957,21 +976,21 @@ Stop and ask rather than guess when any of these holds:
 - The dry run lists a line with `deleting`, or any `rsync` or `ssh` exit code is not `0`: run no other copy, and paste only the exit code, because the error text names the server address.
 - Check 41 (a) prints a line starting with `<` or `>`, check 41 (d) prints any line before `extras check finished` (or does not print that line), or check 41 (e) prints a line.
 - The count of unreadable files in step 41 (f) is not `0`, or `docker system df` changed.
-- Step 42 does not end with `ALL PASS`, or the script name is another one.
+- Step 42 does not end with `ALL PASS`, the script name is another one, or the `robots.txt` check prints `STOP`.
 - The prune list of step 45 names the script or the stylesheet that the live page loads, or anything you want to keep able to roll back to: delete nothing and read the history folder again.
 
 Paste only public data: exit codes, file counts, sizes, `df` and the hashed file names of the build. Never the server address, the key or the demo credentials.
 
 ### If the server has no rsync
 
-Untested: this path was not needed, because the server has `rsync`. Use it also if the laptop's `rsync` misbehaves against the server. The first command streams the build to a new folder (it fails if the folder exists, so remove an old `/opt/cms/site.new` only after reading what is in it); the second block runs on the server and moves the files in the same order as step 40, assets first and `index.html` last, each `mv` a rename on one file system. Then go on with step 41. The `mkdir -p` covers the first deploy, where `assets/` does not exist.
+Untested: this path was not needed, because the server has `rsync` (the two commands with the `robots.txt` move were run once on scratch folders on the laptop, with local paths in place of `ssh`). Use it also if the laptop's `rsync` misbehaves against the server. The first command streams the build to a new folder (it fails if the folder exists, so remove an old `/opt/cms/site.new` only after reading what is in it); the second block runs on the server and moves the files in the same order as step 40, assets first and `index.html` last (`robots.txt` just before it; a build without that file needs its `mv` taken out, or the chain stops there), each `mv` a rename on one file system. Then go on with step 41. The `mkdir -p` covers the first deploy, where `assets/` does not exist.
 
 ```sh
 COPYFILE_DISABLE=1 tar -C "$FRONT/dist" -cf - . | ssh -i "$SSH_KEY" "$SITE_HOST" 'mkdir /opt/cms/site.new && tar -C /opt/cms/site.new -xf -'; echo "exit: $?"
 ```
 
 ```sh
-mkdir -p /opt/cms/site/assets && cp -a /opt/cms/site.new/assets/. /opt/cms/site/assets/ && mv -f /opt/cms/site.new/favicon.svg /opt/cms/site/ && mv -f /opt/cms/site.new/index.html /opt/cms/site/ && rm -rf /opt/cms/site.new
+mkdir -p /opt/cms/site/assets && cp -a /opt/cms/site.new/assets/. /opt/cms/site/assets/ && mv -f /opt/cms/site.new/favicon.svg /opt/cms/site/ && mv -f /opt/cms/site.new/robots.txt /opt/cms/site/ && mv -f /opt/cms/site.new/index.html /opt/cms/site/ && rm -rf /opt/cms/site.new
 ```
 
 ## Changing the Caddy configuration
@@ -1158,6 +1177,7 @@ Not confirmed:
 - The exact cost of a chat question. The estimate in [the section on chat costs](#what-the-chat-costs-and-what-it-needs-in-memory) comes from listed prices that are unverified since 2026-10-12, and the usage rows showed only "under one cent" for each provider.
 - That the server's `rsync` writes each file under a temporary name and renames it, so that `index.html` is never half written (no observation was made).
 - The Caddy change of [steps 46-52](#changing-the-caddy-configuration) ran on the server; still not done or not confirmed: the rollback was not run, how a browser behaves once the page carries `no-cache` (no browser was used), and a real certificate renewal (the date did not change on this run). The lower memory of `cms` after the run has no established cause.
+- The `robots.txt` copy of step 40 and its check in step 42 (written and run on scratch copies only; the live site still answers with the page).
 - [The tar fallback](#if-the-server-has-no-rsync) (untested), and step 45, the prune (not run on the server; the rehearsal was on a scratch copy only).
 - The cause of the iPhone's login page without the notice after 30 minutes (see the note under step 43).
 - The CPU credit cap of 288 for this size.
